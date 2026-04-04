@@ -1,0 +1,34 @@
+# Sapwood
+
+> Shape your signer -- browser-based management UI for the Heartwood ESP32 signing device.
+
+Sapwood connects to a Heartwood ESP32 hardware signer via Web Serial API (Chrome/Edge) and provides a management interface for TOFU client policies, OTA firmware updates, factory reset, and device monitoring. No server required -- it's a static SPA deployed to GitHub Pages.
+
+## Key facts
+
+- Static SPA: Svelte 5, 21KB gzipped, zero server dependencies
+- Connects via Web Serial API directly to ESP32 USB-Serial-JTAG
+- TypeScript port of the Heartwood frame protocol (19 tests, byte-compatible with Rust)
+- Secrets never leave the ESP32 -- all destructive ops require physical button press
+- Part of the Heartwood ecosystem: Heartwood (device) + Sapwood (management UI) + Bark (browser extension)
+
+## Frame protocol
+
+Frame format: [0x48 0x57] [type_u8] [length_u16_be] [payload...] [crc32_be32]
+CRC32 (IEEE 802.3) covers type + length bytes + payload.
+
+Key frame types:
+- 0x05 PROVISION_LIST (empty) -> 0x07 PROVISION_LIST_RESPONSE (JSON)
+- 0x24 FACTORY_RESET (empty, requires button)
+- 0x27 POLICY_LIST_REQUEST (slot byte) -> 0x28 POLICY_LIST_RESPONSE (JSON)
+- 0x29 POLICY_REVOKE (slot + 64-char hex pubkey)
+- 0x2A POLICY_UPDATE (slot + JSON ClientPolicy)
+- 0x30-0x32 OTA_BEGIN/CHUNK/FINISH -> 0x33 OTA_STATUS
+
+## Source
+
+- Repository: https://github.com/forgesworn/sapwood
+- Live: https://forgesworn.github.io/sapwood/
+- Frame protocol: src/lib/frame.ts
+- Serial transport: src/lib/serial.ts
+- Device state: src/lib/device.svelte.ts

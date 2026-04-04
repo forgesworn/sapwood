@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "description": "Shape your signer -- web management UI for Heartwood ESP32",
   "type": "module",
+  "license": "MIT",
+  "homepage": "https://forgesworn.github.io/sapwood/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/forgesworn/sapwood.git"
+  },
+  "keywords": [
+    "nostr", "esp32", "hardware-signer", "web-serial",
+    "nip-46", "heartwood", "signing-device", "management-ui"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

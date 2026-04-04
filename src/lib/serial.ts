@@ -48,7 +48,10 @@ export class SerialTransport {
 
   /** Request a serial port from the user and connect. */
   async connect(baudRate = 115200): Promise<void> {
-    if (this.connected) return
+    // Clean up any stale connection first.
+    if (this.port) {
+      await this.disconnect()
+    }
 
     try {
       const port = await navigator.serial.requestPort({
@@ -58,7 +61,10 @@ export class SerialTransport {
         ],
       })
 
-      await port.open({ baudRate, bufferSize: 4096 })
+      // Handle port that's already open (e.g. browser kept it from a previous session).
+      if (!port.readable) {
+        await port.open({ baudRate, bufferSize: 4096 })
+      }
       this.port = port
       this.running = true
       this.buffer = new Uint8Array(0)
