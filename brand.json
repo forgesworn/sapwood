@@ -1,0 +1,41 @@
+{
+  "name": "Sapwood",
+  "tagline": "Shape your signer",
+  "tone": {
+    "personality": ["sovereign", "precise", "calm"],
+    "voice": {
+      "do": [
+        "State facts clearly",
+        "Use technical terms your audience knows",
+        "Confirm actions directly"
+      ],
+      "dont": [
+        "Celebrate unnecessarily",
+        "Dumb things down or over-explain",
+        "Add filler words or padding"
+      ]
+    },
+    "examples": {
+      "greeting": "Connected to Heartwood on /dev/cu.usbmodem1101",
+      "success": "Firmware updated. Rebooting.",
+      "error": "Serial connection lost. Check the cable.",
+      "status": "2 masters provisioned. 5 approved clients.",
+      "destructive": "This will erase all keys. Hold the button to confirm."
+    }
+  },
+  "domain": {
+    "primary": "sapwood.dev",
+    "alternates": ["sapwood.app", "sapwood.io"],
+    "defensive": ["sapwood.org", "sapwood.tools"]
+  },
+  "handles": {
+    "github": { "org": "forgesworn", "name": "sapwood", "available": true }
+  },
+  "meta": {
+    "generatedAt": "2026-04-04T00:00:00Z",
+    "generatedBy": "brand-forge v1",
+    "scoringRubric": "holodeck-derived-v1",
+    "score": 71,
+    "maxScore": 80
+  }
+}
