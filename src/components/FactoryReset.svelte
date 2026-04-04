@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, transport } from '../lib/device.svelte.js'
+  import { device, serialTransport, httpTransport } from '../lib/device.svelte.js'
   import { FrameType, buildFactoryReset } from '../lib/frame.js'
 
   let pending = $state(false)
@@ -11,11 +11,16 @@
     pending = true
     result = null
     try {
-      const frame = await transport.sendAndReceive(
-        buildFactoryReset(),
-        [FrameType.ACK, FrameType.NACK],
-        60_000, // 60s -- user needs to press the button
-      )
+      let frame
+      if (device.mode === 'http') {
+        frame = await httpTransport.factoryReset()
+      } else {
+        frame = await serialTransport.sendAndReceive(
+          buildFactoryReset(),
+          [FrameType.ACK, FrameType.NACK],
+          60_000,
+        )
+      }
       result = frame.type === FrameType.ACK
         ? 'Factory reset complete. Device will reboot.'
         : 'Factory reset rejected by device.'

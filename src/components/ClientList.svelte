@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, refreshClients, transport } from '../lib/device.svelte.js'
+  import { device, refreshClients, serialTransport, httpTransport } from '../lib/device.svelte.js'
   import { FrameType, buildPolicyRevoke, buildPolicyUpdate } from '../lib/frame.js'
   import type { ClientPolicy } from '../lib/types.js'
 
@@ -11,10 +11,15 @@
     const short = pubkey.slice(0, 16)
     if (!confirm(`Revoke client ${short}...?`)) return
     try {
-      const frame = await transport.sendAndReceive(
-        buildPolicyRevoke(device.selectedSlot, pubkey),
-        [FrameType.ACK, FrameType.NACK],
-      )
+      let frame
+      if (device.mode === 'http') {
+        frame = await httpTransport.revokeClient(device.selectedSlot, pubkey)
+      } else {
+        frame = await serialTransport.sendAndReceive(
+          buildPolicyRevoke(device.selectedSlot, pubkey),
+          [FrameType.ACK, FrameType.NACK],
+        )
+      }
       if (frame.type === FrameType.NACK) {
         device.error = 'Revoke rejected by device.'
       }
@@ -27,10 +32,15 @@
   async function handleUpdate(client: ClientPolicy, changes: Partial<ClientPolicy>) {
     const updated = { ...client, ...changes }
     try {
-      const frame = await transport.sendAndReceive(
-        buildPolicyUpdate(device.selectedSlot, JSON.stringify(updated)),
-        [FrameType.ACK, FrameType.NACK],
-      )
+      let frame
+      if (device.mode === 'http') {
+        frame = await httpTransport.updateClient(device.selectedSlot, updated)
+      } else {
+        frame = await serialTransport.sendAndReceive(
+          buildPolicyUpdate(device.selectedSlot, JSON.stringify(updated)),
+          [FrameType.ACK, FrameType.NACK],
+        )
+      }
       if (frame.type === FrameType.NACK) {
         device.error = 'Update rejected by device.'
       }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, transport } from '../lib/device.svelte.js'
+  import { device, serialTransport } from '../lib/device.svelte.js'
   import { FrameType, buildFrame } from '../lib/frame.js'
 
   let file = $state<File | null>(null)
@@ -39,7 +39,7 @@
       beginPayload.set(hash, 4)
 
       const beginFrame = buildFrame(FrameType.OTA_BEGIN, beginPayload)
-      const beginResp = await transport.sendAndReceive(
+      const beginResp = await serialTransport.sendAndReceive(
         beginFrame,
         [FrameType.OTA_STATUS],
         60_000,
@@ -67,7 +67,7 @@
         chunkPayload.set(chunk, 4)
 
         const chunkFrame = buildFrame(FrameType.OTA_CHUNK, chunkPayload)
-        const chunkResp = await transport.sendAndReceive(
+        const chunkResp = await serialTransport.sendAndReceive(
           chunkFrame,
           [FrameType.OTA_STATUS],
           10_000,
@@ -88,7 +88,7 @@
       status = 'verifying'
       message = 'Verifying hash...'
       const finishFrame = buildFrame(FrameType.OTA_FINISH)
-      const finishResp = await transport.sendAndReceive(
+      const finishResp = await serialTransport.sendAndReceive(
         finishFrame,
         [FrameType.OTA_STATUS],
         30_000,
