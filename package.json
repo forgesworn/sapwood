@@ -10,8 +10,14 @@
     "url": "https://github.com/forgesworn/sapwood.git"
   },
   "keywords": [
-    "nostr", "esp32", "hardware-signer", "web-serial",
-    "nip-46", "heartwood", "signing-device", "management-ui"
+    "nostr",
+    "esp32",
+    "hardware-signer",
+    "web-serial",
+    "nip-46",
+    "heartwood",
+    "signing-device",
+    "management-ui"
   ],
   "scripts": {
     "dev": "vite",
@@ -30,5 +36,11 @@
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
+    "@scure/bip32": "^2.0.1",
+    "@scure/bip39": "^2.0.1"
   }
 }
