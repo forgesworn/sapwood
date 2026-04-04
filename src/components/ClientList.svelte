@@ -61,6 +61,23 @@
     } catch (e) { device.error = e instanceof Error ? e.message : 'Update failed' }
   }
 
+  async function handleRevokeAll() {
+    if (!confirm(`Revoke all ${device.clients.length} clients for slot ${device.selectedSlot}?`)) return
+    for (const client of [...device.clients]) {
+      try {
+        if (device.mode === 'http') {
+          await httpTransport.revokeClient(device.selectedSlot, client.client_pubkey)
+        } else {
+          await serialTransport.sendAndReceive(
+            buildPolicyRevoke(device.selectedSlot, client.client_pubkey),
+            [FrameType.ACK, FrameType.NACK],
+          )
+        }
+      } catch { /* continue revoking the rest */ }
+    }
+    await refreshClients()
+  }
+
   function handleSlotChange(e: Event) {
     device.selectedSlot = parseInt((e.target as HTMLSelectElement).value)
     refreshClients(device.selectedSlot)
@@ -74,14 +91,19 @@
 <div class="client-list">
   <div class="header-row">
     <h2>Approved Clients</h2>
-    <label class="slot-pick">
-      SLOT
-      <select value={device.selectedSlot} onchange={handleSlotChange}>
-        {#each [0, 1, 2, 3, 4, 5, 6, 7] as s}
-          <option value={s}>{s}</option>
-        {/each}
-      </select>
-    </label>
+    <div class="header-actions">
+      {#if device.clients.length > 0}
+        <button class="btn-revoke-all" onclick={handleRevokeAll}>Revoke All</button>
+      {/if}
+      <label class="slot-pick">
+        SLOT
+        <select value={device.selectedSlot} onchange={handleSlotChange}>
+          {#each [0, 1, 2, 3, 4, 5, 6, 7] as s}
+            <option value={s}>{s}</option>
+          {/each}
+        </select>
+      </label>
+    </div>
   </div>
 
   {#if !device.connected}
@@ -339,6 +361,21 @@
   }
 
   /* kind permissions handled by KindPermissions component */
+
+  .header-actions { display: flex; align-items: center; gap: 0.75rem; }
+
+  .btn-revoke-all {
+    background: transparent;
+    border: 1px solid #442222;
+    color: var(--red);
+    padding: 0.35rem 1rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-revoke-all:hover { background: #1a0808; }
 
   .empty { color: var(--text-muted); font-size: 1.1rem; }
 </style>
