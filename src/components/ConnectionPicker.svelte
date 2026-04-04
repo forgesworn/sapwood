@@ -27,7 +27,7 @@
       <span class="indicator connected"></span>
       <span class="conn-label">CONNECTED</span>
       <span class="conn-detail">
-        {device.mode === 'serial' ? 'USB' : 'PI'} &mdash; {device.portInfo}
+        {device.mode === 'serial' ? 'USB' : 'BRIDGE'} &mdash; {device.portInfo}
       </span>
       <button class="btn btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
     </div>
@@ -46,7 +46,7 @@
           {connecting ? 'Connecting...' : 'Connect USB'}
         </button>
         <button class="btn btn-secondary" onclick={() => showHttpForm = true} disabled={connecting}>
-          Connect to Pi
+          Connect to Bridge
         </button>
       </div>
       {#if !('serial' in navigator)}
