@@ -2,9 +2,9 @@
   import { device, refreshMasters } from '../lib/device.svelte.js'
 
   const MODE_LABELS: Record<number, string> = {
-    0: 'bunker',
-    1: 'tree-mnemonic',
-    2: 'tree-nsec',
+    0: 'BUNKER',
+    1: 'TREE-MNEMONIC',
+    2: 'TREE-NSEC',
   }
 </script>
 
@@ -12,20 +12,20 @@
   <div class="header-row">
     <h2>Provisioned Masters</h2>
     {#if device.connected}
-      <button class="refresh" onclick={() => refreshMasters()}>Refresh</button>
+      <button class="btn-refresh" onclick={() => refreshMasters()}>Refresh</button>
     {/if}
   </div>
 
   {#if !device.connected}
-    <p class="muted">Connect to view masters.</p>
+    <p class="empty">Connect to view masters.</p>
   {:else if device.masters.length === 0}
-    <p class="muted">No masters provisioned.</p>
+    <p class="empty">No masters provisioned.</p>
   {:else}
     {#each device.masters as master}
-      <div class="master-card">
-        <div class="master-header">
-          <span class="slot">Slot {master.slot}</span>
-          <span class="mode">{MODE_LABELS[master.mode] ?? `mode ${master.mode}`}</span>
+      <div class="card">
+        <div class="card-header">
+          <span class="slot">SLOT {master.slot}</span>
+          <span class="mode">{MODE_LABELS[master.mode] ?? `MODE ${master.mode}`}</span>
         </div>
         {#if master.label}
           <div class="label">{master.label}</div>
@@ -41,36 +41,69 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
   }
 
-  h2 { font-size: 1rem; font-weight: 600; margin: 0; color: #ccc; }
+  h2 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin: 0;
+    color: #fff;
+  }
 
-  .refresh {
-    background: none;
-    border: 1px solid #333;
-    color: #666;
-    padding: 0.15rem 0.5rem;
-    border-radius: 3px;
+  .btn-refresh {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--text-dim);
+    padding: 0.4rem 1rem;
+    border-radius: 4px;
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.85rem;
     cursor: pointer;
   }
+  .btn-refresh:hover { color: var(--text); border-color: #444; }
 
-  .refresh:hover { color: #aaa; border-color: #555; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+  }
 
-  .master-card {
-    background: #111;
-    border: 1px solid #222;
-    border-radius: 4px;
-    padding: 0.75rem;
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 0.5rem;
   }
 
-  .master-header { display: flex; justify-content: space-between; margin-bottom: 0.25rem; }
-  .slot { font-weight: 600; color: #4a9; font-size: 0.85rem; }
-  .mode { color: #666; font-size: 0.75rem; }
-  .label { color: #aaa; font-size: 0.85rem; margin-bottom: 0.25rem; }
-  .npub { font-size: 0.7rem; color: #555; word-break: break-all; }
-  .muted { color: #555; font-size: 0.85rem; }
+  .slot {
+    font-weight: 700;
+    color: var(--green);
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+  }
+
+  .mode {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+  }
+
+  .label {
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 0.5rem;
+  }
+
+  .npub {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    word-break: break-all;
+    line-height: 1.4;
+  }
+
+  .empty { color: var(--text-muted); font-size: 1rem; }
 </style>

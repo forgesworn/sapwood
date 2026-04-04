@@ -12,10 +12,19 @@
   let currentTab = $state<'masters' | 'clients' | 'provision' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
 
+<svelte:head>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</svelte:head>
+
 <main>
   <header>
-    <h1>Sapwood</h1>
-    <p class="tagline">Shape your signer</p>
+    <div class="brand">
+      <h1>SAPWOOD</h1>
+      <span class="divider"></span>
+      <p class="tagline">SHAPE YOUR SIGNER</p>
+    </div>
   </header>
 
   <ConnectionPicker />
@@ -62,71 +71,118 @@
       <DangerZone />
     {/if}
   </section>
-
-  <footer>
-    <a href="https://github.com/nicorache/esptool-js" target="_blank" rel="noopener">
-      First-time flash? Use WebSerial ESPTool.
-    </a>
-  </footer>
 </main>
 
 <style>
+  :global(*) {
+    box-sizing: border-box;
+  }
+
   :global(body) {
     margin: 0;
-    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
-    background: #0a0a0a;
-    color: #e0e0e0;
-    line-height: 1.5;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    background: #050505;
+    color: #e8e8e8;
+    line-height: 1.6;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :global(:root) {
+    --green: #00e87b;
+    --green-dim: #00a858;
+    --green-glow: 0 0 12px rgba(0, 232, 123, 0.3);
+    --red: #ff4444;
+    --red-dim: #cc2222;
+    --amber: #ffaa00;
+    --surface: #0c0c0c;
+    --surface-raised: #131313;
+    --surface-hover: #1a1a1a;
+    --border: #1e1e1e;
+    --border-bright: #2a2a2a;
+    --text: #e8e8e8;
+    --text-dim: #888;
+    --text-muted: #555;
   }
 
   main {
-    max-width: 720px;
+    max-width: 860px;
     margin: 0 auto;
-    padding: 1.5rem;
+    padding: 2rem 2.5rem;
   }
 
   header {
-    margin-bottom: 1rem;
-    border-bottom: 1px solid #222;
-    padding-bottom: 0.75rem;
+    margin-bottom: 2rem;
   }
 
-  h1 { margin: 0; font-size: 1.5rem; font-weight: 600; color: #fff; }
-  .tagline { margin: 0.25rem 0 0; font-size: 0.8rem; color: #666; }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.15em;
+  }
+
+  .divider {
+    width: 2px;
+    height: 1.4rem;
+    background: var(--green);
+    box-shadow: var(--green-glow);
+    align-self: center;
+  }
+
+  .tagline {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--green-dim);
+    letter-spacing: 0.2em;
+  }
 
   nav {
     display: flex;
     gap: 0;
-    margin: 0.75rem 0;
-    border-bottom: 1px solid #222;
+    margin: 1.5rem 0;
+    border-bottom: 2px solid var(--border);
+    overflow-x: auto;
   }
 
   nav button {
     background: none;
     border: none;
-    border-bottom: 2px solid transparent;
-    color: #666;
-    padding: 0.5rem 1rem;
+    border-bottom: 3px solid transparent;
+    color: var(--text-muted);
+    padding: 0.75rem 1.25rem;
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 1rem;
+    font-weight: 500;
     cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
+    transition: color 0.2s, border-color 0.2s;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
   }
 
-  nav button:hover { color: #aaa; }
-  nav button.active { color: #e0e0e0; border-bottom-color: #4a9; }
-  nav button.danger-tab.active { border-bottom-color: #a44; }
-
-  .panel { min-height: 300px; padding-top: 0.5rem; }
-
-  footer {
-    margin-top: 2rem;
-    padding-top: 1rem;
-    border-top: 1px solid #1a1a1a;
-    text-align: center;
-    font-size: 0.7rem;
+  nav button:hover {
+    color: var(--text-dim);
   }
 
-  footer a { color: #555; text-decoration: none; }
-  footer a:hover { color: #888; }
+  nav button.active {
+    color: #fff;
+    border-bottom-color: var(--green);
+  }
+
+  nav button.danger-tab.active {
+    border-bottom-color: var(--red);
+  }
+
+  .panel {
+    min-height: 400px;
+    padding-top: 1.5rem;
+  }
 </style>

@@ -7,11 +7,7 @@
 
   async function handleConnectSerial() {
     connecting = true
-    try {
-      await connectSerial()
-    } finally {
-      connecting = false
-    }
+    try { await connectSerial() } finally { connecting = false }
   }
 
   async function handleConnectHttp() {
@@ -20,120 +16,186 @@
     try {
       await connectHttp(httpAddress.trim())
       showHttpForm = false
-    } catch {
-      // Error emitted via transport listener.
-    } finally {
-      connecting = false
-    }
+    } catch { /* emitted via listener */ }
+    finally { connecting = false }
   }
 </script>
 
 <div class="connection">
   {#if device.connected}
-    <span class="dot connected"></span>
-    <span class="info">
-      {device.mode === 'serial' ? 'USB' : 'Pi'}: {device.portInfo}
-    </span>
-    {#if device.mode === 'http' && device.bridgeInfo}
-      <span class="bridge-mode">{device.bridgeInfo.mode}</span>
-    {/if}
-    <button class="btn disconnect" onclick={() => disconnect()}>Disconnect</button>
+    <div class="status-row">
+      <span class="indicator connected"></span>
+      <span class="conn-label">CONNECTED</span>
+      <span class="conn-detail">
+        {device.mode === 'serial' ? 'USB' : 'PI'} &mdash; {device.portInfo}
+      </span>
+      <button class="btn btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
+    </div>
   {:else}
-    <span class="dot disconnected"></span>
-    <div class="connect-options">
-      {#if !showHttpForm}
+    <div class="status-row">
+      <span class="indicator disconnected"></span>
+      <span class="conn-label">DISCONNECTED</span>
+    </div>
+    {#if !showHttpForm}
+      <div class="connect-buttons">
         <button
-          class="btn connect"
+          class="btn btn-primary"
           onclick={handleConnectSerial}
           disabled={connecting || !('serial' in navigator)}
-          title={!('serial' in navigator) ? 'Web Serial not supported. Use Chrome or Edge.' : ''}
         >
           {connecting ? 'Connecting...' : 'Connect USB'}
         </button>
-        <button class="btn connect-http" onclick={() => showHttpForm = true} disabled={connecting}>
+        <button class="btn btn-secondary" onclick={() => showHttpForm = true} disabled={connecting}>
           Connect to Pi
         </button>
-      {:else}
-        <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectHttp() }}>
-          <input
-            type="text"
-            bind:value={httpAddress}
-            placeholder="192.168.1.50:3100"
-            disabled={connecting}
-          />
-          <button type="submit" class="btn connect-http" disabled={connecting || !httpAddress.trim()}>
-            {connecting ? 'Connecting...' : 'Connect'}
-          </button>
-          <button type="button" class="btn cancel" onclick={() => showHttpForm = false}>
-            Cancel
-          </button>
-        </form>
+      </div>
+      {#if !('serial' in navigator)}
+        <p class="notice">Web Serial requires Chrome or Edge.</p>
       {/if}
-    </div>
+    {:else}
+      <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectHttp() }}>
+        <input
+          type="text"
+          bind:value={httpAddress}
+          placeholder="192.168.0.107:3100"
+          disabled={connecting}
+          autofocus
+        />
+        <button type="submit" class="btn btn-primary" disabled={connecting || !httpAddress.trim()}>
+          {connecting ? 'Connecting...' : 'Connect'}
+        </button>
+        <button type="button" class="btn btn-ghost" onclick={() => showHttpForm = false}>
+          Cancel
+        </button>
+      </form>
+    {/if}
   {/if}
   {#if device.error}
-    <span class="error">{device.error}</span>
+    <p class="error">{device.error}</p>
   {/if}
 </div>
 
 <style>
   .connection {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .status-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    background: #111;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    flex-wrap: wrap;
+    gap: 0.75rem;
   }
 
-  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .dot.connected { background: #4a9; }
-  .dot.disconnected { background: #555; }
+  .indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
 
-  .info { color: #888; }
-  .bridge-mode { color: #666; font-size: 0.7rem; }
+  .indicator.connected {
+    background: var(--green);
+    box-shadow: var(--green-glow);
+  }
 
-  .connect-options { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+  .indicator.disconnected {
+    background: #333;
+    border: 2px solid #444;
+  }
+
+  .conn-label {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #fff;
+  }
+
+  .conn-detail {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+
+  .connect-buttons {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+  }
 
   .btn {
-    background: #1a1a1a;
-    border: 1px solid #333;
-    color: #ccc;
-    padding: 0.25rem 0.75rem;
-    border-radius: 3px;
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: 1rem;
+    font-weight: 500;
+    padding: 0.65rem 1.5rem;
+    border-radius: 4px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    letter-spacing: 0.02em;
   }
 
-  .btn:hover:not(:disabled) { background: #222; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn.connect { border-color: #4a9; color: #4a9; }
-  .btn.connect-http { border-color: #49a; color: #49a; }
-  .btn.disconnect { border-color: #633; color: #a44; }
-  .btn.cancel { color: #666; }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .btn-primary {
+    background: var(--green);
+    color: #050505;
+    border-color: var(--green);
+    font-weight: 600;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: #00ff88;
+    box-shadow: var(--green-glow);
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border-bright);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-hover);
+    border-color: #444;
+  }
+
+  .btn-disconnect {
+    background: transparent;
+    color: var(--red);
+    border-color: #442222;
+    margin-left: auto;
+  }
+  .btn-disconnect:hover { background: #1a0808; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 0.65rem 1rem;
+  }
+  .btn-ghost:hover { color: var(--text-dim); }
 
   .http-form {
     display: flex;
-    gap: 0.25rem;
+    gap: 0.75rem;
     align-items: center;
+    margin-top: 1.25rem;
   }
 
   .http-form input {
-    background: #0a0a0a;
-    border: 1px solid #333;
-    color: #ccc;
-    padding: 0.25rem 0.5rem;
-    border-radius: 3px;
+    background: #080808;
+    border: 1px solid var(--border-bright);
+    color: var(--text);
+    padding: 0.65rem 1rem;
+    border-radius: 4px;
     font-family: inherit;
-    font-size: 0.8rem;
-    width: 180px;
+    font-size: 1rem;
+    width: 240px;
   }
+  .http-form input::placeholder { color: #444; }
+  .http-form input:focus { outline: none; border-color: var(--green-dim); }
 
-  .http-form input::placeholder { color: #555; }
-
-  .error { color: #a44; font-size: 0.75rem; width: 100%; margin-top: 0.25rem; }
+  .notice { font-size: 0.85rem; color: var(--amber); margin-top: 0.75rem; }
+  .error { font-size: 0.9rem; color: var(--red); margin-top: 0.75rem; }
 </style>
