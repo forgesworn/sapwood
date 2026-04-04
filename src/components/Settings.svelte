@@ -77,10 +77,31 @@
     return `${h}h ${m}m`
   }
 
+  let copied = $state(false)
+
   function modeLabel(): string {
     if (device.mode === 'serial') return 'USB (Web Serial)'
-    if (device.mode === 'http') return 'Pi (HTTP)'
+    if (device.mode === 'http') return 'Bridge (HTTP)'
     return 'Disconnected'
+  }
+
+  async function copyBunkerUri() {
+    const uri = device.bridgeInfo?.bunker_uri as string | undefined
+    if (!uri) return
+    try {
+      await navigator.clipboard.writeText(uri)
+      copied = true
+      setTimeout(() => { copied = false }, 2000)
+    } catch {
+      // Fallback: select the text
+      const el = document.querySelector('.bunker-uri') as HTMLElement
+      if (el) {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        window.getSelection()?.removeAllRanges()
+        window.getSelection()?.addRange(range)
+      }
+    }
   }
 </script>
 
@@ -94,6 +115,15 @@
   </tbody></table>
 
   {#if device.mode === 'http' && device.bridgeInfo}
+    <h2>Bunker URI</h2>
+    <p class="info">Paste this into Nostrudel, Coracle, or any NIP-46 client to connect.</p>
+    <div class="bunker-block">
+      <code class="bunker-uri">{device.bridgeInfo.bunker_uri}</code>
+      <button class="btn-copy" onclick={copyBunkerUri}>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+
     <h2>Bridge</h2>
     <table><tbody>
       <tr><td class="label">Mode</td><td>{device.bridgeInfo.mode}</td></tr>
@@ -105,10 +135,6 @@
             <div class="relay">{relay}</div>
           {/each}
         </td>
-      </tr>
-      <tr>
-        <td class="label">Bunker URI</td>
-        <td class="mono">{device.bridgeInfo.bunker_uri}</td>
       </tr>
     </tbody></table>
   {/if}
@@ -177,8 +203,42 @@
 
   td.label { color: #666; width: 100px; white-space: nowrap; }
 
-  .relay { color: #aaa; font-size: 0.75rem; }
-  .mono { font-size: 0.7rem; color: #888; word-break: break-all; }
+  .relay { color: var(--text); font-size: 0.9rem; }
+
+  .bunker-block {
+    background: #080808;
+    border: 1px solid var(--green-dim);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .bunker-uri {
+    font-size: 0.85rem;
+    color: var(--green);
+    word-break: break-all;
+    line-height: 1.5;
+    flex: 1;
+    user-select: all;
+  }
+
+  .btn-copy {
+    background: var(--green);
+    color: #050505;
+    border: none;
+    padding: 0.4rem 1rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+
+  .btn-copy:hover { background: #00ff88; box-shadow: var(--green-glow); }
   .info { font-size: 0.8rem; color: #555; margin: 0 0 0.5rem; }
   .hint { font-size: 0.8rem; color: #555; margin-top: 1.5rem; }
   .status { font-size: 0.8rem; color: #888; margin-top: 0.5rem; }
