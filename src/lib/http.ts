@@ -21,6 +21,7 @@ export class HttpTransport {
   private _connected = false
   private listeners: HttpListener[] = []
   private pollInterval: ReturnType<typeof setInterval> | null = null
+  private logSocket: WebSocket | null = null
 
   get connected(): boolean {
     return this._connected
@@ -56,6 +57,9 @@ export class HttpTransport {
       this._connected = true
       this.emit({ kind: 'connected', port: `HTTP ${url}` })
 
+      // Connect WebSocket for log streaming.
+      this.connectLogSocket()
+
       // Save address for next time.
       try { localStorage.setItem('sapwood-bridge-address', address) } catch { /* */ }
     } catch (e) {
@@ -71,7 +75,36 @@ export class HttpTransport {
       clearInterval(this.pollInterval)
       this.pollInterval = null
     }
+    if (this.logSocket) {
+      this.logSocket.close()
+      this.logSocket = null
+    }
     this.emit({ kind: 'disconnected' })
+  }
+
+  private connectLogSocket(): void {
+    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + '/api/logs'
+    try {
+      const ws = new WebSocket(wsUrl)
+      ws.onmessage = (event) => {
+        if (typeof event.data === 'string' && event.data.trim()) {
+          this.emit({ kind: 'log', line: event.data.trim() })
+        }
+      }
+      ws.onerror = () => {
+        // Non-fatal -- log streaming is best-effort.
+      }
+      ws.onclose = () => {
+        this.logSocket = null
+        // Reconnect if still connected.
+        if (this._connected) {
+          setTimeout(() => this.connectLogSocket(), 2000)
+        }
+      }
+      this.logSocket = ws
+    } catch {
+      // WebSocket not available or blocked -- continue without logs.
+    }
   }
 
   /** Get the saved bridge address from localStorage. */
