@@ -117,4 +117,88 @@ describe('provision frame', () => {
     // Bunker + non-default: extended format.
     expect(parsed.payload[0]).toBe(0) // bunker
   })
+
+  it('builds tree-nsec mode frame', () => {
+    const secret = new Uint8Array(32).fill(0xdd)
+    const frame = buildProvisionFrame(secret, 'MyNsec', 'tree-nsec')
+    const parsed = parseFrame(frame)
+    expect(parsed.type).toBe(FrameType.PROVISION)
+    expect(parsed.payload[0]).toBe(2) // tree-nsec
+    expect(parsed.payload[1]).toBe(6) // "MyNsec" = 6 bytes
+    expect(parsed.payload.length).toBe(2 + 6 + 32)
+  })
+
+  it('truncates label to 32 bytes', () => {
+    const secret = new Uint8Array(32).fill(0xee)
+    const longLabel = 'a'.repeat(100)
+    const frame = buildProvisionFrame(secret, longLabel, 'tree-mnemonic')
+    const parsed = parseFrame(frame)
+    expect(parsed.payload[1]).toBe(32) // capped at 32
+    expect(parsed.payload.length).toBe(2 + 32 + 32)
+  })
+})
+
+describe('zeroize', () => {
+  it('fills array with zeros', () => {
+    const arr = new Uint8Array([1, 2, 3, 4, 5])
+    zeroize(arr)
+    expect(Array.from(arr)).toEqual([0, 0, 0, 0, 0])
+  })
+
+  it('handles empty array', () => {
+    const arr = new Uint8Array(0)
+    zeroize(arr) // should not throw
+    expect(arr.length).toBe(0)
+  })
+})
+
+describe('derivation edge cases', () => {
+  it('tree-nsec rejects wrong-length input', () => {
+    expect(() => deriveFromNsec(new Uint8Array(16))).toThrow('32 bytes')
+  })
+
+  it('bunker mode rejects wrong-length input', () => {
+    expect(() => useRawNsec(new Uint8Array(31))).toThrow('32 bytes')
+  })
+
+  it('tree-nsec is deterministic', () => {
+    const input = new Uint8Array(32).fill(0x42)
+    const a = deriveFromNsec(input)
+    const b = deriveFromNsec(input)
+    expect(Array.from(a.secret)).toEqual(Array.from(b.secret))
+    expect(a.npub).toBe(b.npub)
+    zeroize(a.secret)
+    zeroize(b.secret)
+  })
+
+  it('mnemonic derivation is deterministic', async () => {
+    const a = await deriveFromMnemonic(TEST_MNEMONIC, '')
+    const b = await deriveFromMnemonic(TEST_MNEMONIC, '')
+    expect(Array.from(a.secret)).toEqual(Array.from(b.secret))
+    zeroize(a.secret)
+    zeroize(b.secret)
+  })
+
+  it('different mnemonics produce different keys', async () => {
+    const m1 = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    const m2 = 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'
+    const a = await deriveFromMnemonic(m1, '')
+    const b = await deriveFromMnemonic(m2, '')
+    expect(Array.from(a.secret)).not.toEqual(Array.from(b.secret))
+    zeroize(a.secret)
+    zeroize(b.secret)
+  })
+
+  it('all three modes produce different results from same input', () => {
+    const input = new Uint8Array(32).fill(0x55)
+    const bunker = useRawNsec(input)
+    const tree = deriveFromNsec(input)
+
+    // Bunker = raw input, tree = HMAC of input. Must differ.
+    expect(Array.from(bunker.secret)).not.toEqual(Array.from(tree.secret))
+    expect(bunker.npub).not.toBe(tree.npub)
+
+    zeroize(bunker.secret)
+    zeroize(tree.secret)
+  })
 })
