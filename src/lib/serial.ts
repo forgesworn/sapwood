@@ -63,7 +63,15 @@ export class SerialTransport {
 
       // Handle port that's already open (e.g. browser kept it from a previous session).
       if (!port.readable) {
-        await port.open({ baudRate, bufferSize: 4096 })
+        try {
+          await port.open({ baudRate, bufferSize: 4096 })
+        } catch (openErr) {
+          const msg = openErr instanceof Error ? openErr.message : String(openErr)
+          if (msg.includes('Failed to open')) {
+            throw new Error('Port is in use. Close the bridge, serial monitor, or other tool first.')
+          }
+          throw openErr
+        }
       }
       this.port = port
       this.running = true
