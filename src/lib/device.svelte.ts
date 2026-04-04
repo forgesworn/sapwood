@@ -122,15 +122,31 @@ export async function connectSerial(baudRate = 115200) {
   await serialTransport.connect(baudRate)
 }
 
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 export async function connectHttp(address: string) {
   await httpTransport.connect(address)
   // Fetch bridge info after connecting.
   try {
     device.bridgeInfo = await httpTransport.bridgeInfo()
   } catch { /* non-fatal */ }
+
+  // Poll for state changes every 3 seconds while connected via HTTP.
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(async () => {
+    if (!device.connected || device.mode !== 'http') {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      return
+    }
+    try {
+      await refreshMasters()
+      await refreshClients()
+    } catch { /* non-fatal */ }
+  }, 3000)
 }
 
 export async function disconnect() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   if (device.mode === 'serial') {
     await serialTransport.disconnect()
   } else if (device.mode === 'http') {
