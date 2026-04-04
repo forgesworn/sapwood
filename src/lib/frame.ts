@@ -158,3 +158,21 @@ export function buildProvisionList(): Uint8Array {
 export function buildFactoryReset(): Uint8Array {
   return buildFrame(FrameType.FACTORY_RESET)
 }
+
+/** Build a SET_PIN frame. Payload: 4-8 ASCII digit PIN, or empty to clear. */
+export function buildSetPin(pin: string): Uint8Array {
+  const encoder = new TextEncoder()
+  return buildFrame(FrameType.SET_PIN, encoder.encode(pin))
+}
+
+/**
+ * Build a SET_BRIDGE_SECRET frame. Payload: 32 bytes (hex-decoded secret).
+ * Requires button confirmation. Rejected if bridge is currently authenticated.
+ */
+export function buildSetBridgeSecret(hexSecret: string): Uint8Array {
+  const bytes = new Uint8Array(32)
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(hexSecret.slice(i * 2, i * 2 + 2), 16)
+  }
+  return buildFrame(FrameType.SET_BRIDGE_SECRET, bytes)
+}

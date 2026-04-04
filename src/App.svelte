@@ -3,11 +3,12 @@
   import StatusBar from './components/StatusBar.svelte'
   import MasterList from './components/MasterList.svelte'
   import ClientList from './components/ClientList.svelte'
-  import FactoryReset from './components/FactoryReset.svelte'
+  import DangerZone from './components/DangerZone.svelte'
   import OtaUpdate from './components/OtaUpdate.svelte'
   import LogMonitor from './components/LogMonitor.svelte'
+  import Settings from './components/Settings.svelte'
 
-  let currentTab = $state<'masters' | 'clients' | 'firmware' | 'logs' | 'danger'>('masters')
+  let currentTab = $state<'masters' | 'clients' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
 
 <main>
@@ -32,6 +33,9 @@
     <button class:active={currentTab === 'logs'} onclick={() => currentTab = 'logs'}>
       Logs
     </button>
+    <button class:active={currentTab === 'settings'} onclick={() => currentTab = 'settings'}>
+      Settings
+    </button>
     <button class:active={currentTab === 'danger'} class="danger-tab" onclick={() => currentTab = 'danger'}>
       Danger
     </button>
@@ -46,8 +50,10 @@
       <OtaUpdate />
     {:else if currentTab === 'logs'}
       <LogMonitor />
+    {:else if currentTab === 'settings'}
+      <Settings />
     {:else if currentTab === 'danger'}
-      <FactoryReset />
+      <DangerZone />
     {/if}
   </section>
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport } from '../lib/device.svelte.js'
+  import { device, serialTransport, httpTransport } from '../lib/device.svelte.js'
   import { FrameType, buildFrame } from '../lib/frame.js'
 
   let file = $state<File | null>(null)
@@ -21,6 +21,18 @@
     if (!file || !device.connected) return
 
     try {
+      // HTTP mode: send the whole binary to the bridge, it handles chunking.
+      if (device.mode === 'http') {
+        status = 'uploading'
+        message = 'Uploading to bridge... Press button on device to approve.'
+        const buf = await file.arrayBuffer()
+        await httpTransport.otaUpload(buf)
+        status = 'done'
+        message = 'Firmware verified. Device rebooting.'
+        return
+      }
+
+      // Web Serial mode: stream chunks directly.
       status = 'hashing'
       message = 'Computing hash...'
       const data = new Uint8Array(await file.arrayBuffer())

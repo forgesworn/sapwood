@@ -137,6 +137,18 @@ export class HttpTransport {
     return res.json()
   }
 
+  async otaUpload(firmware: ArrayBuffer): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/device/ota`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: firmware,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+      throw new Error((body as Record<string, string>).error ?? `OTA failed: ${res.status}`)
+    }
+  }
+
   async bridgeRestart(): Promise<void> {
     await this.fetch('/api/bridge/restart', { method: 'POST' })
     this._connected = false
