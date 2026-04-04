@@ -3,40 +3,48 @@
   import { FrameType, buildPolicyRevoke, buildPolicyUpdate } from '../lib/frame.js'
   import { resolveProfiles, type Profile } from '../lib/profiles.js'
   import { kindLabel } from '../lib/kinds.js'
+  import KindPermissions from './KindPermissions.svelte'
   import type { ClientPolicy } from '../lib/types.js'
 
   let profiles = $state(new Map<string, Profile>())
-  let loadingProfiles = $state(false)
+  let editingLabel = $state<string | null>(null)
+  let labelInput = $state('')
 
   $effect(() => { if (device.connected) refreshClients() })
 
   $effect(() => {
-    if (device.clients.length > 0) loadProfiles()
+    if (device.clients.length > 0) {
+      const pubkeys = device.clients.map(c => c.client_pubkey)
+      resolveProfiles(pubkeys).then(p => { profiles = p }).catch(() => {})
+    }
   })
 
-  async function loadProfiles() {
-    const pubkeys = device.clients.map(c => c.client_pubkey)
-    if (pubkeys.length === 0) return
-    loadingProfiles = true
-    try { profiles = await resolveProfiles(pubkeys) } catch { /* fallback to hex */ }
-    finally { loadingProfiles = false }
+  function displayName(client: ClientPolicy): string {
+    if (client.label) return client.label
+    const p = profiles.get(client.client_pubkey)
+    if (p?.display_name) return p.display_name
+    if (p?.name) return p.name
+    return 'Unknown client'
   }
 
-  function clientName(pubkey: string): string {
-    const p = profiles.get(pubkey)
-    return p?.display_name || p?.name || pubkey.slice(0, 12) + '...'
+  function startEditLabel(pubkey: string, currentLabel: string) {
+    editingLabel = pubkey
+    labelInput = currentLabel
   }
 
-  function clientNip05(pubkey: string): string | null {
-    return profiles.get(pubkey)?.nip05 ?? null
+  async function saveLabel(client: ClientPolicy) {
+    await handleUpdate(client, { label: labelInput })
+    editingLabel = null
+    labelInput = ''
   }
 
-  async function handleRevoke(pubkey: string) {
-    if (!confirm(`Revoke ${clientName(pubkey)}?`)) return
+  async function handleRevoke(client: ClientPolicy) {
+    const name = displayName(client)
+    if (!confirm(`Revoke ${name}?`)) return
     try {
       const frame = device.mode === 'http'
-        ? await httpTransport.revokeClient(device.selectedSlot, pubkey)
-        : await serialTransport.sendAndReceive(buildPolicyRevoke(device.selectedSlot, pubkey), [FrameType.ACK, FrameType.NACK])
+        ? await httpTransport.revokeClient(device.selectedSlot, client.client_pubkey)
+        : await serialTransport.sendAndReceive(buildPolicyRevoke(device.selectedSlot, client.client_pubkey), [FrameType.ACK, FrameType.NACK])
       if (frame.type === FrameType.NACK) device.error = 'Revoke rejected.'
       await refreshClients()
     } catch (e) { device.error = e instanceof Error ? e.message : 'Revoke failed' }
@@ -57,16 +65,15 @@
     device.selectedSlot = parseInt((e.target as HTMLSelectElement).value)
     refreshClients(device.selectedSlot)
   }
+
+  function shortPubkey(hex: string): string {
+    return hex.slice(0, 8) + '...' + hex.slice(-8)
+  }
 </script>
 
 <div class="client-list">
   <div class="header-row">
-    <h2>
-      Approved Clients
-      {#if loadingProfiles}
-        <span class="resolving">resolving...</span>
-      {/if}
-    </h2>
+    <h2>Approved Clients</h2>
     <label class="slot-pick">
       SLOT
       <select value={device.selectedSlot} onchange={handleSlotChange}>
@@ -82,25 +89,37 @@
   {:else if device.clients.length === 0}
     <p class="empty">No approved clients for slot {device.selectedSlot}.</p>
   {:else}
-    {#each device.clients as client}
+    {#each device.clients as client, i}
       {@const profile = profiles.get(client.client_pubkey)}
       <div class="card">
         <div class="card-top">
-          <div class="identity">
+          <div class="card-left">
+            <span class="client-num">#{i + 1}</span>
             {#if profile?.picture}
               <img class="avatar" src={profile.picture} alt="" />
-            {:else}
-              <div class="avatar-placeholder"></div>
             {/if}
-            <div class="identity-text">
-              <span class="name">{clientName(client.client_pubkey)}</span>
-              {#if clientNip05(client.client_pubkey)}
-                <span class="nip05">{clientNip05(client.client_pubkey)}</span>
+            <div class="client-info">
+              {#if editingLabel === client.client_pubkey}
+                <form class="label-edit" onsubmit={(e) => { e.preventDefault(); saveLabel(client) }}>
+                  <input
+                    type="text"
+                    bind:value={labelInput}
+                    placeholder="e.g. Nostrudel, Coracle, Bark..."
+                    autofocus
+                  />
+                  <button type="submit" class="label-save">Save</button>
+                  <button type="button" class="label-cancel" onclick={() => editingLabel = null}>Cancel</button>
+                </form>
               {:else}
-                <span class="pubkey-short">{client.client_pubkey.slice(0, 20)}...</span>
+                <span class="client-name" onclick={() => startEditLabel(client.client_pubkey, client.label)}>
+                  {displayName(client)}
+                  <span class="edit-hint">edit</span>
+                </span>
               {/if}
+              <span class="pubkey">{shortPubkey(client.client_pubkey)}</span>
             </div>
           </div>
+
           <div class="actions">
             <button
               class="badge"
@@ -109,23 +128,17 @@
             >
               {client.auto_approve ? 'AUTO' : 'MANUAL'}
             </button>
-            <button class="btn-revoke" onclick={() => handleRevoke(client.client_pubkey)}>
+            <button class="btn-revoke" onclick={() => handleRevoke(client)}>
               Revoke
             </button>
           </div>
         </div>
 
-        <div class="card-meta">
-          {#if client.allowed_kinds.length > 0}
-            <div class="kinds">
-              {#each client.allowed_kinds as kind}
-                <span class="kind-tag">{kindLabel(kind)}</span>
-              {/each}
-            </div>
-          {:else}
-            <span class="all-kinds">All event kinds</span>
-          {/if}
-        </div>
+        <KindPermissions
+          allowedKinds={client.allowed_kinds}
+          unrestricted={client.allowed_kinds.length === 0}
+          onchange={(kinds) => handleUpdate(client, { allowed_kinds: kinds })}
+        />
       </div>
     {/each}
   {/if}
@@ -139,19 +152,7 @@
     margin-bottom: 1.5rem;
   }
 
-  h2 {
-    font-size: 1.3rem;
-    font-weight: 600;
-    margin: 0;
-    color: #fff;
-  }
-
-  .resolving {
-    font-size: 0.8rem;
-    font-weight: 400;
-    color: var(--text-muted);
-    margin-left: 0.5rem;
-  }
+  h2 { font-size: 1.3rem; font-weight: 600; margin: 0; color: #fff; }
 
   .slot-pick {
     font-size: 0.85rem;
@@ -190,53 +191,100 @@
     gap: 1rem;
   }
 
-  .identity {
+  .card-left {
     display: flex;
     align-items: center;
     gap: 1rem;
     min-width: 0;
   }
 
+  .client-num {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    min-width: 2rem;
+  }
+
   .avatar {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     object-fit: cover;
     flex-shrink: 0;
     border: 2px solid var(--border-bright);
   }
 
-  .avatar-placeholder {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: var(--surface-hover);
-    border: 2px solid var(--border);
-    flex-shrink: 0;
-  }
+  .client-info { min-width: 0; }
 
-  .identity-text { min-width: 0; }
-
-  .name {
-    display: block;
-    font-size: 1.1rem;
+  .client-name {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.15rem;
     font-weight: 600;
     color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    cursor: pointer;
   }
 
-  .nip05 {
+  .client-name:hover .edit-hint { opacity: 1; }
+
+  .edit-hint {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s;
+    letter-spacing: 0.05em;
+  }
+
+  .pubkey {
     display: block;
     font-size: 0.85rem;
-    color: var(--green-dim);
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+    letter-spacing: 0.03em;
   }
 
-  .pubkey-short {
-    display: block;
-    font-size: 0.8rem;
+  .label-edit {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .label-edit input {
+    background: #080808;
+    border: 1px solid var(--green-dim);
+    color: var(--text);
+    padding: 0.4rem 0.75rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 1rem;
+    width: 250px;
+  }
+
+  .label-edit input:focus { outline: none; border-color: var(--green); }
+  .label-edit input::placeholder { color: #444; }
+
+  .label-save {
+    background: var(--green);
+    color: #050505;
+    border: none;
+    padding: 0.4rem 0.85rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .label-cancel {
+    background: none;
+    border: none;
     color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 0.4rem 0.5rem;
   }
 
   .actions {
@@ -250,10 +298,10 @@
     background: #1a0e00;
     border: 1px solid #442800;
     color: var(--amber);
-    padding: 0.35rem 0.85rem;
+    padding: 0.4rem 1rem;
     border-radius: 4px;
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: 0.08em;
     cursor: pointer;
@@ -270,10 +318,10 @@
     background: transparent;
     border: 1px solid #442222;
     color: var(--red);
-    padding: 0.35rem 0.85rem;
+    padding: 0.4rem 1rem;
     border-radius: 4px;
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
@@ -282,27 +330,15 @@
   .btn-revoke:hover { background: #1a0808; }
 
   .card-meta {
-    margin-top: 0.75rem;
+    margin-top: 1rem;
     padding-top: 0.75rem;
     border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
-  .kinds { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  /* kind permissions handled by KindPermissions component */
 
-  .kind-tag {
-    background: var(--surface-hover);
-    border: 1px solid var(--border-bright);
-    border-radius: 3px;
-    padding: 0.2rem 0.6rem;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-
-  .all-kinds {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  .empty { color: var(--text-muted); font-size: 1rem; }
+  .empty { color: var(--text-muted); font-size: 1.1rem; }
 </style>

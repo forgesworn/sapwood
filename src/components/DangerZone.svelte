@@ -4,11 +4,10 @@
 
   let resetPending = $state(false)
   let resetResult = $state<string | null>(null)
-  let restartPending = $state(false)
+  let stopPending = $state(false)
 
   async function handleReset() {
     if (!confirm('This will erase all keys and policies. The device will require button confirmation. Continue?')) return
-
     resetPending = true
     resetResult = null
     try {
@@ -32,24 +31,56 @@
     }
   }
 
+  async function handleBridgeStop() {
+    if (!confirm('Stop the bridge? This will free the USB port so you can connect directly. You will need to restart the bridge manually.')) return
+    stopPending = true
+    try {
+      await bridgeRestart() // exits the process
+    } catch {
+      // Expected -- the bridge is gone.
+    } finally {
+      stopPending = false
+    }
+  }
+
   async function handleBridgeRestart() {
     if (!confirm('Restart the bridge? Relay connections will drop temporarily.')) return
-    restartPending = true
+    stopPending = true
     try {
       await bridgeRestart()
-    } catch (e) {
-      device.error = e instanceof Error ? e.message : 'Restart failed'
+    } catch {
+      // Expected during restart.
     } finally {
-      restartPending = false
+      stopPending = false
     }
   }
 </script>
 
 <div class="danger-zone">
+  {#if device.mode === 'http'}
+    <h2>Bridge Control</h2>
+    <p class="info">
+      The bridge holds the USB serial port. Stop it to switch to direct USB mode.
+    </p>
+    <div class="button-row">
+      <button class="btn-stop" disabled={stopPending} onclick={handleBridgeStop}>
+        {stopPending ? 'Stopping...' : 'Stop Bridge'}
+      </button>
+      <button class="btn-restart" disabled={stopPending} onclick={handleBridgeRestart}>
+        {stopPending ? 'Restarting...' : 'Restart Bridge'}
+      </button>
+    </div>
+    <p class="hint">
+      After stopping, open <a href="https://forgesworn.github.io/sapwood/" target="_blank" rel="noopener">sapwood.dev</a> and connect via USB.
+    </p>
+  {:else if device.mode === 'serial'}
+    <p class="info">Connected via USB. To use bridge mode, start the bridge and reconnect.</p>
+  {/if}
+
   <h2>Factory Reset</h2>
-  <p class="warning">Erases all master secrets, policies, bridge secret, and PIN. Irreversible.</p>
+  <p class="warning">Erases all master secrets, policies, bridge secret, and PIN. Irreversible. Requires physical button confirmation.</p>
   <button
-    class="danger-btn"
+    class="btn-danger"
     disabled={!device.connected || resetPending}
     onclick={handleReset}
   >
@@ -58,43 +89,54 @@
   {#if resetResult}
     <p class="result">{resetResult}</p>
   {/if}
-
-  {#if device.mode === 'http'}
-    <h2>Bridge</h2>
-    <p class="info">Restart the bridge process. systemd will bring it back up. Relay connections will reconnect automatically.</p>
-    <button
-      class="restart-btn"
-      disabled={restartPending}
-      onclick={handleBridgeRestart}
-    >
-      {restartPending ? 'Restarting...' : 'Restart Bridge'}
-    </button>
-  {/if}
 </div>
 
 <style>
-  h2 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; color: #ccc; }
+  h2 { font-size: 1.3rem; font-weight: 600; margin: 1.5rem 0 0.75rem; color: #fff; }
   h2:first-child { margin-top: 0; }
-  .warning { font-size: 0.8rem; color: #a93; margin: 0 0 1rem; }
-  .info { font-size: 0.8rem; color: #666; margin: 0 0 1rem; }
 
-  .danger-btn, .restart-btn {
-    border: 1px solid #633;
-    color: #a44;
-    padding: 0.5rem 1.5rem;
-    border-radius: 4px;
+  .info { font-size: 1rem; color: var(--text-dim); margin: 0 0 1.25rem; line-height: 1.5; }
+  .warning { font-size: 1rem; color: var(--amber); margin: 0 0 1.25rem; line-height: 1.5; }
+  .hint { font-size: 0.9rem; color: var(--text-muted); margin-top: 1rem; }
+  .hint a { color: var(--green-dim); text-decoration: none; }
+  .hint a:hover { color: var(--green); }
+  .result { font-size: 1rem; color: var(--text-dim); margin-top: 1rem; }
+
+  .button-row { display: flex; gap: 0.75rem; }
+
+  .btn-stop, .btn-restart, .btn-danger {
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 1rem;
+    font-weight: 500;
+    padding: 0.65rem 1.5rem;
+    border-radius: 4px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: all 0.15s;
   }
 
-  .danger-btn { background: #1a1111; }
-  .danger-btn:hover:not(:disabled) { background: #2a1515; }
+  .btn-stop {
+    background: #1a0e00;
+    border: 1px solid #664400;
+    color: var(--amber);
+  }
+  .btn-stop:hover:not(:disabled) { background: #2a1800; }
 
-  .restart-btn { background: #1a1511; border-color: #653; color: #a84; }
-  .restart-btn:hover:not(:disabled) { background: #2a2015; }
+  .btn-restart {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--text-dim);
+  }
+  .btn-restart:hover:not(:disabled) { background: var(--surface-hover); }
 
-  .danger-btn:disabled, .restart-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .result { font-size: 0.85rem; color: #888; margin-top: 1rem; }
+  .btn-danger {
+    background: #1a0808;
+    border: 1px solid #662222;
+    color: var(--red);
+  }
+  .btn-danger:hover:not(:disabled) { background: #2a1010; }
+
+  .btn-stop:disabled, .btn-restart:disabled, .btn-danger:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
 </style>
