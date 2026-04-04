@@ -117,6 +117,7 @@ export class HttpTransport {
   async fetchStatus(): Promise<void> {
     try {
       const res = await this.fetch('/api/status')
+      if (res.status === 423) return
       const data = await res.json()
 
       // Emit a synthetic PROVISION_LIST_RESPONSE frame.
@@ -133,6 +134,7 @@ export class HttpTransport {
   async fetchClients(slot: number): Promise<void> {
     try {
       const res = await this.fetch(`/api/clients/${slot}`)
+      if (res.status === 423) return
       const payload = new Uint8Array(await res.arrayBuffer())
       this.emit({
         kind: 'frame',
@@ -196,7 +198,9 @@ export class HttpTransport {
     }
     const res = await fetch(`${this.baseUrl}${path}`, init)
     if (res.status === 423) {
-      throw new Error('Device busy -- signing in progress')
+      // Device busy (serial lock held by relay handler). Silently skip —
+      // the next poll cycle will retry. Not an error worth surfacing.
+      return new Response('{}', { status: 423 })
     }
     return res
   }
