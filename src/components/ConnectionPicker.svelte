@@ -5,6 +5,24 @@
   let httpAddress = $state(HttpTransport.savedAddress() ?? '')
   let connecting = $state(false)
 
+  // If Sapwood is loaded from the bridge itself (e.g. http://mypi.local:3100/),
+  // auto-connect to the same origin. When loaded from GitHub Pages the probe 404s
+  // and we fall through to the manual USB / bridge-address picker.
+  $effect(() => {
+    if (device.connected || connecting) return
+    const origin = window.location.origin
+    if (!origin.startsWith('http')) return
+    void (async () => {
+      try {
+        const res = await fetch(`${origin}/api/bridge/info`, { cache: 'no-store' })
+        if (!res.ok) return
+        connecting = true
+        try { await connectHttp(origin) } catch { /* emitted via listener */ }
+        finally { connecting = false }
+      } catch { /* not a bridge origin -- fall through to picker */ }
+    })()
+  })
+
   async function handleConnectSerial() {
     connecting = true
     try { await connectSerial() } finally { connecting = false }
