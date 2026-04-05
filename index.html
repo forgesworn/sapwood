@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sapwood -- Shape your signer</title>
+    <!-- When Sapwood is served from the Heartwood bridge, the bridge substitutes
+         the __HEARTWOOD_API_TOKEN__ placeholder below with the real bearer token
+         at serve time. Sapwood reads it and sends it on all /api/* calls. When
+         Sapwood is served from GitHub Pages (Web Serial flow) the placeholder
+         stays literal; http.ts detects this and falls back to no-auth. -->
+    <meta name="heartwood-api-token" content="__HEARTWOOD_API_TOKEN__" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>

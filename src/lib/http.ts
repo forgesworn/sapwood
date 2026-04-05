@@ -6,6 +6,22 @@
 import { FrameType } from './frame.js'
 import type { Frame, FrameTypeValue } from './frame.js'
 
+/**
+ * Read the API bearer token from the meta tag that the Heartwood bridge
+ * injects into index.html at serve time. When Sapwood is served from the
+ * bridge, this returns the real token; when served from GitHub Pages
+ * (Web Serial initial setup flow), the placeholder remains literal and
+ * we return null so no auth header is sent.
+ */
+function readBridgeToken(): string | null {
+  if (typeof document === 'undefined') return null
+  const meta = document.querySelector('meta[name="heartwood-api-token"]')
+  const value = meta?.getAttribute('content') ?? ''
+  // Unsubstituted placeholder means we are not served from a bridge with auth.
+  if (!value || value === '__HEARTWOOD_API_TOKEN__') return null
+  return value
+}
+
 export type HttpEvent =
   | { kind: 'connected'; port: string }
   | { kind: 'disconnected' }
@@ -22,6 +38,13 @@ export class HttpTransport {
   private listeners: HttpListener[] = []
   private pollInterval: ReturnType<typeof setInterval> | null = null
   private logSocket: WebSocket | null = null
+  /** Bearer token from the bridge-injected meta tag. Null when served from GH Pages. */
+  private bridgeToken: string | null = readBridgeToken()
+
+  /** Build the Authorization header, or an empty object if no token. */
+  private authHeaders(): Record<string, string> {
+    return this.bridgeToken ? { Authorization: `Bearer ${this.bridgeToken}` } : {}
+  }
 
   get connected(): boolean {
     return this._connected
@@ -50,9 +73,14 @@ export class HttpTransport {
     url = url.replace(/\/+$/, '')
     this.baseUrl = url
 
-    // Test connectivity with bridge info endpoint.
+    // Test connectivity with bridge info endpoint. This is a public route
+    // (no auth required) so it works regardless of whether we have a token.
+    // Whether the token we have is *correct* gets verified by the first
+    // protected call (fetchStatus below).
     try {
-      const res = await fetch(`${this.baseUrl}/api/bridge/info`)
+      const res = await fetch(`${this.baseUrl}/api/bridge/info`, {
+        headers: { ...this.authHeaders() },
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       this._connected = true
       this.emit({ kind: 'connected', port: `HTTP ${url}` })
@@ -175,7 +203,10 @@ export class HttpTransport {
   async otaUpload(firmware: ArrayBuffer): Promise<void> {
     const res = await fetch(`${this.baseUrl}/api/device/ota`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...this.authHeaders(),
+      },
       body: firmware,
     })
     if (!res.ok) {
@@ -196,7 +227,14 @@ export class HttpTransport {
     if (!this._connected && !path.includes('bridge/info')) {
       throw new Error('Not connected')
     }
-    const res = await fetch(`${this.baseUrl}${path}`, init)
+    const mergedHeaders = {
+      ...this.authHeaders(),
+      ...(init?.headers as Record<string, string> | undefined),
+    }
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: mergedHeaders,
+    })
     if (res.status === 423) {
       // Device busy (serial lock held by relay handler). Silently skip —
       // the next poll cycle will retry. Not an error worth surfacing.
