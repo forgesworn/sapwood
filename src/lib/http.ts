@@ -159,34 +159,51 @@ export class HttpTransport {
     }
   }
 
-  async fetchClients(slot: number): Promise<void> {
+  async fetchSlots(slot: number): Promise<void> {
     try {
-      const res = await this.fetch(`/api/clients/${slot}`)
+      const res = await this.fetch(`/api/slots/${slot}`)
       if (res.status === 423) return
-      const payload = new Uint8Array(await res.arrayBuffer())
+      const data = await res.json()
+      // Emit as a synthetic CONNSLOT_LIST_RESP frame -- device.svelte.ts handles it.
       this.emit({
         kind: 'frame',
-        frame: { type: FrameType.POLICY_LIST_RESPONSE as FrameTypeValue, payload },
+        frame: { type: 0x43 as FrameTypeValue, payload: new TextEncoder().encode(JSON.stringify(data)) },
       })
     } catch (e) {
       this.handleError(e)
     }
   }
 
-  async revokeClient(slot: number, pubkey: string): Promise<Frame> {
-    const res = await this.fetch(`/api/clients/${slot}/${pubkey}`, { method: 'DELETE' })
+  async createSlot(masterSlot: number, label: string): Promise<Record<string, unknown>> {
+    const res = await this.fetch(`/api/slots/${masterSlot}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    })
+    if (!res.ok) throw new Error(`Create slot failed: ${res.status}`)
+    return res.json()
+  }
+
+  async revokeSlot(masterSlot: number, slotIndex: number): Promise<Frame> {
+    const res = await this.fetch(`/api/slots/${masterSlot}/${slotIndex}`, { method: 'DELETE' })
     const type = res.ok ? FrameType.ACK : FrameType.NACK
     return { type: type as FrameTypeValue, payload: new Uint8Array(0) }
   }
 
-  async updateClient(slot: number, policy: Record<string, unknown>): Promise<Frame> {
-    const res = await this.fetch(`/api/clients/${slot}`, {
+  async updateSlot(masterSlot: number, slotIndex: number, changes: Record<string, unknown>): Promise<Frame> {
+    const res = await this.fetch(`/api/slots/${masterSlot}/${slotIndex}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(policy),
+      body: JSON.stringify(changes),
     })
     const type = res.ok ? FrameType.ACK : FrameType.NACK
     return { type: type as FrameTypeValue, payload: new Uint8Array(0) }
+  }
+
+  async getSlotUri(masterSlot: number, slotIndex: number): Promise<string> {
+    const res = await this.fetch(`/api/slots/${masterSlot}/${slotIndex}/uri`)
+    const data = await res.json()
+    return data.bunker_uri as string
   }
 
   async factoryReset(): Promise<Frame> {

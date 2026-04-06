@@ -4,7 +4,7 @@
 import { transport as serialTransport, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import { FrameType, buildProvisionList, buildPolicyListRequest } from './frame.js'
-import type { ClientPolicy, MasterInfo } from './types.js'
+import type { ConnectSlot, MasterInfo } from './types.js'
 
 // --- Reactive state ---
 
@@ -15,7 +15,7 @@ export const device = $state({
   mode: 'none' as TransportMode,
   portInfo: '',
   masters: [] as MasterInfo[],
-  clients: [] as ClientPolicy[],
+  slots: [] as ConnectSlot[],
   selectedSlot: 0,
   logs: [] as string[],
   error: null as string | null,
@@ -41,7 +41,7 @@ serialTransport.on((event: SerialEvent) => {
         device.mode = 'none'
         device.portInfo = ''
         device.masters = []
-        device.clients = []
+        device.slots = []
       }
       break
     case 'frame':
@@ -73,7 +73,7 @@ httpTransport.on((event: HttpEvent) => {
         device.mode = 'none'
         device.portInfo = ''
         device.masters = []
-        device.clients = []
+        device.slots = []
         device.bridgeInfo = null
       }
       break
@@ -99,11 +99,11 @@ function handleFrame(frame: { type: number; payload: Uint8Array }) {
         device.error = 'Failed to parse master list'
       }
       break
-    case FrameType.POLICY_LIST_RESPONSE:
+    case 0x43: // CONNSLOT_LIST_RESP
       try {
-        device.clients = JSON.parse(decoder.decode(frame.payload)) as ClientPolicy[]
+        device.slots = JSON.parse(decoder.decode(frame.payload)) as ConnectSlot[]
       } catch {
-        device.error = 'Failed to parse client list'
+        device.error = 'Failed to parse slot list'
       }
       break
   }
@@ -140,7 +140,7 @@ export async function connectHttp(address: string) {
     }
     try {
       await refreshMasters()
-      await refreshClients()
+      await refreshSlots()
     } catch { /* non-fatal */ }
   }, 3000)
 }
@@ -165,15 +165,16 @@ export async function refreshMasters() {
   }
 }
 
-export async function refreshClients(slot?: number) {
+export async function refreshSlots(slot?: number) {
   if (!device.connected) return
   const s = slot ?? device.selectedSlot
   if (device.mode === 'serial') {
+    // Serial mode: TODO when serial CONNSLOT frames are implemented.
     try { await serialTransport.write(buildPolicyListRequest(s)) } catch (e) {
-      device.error = e instanceof Error ? e.message : 'Failed to fetch clients'
+      device.error = e instanceof Error ? e.message : 'Failed to fetch slots'
     }
   } else if (device.mode === 'http') {
-    await httpTransport.fetchClients(s)
+    await httpTransport.fetchSlots(s)
   }
 }
 
