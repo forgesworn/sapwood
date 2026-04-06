@@ -442,19 +442,20 @@
   }
 
   .btn-uri {
-    background: transparent;
-    border: 1px solid #333;
-    color: var(--text-muted);
+    background: #001a0a;
+    border: 1px solid var(--green-dim);
+    color: var(--green);
     padding: 0.4rem 0.85rem;
     border-radius: 4px;
     font-family: inherit;
     font-size: 0.85rem;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.03em;
     cursor: pointer;
     transition: all 0.15s;
   }
 
-  .btn-uri:hover { border-color: var(--green-dim); color: var(--green); }
+  .btn-uri:hover { background: #002a12; border-color: var(--green); box-shadow: var(--green-glow); }
 
   .btn-revoke {
     background: transparent;
