@@ -89,8 +89,24 @@
   }
 
   async function copyUri(uri: string, isCreated = false) {
+    let ok = false
     try {
       await navigator.clipboard.writeText(uri)
+      ok = true
+    } catch {
+      // Clipboard API blocked (HTTP context). Use legacy execCommand fallback.
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = uri
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch { /* both methods failed */ }
+    }
+    if (ok) {
       if (isCreated) {
         createdUriCopied = true
         setTimeout(() => { createdUriCopied = false }, 2000)
@@ -98,7 +114,7 @@
         uriCopied = true
         setTimeout(() => { uriCopied = false }, 2000)
       }
-    } catch { /* fallback -- browser blocked clipboard */ }
+    }
   }
 
   async function handleCreate() {
