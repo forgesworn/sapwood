@@ -3,3 +3,12 @@ dist/
 .vite/
 *.local
 .DS_Store
+
+# Local AI agent settings
+.claude/
+
+# MCP config (may contain private keys)
+.mcp.json
+
+# Playwright MCP artifacts
+.playwright-mcp/
