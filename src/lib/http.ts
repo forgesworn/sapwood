@@ -368,14 +368,17 @@ export class HttpTransport {
       const pubkey = pubkeys[slotIndex]
       if (!pubkey) return { type: FrameType.NACK as FrameTypeValue, payload: new Uint8Array(0) }
       const existing = data.approved[pubkey] ?? {}
+      // Build the approve payload. If allowed_kinds is explicitly null, omit it
+      // to clear restrictions. If it's an array, send it.
+      const approveBody: Record<string, unknown> = { pubkey, label: existing.label }
+      const newKinds = 'allowed_kinds' in changes ? changes.allowed_kinds : existing.allowedKinds
+      if (newKinds != null) {
+        approveBody.allowed_kinds = newKinds
+      }
       const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
-        body: JSON.stringify({
-          pubkey,
-          label: existing.label,
-          allowed_kinds: changes.allowed_kinds ?? existing.allowedKinds,
-        }),
+        body: JSON.stringify(approveBody),
       })
       const type = res.ok ? FrameType.ACK : FrameType.NACK
       return { type: type as FrameTypeValue, payload: new Uint8Array(0) }

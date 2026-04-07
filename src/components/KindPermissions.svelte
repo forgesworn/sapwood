@@ -61,7 +61,9 @@
   }
 
   function allowAll() {
-    onchange([])
+    // null signals "remove restrictions" (omit allowedKinds from clients.json).
+    // Empty array [] would mean "block everything".
+    onchange(null as unknown as number[])
   }
 
   function tierColour(tier: Tier): string {
@@ -75,7 +77,7 @@
   function tierLabel(tier: Tier): string {
     switch (tier) {
       case 'auto': return 'auto-sign'
-      case 'prompt': return 'prompt'
+      case 'prompt': return 'blocked'
       case 'block': return 'blocked'
     }
   }
@@ -91,7 +93,7 @@
 
   <div class="legend">
     <span class="legend-item"><span class="legend-dot" style="background: var(--green)"></span> Auto-sign</span>
-    <span class="legend-item"><span class="legend-dot" style="background: var(--amber)"></span> Prompt (button)</span>
+    <span class="legend-item"><span class="legend-dot" style="background: var(--amber)"></span> Blocked</span>
   </div>
 
   <div class="categories">
