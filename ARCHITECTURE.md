@@ -94,6 +94,8 @@ sequenceDiagram
     Note over D: Reboot with new firmware
 ```
 
+Over HTTP, OTA uses a single streaming `POST /api/device/ota` instead of the frame-by-frame protocol. The bridge handles chunking and verification internally.
+
 ## Provisioning
 
 Three modes for establishing a master identity on the device:
