@@ -24,6 +24,7 @@ export const device = $state({
   masters: [] as MasterInfo[],
   slots: [] as ConnectSlot[],
   pendingClients: [] as PendingClient[],
+  approvals: [] as Record<string, unknown>[],
   selectedSlot: 0,
   logs: [] as string[],
   error: null as string | null,
@@ -83,6 +84,7 @@ httpTransport.on((event: HttpEvent) => {
         device.masters = []
         device.slots = []
         device.pendingClients = []
+        device.approvals = []
         device.bridgeInfo = null
       }
       break
@@ -153,6 +155,7 @@ export async function connectHttp(address: string) {
     try {
       await refreshMasters()
       await refreshSlots()
+      device.approvals = await httpTransport.fetchApprovals()
     } catch { /* non-fatal */ }
   }, 3000)
 }

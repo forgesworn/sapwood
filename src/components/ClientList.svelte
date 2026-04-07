@@ -3,6 +3,7 @@
   import { FrameType, buildPolicyRevoke, buildPolicyUpdate } from '../lib/frame.js'
   import { kindLabel } from '../lib/kinds.js'
   import KindPermissions from './KindPermissions.svelte'
+  import ApprovalQueue from './ApprovalQueue.svelte'
   import type { ConnectSlot } from '../lib/types.js'
 
   // --- State ---
@@ -263,6 +264,9 @@
       {/if}
     </section>
   {/if}
+
+  <!-- Approval Queue (heartwoodd Soft mode) -->
+  <ApprovalQueue />
 
   <!-- Pending Approval -->
   {#if device.pendingClients.length > 0}

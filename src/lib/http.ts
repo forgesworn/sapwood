@@ -528,6 +528,29 @@ export class HttpTransport {
     this.emit({ kind: 'disconnected' })
   }
 
+  /** Fetch pending approval requests. */
+  async fetchApprovals(): Promise<Record<string, unknown>[]> {
+    if (!this.heartwooddMode) return []
+    try {
+      const res = await this.fetch('/api/approvals')
+      if (!res.ok) return []
+      return res.json()
+    } catch { return [] }
+  }
+
+  /** Approve or deny a pending request. */
+  async resolveApproval(id: string, action: 'approve' | 'deny'): Promise<boolean> {
+    if (!this.heartwooddMode) return false
+    try {
+      const res = await this.fetch(`/api/approvals/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      return res.ok
+    } catch { return false }
+  }
+
   // --- Internal ---
 
   private async fetch(path: string, init?: RequestInit): Promise<Response> {
