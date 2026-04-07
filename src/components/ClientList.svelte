@@ -97,7 +97,11 @@
     } catch (e) { device.error = e instanceof Error ? e.message : 'Revoke failed' }
   }
 
+  /** Track which slot index is currently waiting for device confirmation. */
+  let updatingSlotIndex = $state<number | null>(null)
+
   async function handleUpdate(slot: ConnectSlot, changes: Record<string, unknown>) {
+    updatingSlotIndex = slot.slot_index
     try {
       const frame = device.mode === 'http'
         ? await httpTransport.updateSlot(device.selectedSlot, slot.slot_index, changes)
@@ -105,9 +109,20 @@
             buildPolicyUpdate(device.selectedSlot, JSON.stringify({ ...slot, ...changes })),
             [FrameType.ACK, FrameType.NACK],
           )
-      if (frame.type === FrameType.NACK) device.error = 'Update rejected.'
+      if (frame.type === FrameType.NACK) device.error = 'Update denied on device.'
       await refreshSlots()
-    } catch (e) { device.error = e instanceof Error ? e.message : 'Update failed' }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Update failed'
+      if (msg.includes('denied') || msg.includes('Denied')) {
+        device.error = 'Update denied on device.'
+      } else if (msg.includes('timeout') || msg.includes('Timeout')) {
+        device.error = 'Timed out waiting for device confirmation.'
+      } else {
+        device.error = msg
+      }
+    } finally {
+      updatingSlotIndex = null
+    }
   }
 
   async function handleRevokeAll() {
@@ -373,6 +388,7 @@
             allowedKinds={slot.allowed_kinds}
             unrestricted={slot.allowed_kinds.length === 0}
             signingApproved={slot.signing_approved ?? true}
+            updating={updatingSlotIndex === slot.slot_index}
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />
         </div>
