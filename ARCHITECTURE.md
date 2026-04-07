@@ -32,6 +32,17 @@ graph TB
     SER -->|"Binary frames"| ESP["ESP32 Device"]
     HTTP -->|"JSON + Bearer token"| BRIDGE["Heartwood Bridge"]
     BRIDGE -->|"Serial"| ESP
+
+    style ML fill:#3b82f6,color:#fff
+    style CL fill:#3b82f6,color:#fff
+    style PR fill:#3b82f6,color:#fff
+    style OTA fill:#3b82f6,color:#fff
+    style LOG fill:#3b82f6,color:#fff
+    style STATE fill:#1e293b,color:#e2e8f0
+    style SER fill:#f59e0b,color:#000
+    style HTTP fill:#8b5cf6,color:#fff
+    style ESP fill:#ef4444,color:#fff
+    style BRIDGE fill:#8b5cf6,color:#fff
 ```
 
 **Serial transport** talks directly to the ESP32's USB-Serial-JTAG interface (VID: 0x303a, PID: 0x1001) at 115,200 baud. It hunts for magic bytes `0x48 0x57` to separate binary protocol frames from ESP-IDF log output.
