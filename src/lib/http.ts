@@ -81,21 +81,50 @@ export class HttpTransport {
     url = url.replace(/\/+$/, '')
     this.baseUrl = url
 
-    // Test connectivity with bridge info endpoint. This is a public route
-    // (no auth required) so it works regardless of whether we have a token.
-    // Whether the token we have is *correct* gets verified by the first
-    // protected call (fetchStatus below).
+    // Test connectivity. heartwoodd exposes /api/info; ESP32 bridge exposes
+    // /api/bridge/info. Try heartwoodd first, fall back to bridge endpoint.
+    // Detection logic:
+    //   - probe has 'tier' field  → heartwoodd
+    //   - probe has 'masters'     → ESP32 bridge
+    //   - neither                 → Pi multi-instance (heartwood-device)
     try {
-      const res = await fetch(`${this.baseUrl}/api/bridge/info`, {
-        headers: { ...this.authHeaders() },
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      // Detect Pi multi-instance mode: heartwood-device returns a flat
-      // status object (no 'masters' array). ESP32 bridge returns { masters }.
+      let probeOk = false
       try {
-        const probe = await res.clone().json()
-        if (!probe.masters) this.piMode = true
-      } catch { /* non-fatal */ }
+        const res = await fetch(`${this.baseUrl}/api/info`, {
+          headers: { ...this.authHeaders() },
+        })
+        if (res.ok) {
+          probeOk = true
+          try {
+            const probe = await res.clone().json()
+            if (probe.tier !== undefined) {
+              this.heartwooddMode = true
+              this.piMode = false
+            }
+          } catch { /* non-fatal */ }
+        }
+      } catch { /* heartwoodd not present, try bridge endpoint */ }
+
+      if (!probeOk) {
+        const res = await fetch(`${this.baseUrl}/api/bridge/info`, {
+          headers: { ...this.authHeaders() },
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        probeOk = true
+        // Detect Pi multi-instance mode: heartwood-device returns a flat
+        // status object (no 'masters' array). ESP32 bridge returns { masters }.
+        try {
+          const probe = await res.clone().json()
+          if (!probe.masters) {
+            this.piMode = true
+            this.heartwooddMode = false
+          } else {
+            this.piMode = false
+            this.heartwooddMode = false
+          }
+        } catch { /* non-fatal */ }
+      }
+
       this._connected = true
       this.emit({ kind: 'connected', port: `HTTP ${url}` })
 
@@ -164,7 +193,20 @@ export class HttpTransport {
 
   async fetchStatus(): Promise<void> {
     try {
-      // First try ESP32 bridge format (returns { masters: [...] }).
+      if (this.heartwooddMode) {
+        // heartwoodd: /api/status returns { masters: [...], daemon: {...} }
+        const res = await this.fetch('/api/status')
+        if (res.status === 423) return
+        const data = await res.json()
+        const payload = new TextEncoder().encode(JSON.stringify(data.masters))
+        this.emit({
+          kind: 'frame',
+          frame: { type: FrameType.PROVISION_LIST_RESPONSE as FrameTypeValue, payload },
+        })
+        return
+      }
+
+      // ESP32 bridge format (returns { masters: [...] }).
       const res = await this.fetch('/api/status')
       if (res.status === 423) return
       const data = await res.json()
@@ -225,8 +267,23 @@ export class HttpTransport {
   /** True once we know the backend is a Pi (no /api/slots/ endpoint). */
   private piMode = false
 
+  /** True once we know the backend is heartwoodd (native daemon API). */
+  private heartwooddMode = false
+
   async fetchSlots(slot: number): Promise<void> {
     try {
+      if (this.heartwooddMode) {
+        // heartwoodd: /api/slots/{master} returns ConnectSlot[] directly.
+        const res = await this.fetch(`/api/slots/${slot}`)
+        if (res.status === 423) return
+        const data = await res.json()
+        this.emit({
+          kind: 'frame',
+          frame: { type: 0x43 as FrameTypeValue, payload: new TextEncoder().encode(JSON.stringify(data)) },
+        })
+        return
+      }
+
       if (!this.piMode) {
         // Try ESP32 bridge endpoint first.
         const res = await this.fetch(`/api/slots/${slot}`)
@@ -279,6 +336,18 @@ export class HttpTransport {
   }
 
   async createSlot(masterSlot: number, label: string): Promise<Record<string, unknown>> {
+    if (this.heartwooddMode) {
+      const res = await this.fetch(`/api/slots/${masterSlot}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        throw new Error((err as Record<string, string>).error ?? `Create failed: ${res.status}`)
+      }
+      return res.json()
+    }
     if (this.piMode) {
       // Pi mode: create a pre-authorised connect slot with a secret.
       // The bunker auto-approves clients that connect with the matching secret.
@@ -304,6 +373,11 @@ export class HttpTransport {
   }
 
   async revokeSlot(masterSlot: number, slotIndex: number): Promise<Frame> {
+    if (this.heartwooddMode) {
+      const res = await this.fetch(`/api/slots/${masterSlot}/${slotIndex}`, { method: 'DELETE' })
+      const type = res.ok ? FrameType.ACK : FrameType.NACK
+      return { type: type as FrameTypeValue, payload: new Uint8Array(0) }
+    }
     if (this.piMode) {
       // In Pi mode, slotIndex is the index into the approved clients list.
       // We need the pubkey to revoke. Fetch clients first, then revoke by pubkey.
@@ -329,8 +403,12 @@ export class HttpTransport {
     return { type: type as FrameTypeValue, payload: new Uint8Array(0) }
   }
 
-  /** Clear all approved and pending clients for a Pi instance. */
+  /** Clear all approved and pending clients for a Pi instance. Not used in heartwooddMode. */
   async clearClients(masterSlot: number): Promise<Frame> {
+    if (this.heartwooddMode) {
+      // heartwoodd uses per-slot revocation; no bulk clear endpoint.
+      return { type: FrameType.NACK as FrameTypeValue, payload: new Uint8Array(0) }
+    }
     if (this.piMode) {
       const inst = this.instanceForSlot(masterSlot)
       const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients/clear`, {
@@ -356,6 +434,15 @@ export class HttpTransport {
   }
 
   async updateSlot(masterSlot: number, slotIndex: number, changes: Record<string, unknown>): Promise<Frame> {
+    if (this.heartwooddMode) {
+      const res = await this.fetch(`/api/slots/${masterSlot}/${slotIndex}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      })
+      const type = res.ok ? FrameType.ACK : FrameType.NACK
+      return { type: type as FrameTypeValue, payload: new Uint8Array(0) }
+    }
     if (this.piMode) {
       // Pi mode: look up pubkey from client list, then re-approve with updated fields.
       const inst = this.instanceForSlot(masterSlot)
