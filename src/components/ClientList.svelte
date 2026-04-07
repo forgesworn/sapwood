@@ -60,6 +60,14 @@
     try {
       const result = await httpTransport.createSlot(device.selectedSlot, label)
       createdUri = (result.bunker_uri as string) ?? null
+      // heartwoodd returns { slot_index, secret, npub } without bunker_uri —
+      // fetch the full URI from the slot endpoint.
+      if (!createdUri && result.slot_index !== undefined) {
+        try {
+          const uri = await httpTransport.getSlotUri(device.selectedSlot, result.slot_index as number)
+          createdUri = uri
+        } catch { /* non-fatal */ }
+      }
       newLabel = ''
     } catch (e) {
       createError = e instanceof Error ? e.message : 'Failed to create connection'
@@ -164,7 +172,8 @@
     if (ok) {
       if (target === 'created') {
         createdUriCopied = true
-        setTimeout(() => { dismissCreatedUri() }, 1500)
+        createdUriCopied = true
+        setTimeout(() => { createdUriCopied = false }, 2000)
       } else if (target === 'advanced') {
         advancedCopied = true
         setTimeout(() => { advancedCopied = false }, 2000)
