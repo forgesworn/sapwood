@@ -72,6 +72,19 @@ describe('tree-nsec derivation', () => {
 
     zeroize(result.secret)
   })
+
+  it('matches nsec-tree frozen vector (0x01-fill)', () => {
+    // FROZEN: must match nsec-tree vectors.test.ts vector 1.
+    // fromNsec(0x01 x 32) must produce this exact npub.
+    const nsecBytes = new Uint8Array(32).fill(0x01)
+    const result = deriveFromNsec(nsecBytes)
+
+    expect(result.npub).toBe(
+      'npub13sp7q3awvrqpa9p2svm7w8ghudghlnrraekwl7qh8w7j8747vjwskvzy2u'
+    )
+
+    zeroize(result.secret)
+  })
 })
 
 describe('bunker mode', () => {

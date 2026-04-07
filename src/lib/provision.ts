@@ -2,7 +2,7 @@
 //
 // Three modes:
 //   tree-mnemonic: BIP-39 mnemonic -> BIP-32 at m/44'/1237'/727'/0'/0' -> 32 bytes
-//   tree-nsec: nsec bytes -> HMAC-SHA256(key="nsec-tree\0", data=nsec) -> 32 bytes
+//   tree-nsec: nsec bytes -> HMAC-SHA256(key=nsec, msg="nsec-tree-root") -> 32 bytes
 //   bunker: raw nsec bytes (no derivation)
 //
 // The derived secret is sent to the ESP32 as a PROVISION frame. It is never
@@ -19,8 +19,8 @@ import { buildFrame, FrameType } from './frame.js'
 /** BIP-32 derivation path -- must match heartwood-core exactly. */
 const MNEMONIC_PATH = "m/44'/1237'/727'/0'/0'"
 
-/** HMAC domain prefix for nsec-tree derivation. */
-const DOMAIN_PREFIX = new TextEncoder().encode('nsec-tree\0')
+/** HMAC label for nsec-tree root derivation -- must match nsec-tree fromNsec(). */
+const NSEC_ROOT_LABEL = new TextEncoder().encode('nsec-tree-root')
 
 export type ProvisionMode = 'tree-mnemonic' | 'tree-nsec' | 'bunker'
 
@@ -55,7 +55,7 @@ export function deriveFromNsec(nsecBytes: Uint8Array): ProvisionResult {
     throw new Error('nsec must be 32 bytes')
   }
 
-  const secret = hmac(sha256, DOMAIN_PREFIX, nsecBytes)
+  const secret = hmac(sha256, nsecBytes, NSEC_ROOT_LABEL)
   const npub = pubkeyToNpub(secretToTreePubkey(secret))
 
   return { secret: new Uint8Array(secret), npub }
