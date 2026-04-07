@@ -354,6 +354,7 @@
           <KindPermissions
             allowedKinds={slot.allowed_kinds}
             unrestricted={slot.allowed_kinds.length === 0}
+            signingApproved={slot.signing_approved ?? true}
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />
         </div>
