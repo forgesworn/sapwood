@@ -51,6 +51,8 @@ npm run build     # production build to dist/
 
 ## Ecosystem
 
+> For internal architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Sapwood is part of the Heartwood signing device ecosystem:
 
 | Component | Role |
