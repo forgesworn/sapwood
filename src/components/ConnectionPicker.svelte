@@ -14,7 +14,9 @@
     if (!origin.startsWith('http')) return
     void (async () => {
       try {
-        const res = await fetch(`${origin}/api/bridge/info`, { cache: 'no-store' })
+        // Try heartwoodd (/api/info) first, then ESP32 bridge (/api/bridge/info).
+        let res = await fetch(`${origin}/api/info`, { cache: 'no-store' }).catch(() => null)
+        if (!res?.ok) res = await fetch(`${origin}/api/bridge/info`, { cache: 'no-store' })
         if (!res.ok) return
         connecting = true
         try { await connectHttp(origin) } catch { /* emitted via listener */ }
