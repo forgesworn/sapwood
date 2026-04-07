@@ -51,7 +51,7 @@ graph TB
 
 ## Frame protocol
 
-TypeScript port of `heartwood-common/src/frame.rs`. 19 tests verify byte-level compatibility.
+TypeScript port of `heartwood-esp32/common/src/frame.rs`. 19 tests verify byte-level compatibility.
 
 Wire format:
 
@@ -74,7 +74,7 @@ Wire format:
 | OTA_CHUNK | 0x31 | host to device | offset (u32 BE) + binary data |
 | OTA_FINISH | 0x32 | host to device | (empty) |
 | OTA_STATUS | 0x33 | device to host | status byte |
-| CONNSLOT_LIST_RESP | 0x43 | device to host | JSON: connection slots |
+| CONNSLOT_LIST_RESP | 0x43 | device to host | JSON: connection slots (HTTP bridge only; serial path pending) |
 
 CRC32 uses IEEE 802.3 polynomial, covering type + length + payload (not magic bytes).
 
