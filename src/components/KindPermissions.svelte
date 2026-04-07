@@ -1,25 +1,19 @@
 <script lang="ts">
   import { COMMON_KINDS, type KindInfo } from '../lib/kinds.js'
 
-  // Three-state permission model per kind:
-  //   'auto'   = sign immediately (green)
-  //   'prompt' = show on OLED, wait for button (amber)
-  //   'block'  = reject immediately (red)
-  //
-  // Stored as allowed_kinds on the ESP32:
-  //   empty array = all kinds auto-sign (unrestricted)
-  //   [1, 7] = only kind 1 and 7 auto-sign, everything else prompts
-  //   (block is not yet in the firmware -- maps to prompt for now)
+  // Two-state permission model per kind:
+  //   'auto'    = sign immediately (green)
+  //   'blocked' = reject (amber) — on ESP32 this would be "prompt for button"
 
   interface Props {
     allowedKinds: number[]
     unrestricted: boolean
-    onchange: (kinds: number[]) => void
+    onchange: (kinds: number[] | null) => void
   }
 
   let { allowedKinds, unrestricted, onchange }: Props = $props()
 
-  type Tier = 'auto' | 'prompt' | 'block'
+  let expanded = $state(false)
 
   const categories: { label: string; kinds: KindInfo[] }[] = [
     { label: 'IDENTITY', kinds: COMMON_KINDS.filter(k => k.category === 'identity') },
@@ -29,226 +23,160 @@
     { label: 'RELAY', kinds: COMMON_KINDS.filter(k => k.category === 'relay') },
   ]
 
-  function getTier(kind: number): Tier {
-    if (unrestricted) return 'auto'
-    if (allowedKinds.includes(kind)) return 'auto'
-    // TODO: when firmware supports block, check a blocked_kinds list.
-    // For now, anything not in allowed_kinds = prompt.
-    return 'prompt'
+  function isAllowed(kind: number): boolean {
+    if (unrestricted) return true
+    return allowedKinds.includes(kind)
   }
 
-  function cycleTier(kind: number) {
-    const current = getTier(kind)
-    // Cycle: auto -> prompt -> block -> auto
-    // Block maps to prompt in firmware for now.
-    const next: Tier = current === 'auto' ? 'prompt' : 'auto'
-
-    if (unrestricted && next === 'prompt') {
-      // First restriction from unrestricted: allow everything except this kind.
+  function toggle(kind: number) {
+    if (unrestricted) {
+      // First restriction: allow everything except this kind.
       const allExcept = COMMON_KINDS.map(k => k.kind).filter(k => k !== kind)
       onchange(allExcept)
-    } else if (next === 'auto') {
-      // Add to allowed list.
-      if (unrestricted) {
-        onchange([]) // stay unrestricted
-      } else {
-        onchange([...allowedKinds, kind])
-      }
+    } else if (isAllowed(kind)) {
+      // Remove from allowed.
+      const next = allowedKinds.filter(k => k !== kind)
+      onchange(next.length > 0 ? next : null)
     } else {
-      // Remove from allowed list (prompt).
-      onchange(allowedKinds.filter(k => k !== kind))
+      // Add to allowed.
+      onchange([...allowedKinds, kind])
     }
   }
 
   function allowAll() {
-    // null signals "remove restrictions" (omit allowedKinds from clients.json).
-    // Empty array [] would mean "block everything".
     onchange(null as unknown as number[])
   }
 
-  function tierColour(tier: Tier): string {
-    switch (tier) {
-      case 'auto': return 'var(--green)'
-      case 'prompt': return 'var(--amber)'
-      case 'block': return 'var(--red)'
-    }
-  }
+  const blockedCount = $derived(
+    unrestricted ? 0 : COMMON_KINDS.filter(k => !allowedKinds.includes(k.kind)).length
+  )
 
-  function tierLabel(tier: Tier): string {
-    switch (tier) {
-      case 'auto': return 'auto-sign'
-      case 'prompt': return 'blocked'
-      case 'block': return 'blocked'
-    }
-  }
+  const summaryText = $derived(
+    unrestricted
+      ? 'All kinds auto-signed'
+      : `${allowedKinds.length} auto-signed, ${blockedCount} blocked`
+  )
 </script>
 
-<div class="kind-perms">
-  <div class="perm-header">
-    <span class="perm-title">SIGNING PERMISSIONS</span>
+<div class="perms">
+  <button class="perms-toggle" onclick={() => expanded = !expanded}>
+    <span class="perms-chevron" class:open={expanded}>{'\u25B8'}</span>
+    <span class="perms-label">Signing</span>
+    <span class="perms-summary" class:restricted={!unrestricted}>{summaryText}</span>
     {#if !unrestricted}
-      <button class="allow-all-btn" onclick={allowAll}>Allow All</button>
+      <button class="perms-reset" onclick={(e) => { e.stopPropagation(); allowAll() }}>Allow all</button>
     {/if}
-  </div>
+  </button>
 
-  <div class="legend">
-    <span class="legend-item"><span class="legend-dot" style="background: var(--green)"></span> Auto-sign</span>
-    <span class="legend-item"><span class="legend-dot" style="background: var(--amber)"></span> Blocked</span>
-  </div>
-
-  <div class="categories">
-    {#each categories as cat}
-      <div class="category">
-        <span class="cat-label">{cat.label}</span>
-        <div class="kind-grid">
-          {#each cat.kinds as ki}
-            {@const tier = getTier(ki.kind)}
-            <button
-              class="kind-toggle"
-              class:auto={tier === 'auto'}
-              class:prompt={tier === 'prompt'}
-              class:block={tier === 'block'}
-              onclick={() => cycleTier(ki.kind)}
-              title="{ki.label} ({ki.kind}) -- {tierLabel(tier)}. Click to change."
-            >
-              <span class="kind-dot" style="background: {tierColour(tier)}"></span>
-              <span class="kind-name">{ki.label}</span>
-              <span class="kind-num">{ki.kind}</span>
-            </button>
-          {/each}
-        </div>
-      </div>
-    {/each}
-  </div>
+  {#if expanded}
+    <div class="perms-grid">
+      {#each categories as cat}
+        {#each cat.kinds as ki}
+          {@const allowed = isAllowed(ki.kind)}
+          <button
+            class="kind-chip"
+            class:allowed
+            class:blocked={!allowed}
+            onclick={() => toggle(ki.kind)}
+            title="{ki.label} (kind {ki.kind}) — {allowed ? 'auto-sign' : 'blocked'}"
+          >
+            <span class="chip-dot" style="background: {allowed ? 'var(--green)' : 'var(--amber)'}"></span>
+            {ki.label}
+          </button>
+        {/each}
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <style>
-  .kind-perms {
-    margin-top: 1rem;
-    padding-top: 0.75rem;
+  .perms {
+    margin-top: 0.75rem;
     border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
   }
 
-  .perm-header {
+  .perms-toggle {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    padding: 0.3rem 0;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
   }
+  .perms-toggle:hover .perms-label { color: #ccc; }
 
-  .perm-title {
-    font-size: 0.85rem;
+  .perms-chevron {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+    width: 0.8rem;
+    flex-shrink: 0;
+  }
+  .perms-chevron.open { transform: rotate(90deg); }
+
+  .perms-label {
+    font-size: 0.8rem;
     font-weight: 600;
     color: var(--text-dim);
-    letter-spacing: 0.12em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
-  .allow-all-btn {
+  .perms-summary {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    flex: 1;
+  }
+  .perms-summary.restricted { color: var(--amber); }
+
+  .perms-reset {
     background: none;
     border: 1px solid var(--border-bright);
     color: var(--text-dim);
-    padding: 0.3rem 0.85rem;
+    padding: 0.2rem 0.6rem;
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-  .allow-all-btn:hover { background: var(--surface-hover); }
-
-  .legend {
-    display: flex;
-    gap: 1.5rem;
-    margin-bottom: 1rem;
-    font-size: 0.85rem;
-    color: var(--text-dim);
-  }
-
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .legend-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-  }
-
-  .categories {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .cat-label {
-    display: block;
     font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    letter-spacing: 0.1em;
-    margin-bottom: 0.4rem;
-  }
-
-  .kind-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .kind-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 0.5rem 1rem;
-    font-family: inherit;
     cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .kind-toggle:hover {
-    border-color: #444;
-    background: var(--surface-hover);
-  }
-
-  .kind-toggle.auto {
-    border-color: #1a4422;
-  }
-
-  .kind-toggle.prompt {
-    border-color: #443300;
-    opacity: 0.7;
-  }
-
-  .kind-toggle.block {
-    border-color: #441111;
-    opacity: 0.4;
-  }
-
-  .kind-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
     flex-shrink: 0;
   }
+  .perms-reset:hover { background: var(--surface-hover); color: #fff; }
 
-  .kind-name {
-    font-size: 0.95rem;
-    font-weight: 500;
+  .perms-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .kind-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.65rem;
+    font-family: inherit;
+    font-size: 0.8rem;
     color: var(--text);
+    cursor: pointer;
+    transition: all 0.12s;
   }
+  .kind-chip:hover { border-color: #444; background: var(--surface-hover); }
+  .kind-chip.allowed { border-color: #1a3a22; }
+  .kind-chip.blocked { border-color: #3a2a00; opacity: 0.7; }
 
-  .kind-toggle.prompt .kind-name,
-  .kind-toggle.block .kind-name {
-    color: var(--text-dim);
-  }
-
-  .kind-num {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    min-width: 2ch;
+  .chip-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 </style>
