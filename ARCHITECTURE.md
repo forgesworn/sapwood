@@ -84,9 +84,13 @@ Firmware updates run over USB with SHA-256 verification and physical button conf
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant S as Sapwood
-    participant D as ESP32
+    actor U as User
+    box rgb(59, 130, 246) Browser
+        participant S as Sapwood
+    end
+    box rgb(239, 68, 68) Hardware
+        participant D as ESP32
+    end
 
     U->>S: Select .bin firmware file
     S->>S: Compute SHA-256 in browser
