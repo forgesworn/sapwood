@@ -339,19 +339,24 @@
               >
                 {slot.auto_approve ? 'AUTO' : 'MANUAL'}
               </button>
-              {#if slot.current_pubkey && slotUriForClient(slot.current_pubkey)}
-                <button class="btn-uri" onclick={() => {
-                  if (uriForPubkey === slot.current_pubkey) { uriForPubkey = null; uriValue = '' }
-                  else { uriForPubkey = slot.current_pubkey!; uriValue = slotUriForClient(slot.current_pubkey!)!; uriCopied = false }
-                }}>
-                  {uriForPubkey === slot.current_pubkey ? 'Hide URI' : 'URI'}
-                </button>
-              {/if}
+              <button class="btn-uri" onclick={async () => {
+                if (uriForPubkey === (slot.current_pubkey ?? String(slot.slot_index))) {
+                  uriForPubkey = null; uriValue = ''
+                } else {
+                  uriForPubkey = slot.current_pubkey ?? String(slot.slot_index)
+                  uriCopied = false
+                  try {
+                    uriValue = await httpTransport.getSlotUri(device.selectedSlot, slot.slot_index)
+                  } catch { uriValue = ''; device.error = 'Failed to fetch URI' }
+                }
+              }}>
+                {uriForPubkey === (slot.current_pubkey ?? String(slot.slot_index)) ? 'Hide URI' : 'URI'}
+              </button>
               <button class="btn-text btn-danger" onclick={() => handleRevoke(slot)}>Revoke</button>
             </div>
           </div>
 
-          {#if uriForPubkey === slot.current_pubkey && uriValue}
+          {#if uriForPubkey === (slot.current_pubkey ?? String(slot.slot_index)) && uriValue}
             <div class="uri-box" style="margin-top: 0.75rem;">
               <code class="uri-code">{uriValue}</code>
               <button
@@ -375,7 +380,7 @@
     </section>
   {/if}
 
-  <!-- Advanced: raw bunker URI (collapsed by default) -->
+  <!-- Advanced: raw bunker URI (Pi multi-instance mode only, hidden in heartwoodd mode) -->
   {#if device.mode === 'http' && device.connected && selectedBunkerUri}
     <section class="advanced">
       <button class="advanced-toggle" onclick={() => showAdvancedUri = !showAdvancedUri}>
