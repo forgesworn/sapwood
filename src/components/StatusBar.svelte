@@ -6,7 +6,7 @@
   <div class="status-bar">
     <span class="stat">{device.masters.length} master{device.masters.length !== 1 ? 's' : ''}</span>
     <span class="dot"></span>
-    <span class="stat">{device.clients.length} client{device.clients.length !== 1 ? 's' : ''}</span>
+    <span class="stat">{device.slots.length} client{device.slots.length !== 1 ? 's' : ''}</span>
     {#if device.mode === 'http' && device.bridgeInfo}
       <span class="dot"></span>
       <span class="stat">{device.bridgeInfo.mode}</span>

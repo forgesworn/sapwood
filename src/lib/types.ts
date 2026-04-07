@@ -32,4 +32,8 @@ export interface MasterInfo {
   label: string
   mode: number
   npub: string
+  /** Bunker URI for this identity (Pi multi-instance mode). */
+  bunkerUri?: string
+  /** Heartwood instance name (Pi mode, e.g. 'personal', 'forgesworn'). */
+  instanceName?: string
 }

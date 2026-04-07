@@ -10,12 +10,20 @@ import type { ConnectSlot, MasterInfo } from './types.js'
 
 export type TransportMode = 'none' | 'serial' | 'http'
 
+export interface PendingClient {
+  pubkey: string
+  firstSeen: string
+  lastSeen: string
+  attempts: number
+}
+
 export const device = $state({
   connected: false,
   mode: 'none' as TransportMode,
   portInfo: '',
   masters: [] as MasterInfo[],
   slots: [] as ConnectSlot[],
+  pendingClients: [] as PendingClient[],
   selectedSlot: 0,
   logs: [] as string[],
   error: null as string | null,
@@ -74,11 +82,15 @@ httpTransport.on((event: HttpEvent) => {
         device.portInfo = ''
         device.masters = []
         device.slots = []
+        device.pendingClients = []
         device.bridgeInfo = null
       }
       break
     case 'frame':
       handleFrame(event.frame)
+      break
+    case 'pending-clients':
+      device.pendingClients = event.clients
       break
     case 'log':
       addLog(event.line)
