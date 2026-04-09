@@ -116,10 +116,10 @@ describe('provision frame', () => {
     const frame = buildProvisionFrame(secret, 'primary', 'tree-mnemonic')
     const parsed = parseFrame(frame)
     expect(parsed.type).toBe(FrameType.PROVISION)
-    // Extended: [mode=1][label_len=15][label...15 bytes][secret...32 bytes]
+    // Extended: [mode=1][label_len=7][label...7 bytes][secret...32 bytes]
     expect(parsed.payload[0]).toBe(1) // tree-mnemonic
-    expect(parsed.payload[1]).toBe(15) // label length
-    expect(parsed.payload.length).toBe(2 + 15 + 32)
+    expect(parsed.payload[1]).toBe(7) // label length
+    expect(parsed.payload.length).toBe(2 + 7 + 32)
   })
 
   it('builds bunker mode frame', () => {

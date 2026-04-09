@@ -106,4 +106,4 @@ WiFi is never enabled on the ESP32 -- TCP/IP stack is too large an attack surfac
 
 ## Grant status
 
-Foundation work -- Manages existing shipped functionality. Safe to build regardless of grant status.
+Foundation work. Manages existing shipped functionality.
