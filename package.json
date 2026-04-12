@@ -30,7 +30,7 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@testing-library/svelte": "^5.0.0",
     "@tsconfig/svelte": "^5.0.0",
-    "jsdom": "^26.0.0",
+    "jsdom": "^29.0.2",
     "svelte": "^5.55.3",
     "svelte-check": "^4.0.0",
     "typescript": "^5.7.0",
