@@ -35,7 +35,7 @@
     "svelte-check": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^8.0.8",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.4"
   },
   "dependencies": {
     "@noble/curves": "^2.2.0",
