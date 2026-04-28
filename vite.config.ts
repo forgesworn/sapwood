@@ -10,4 +10,11 @@ export default defineConfig({
     target: 'es2022',
     outDir: 'dist',
   },
+  server: {
+    hmr: {
+      host: 'localhost',
+      port: 5173,
+      protocol: 'ws',
+    },
+  },
 })

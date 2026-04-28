@@ -109,20 +109,24 @@ export class HttpTransport {
         const res = await fetch(`${this.baseUrl}/api/bridge/info`, {
           headers: { ...this.authHeaders() },
         })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        probeOk = true
-        // Detect Pi multi-instance mode: heartwood-device returns a flat
-        // status object (no 'masters' array). ESP32 bridge returns { masters }.
-        try {
-          const probe = await res.clone().json()
-          if (!probe.masters) {
-            this.piMode = true
-            this.heartwooddMode = false
-          } else {
-            this.piMode = false
-            this.heartwooddMode = false
-          }
-        } catch { /* non-fatal */ }
+        // 404 is OK (fresh Heartwood in setup mode). Anything else is a real error.
+        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+
+        if (res.ok) {
+          probeOk = true
+          // Detect Pi multi-instance mode: heartwood-device returns a flat
+          // status object (no 'masters' array). ESP32 bridge returns { masters }.
+          try {
+            const probe = await res.clone().json()
+            if (!probe.masters) {
+              this.piMode = true
+              this.heartwooddMode = false
+            } else {
+              this.piMode = false
+              this.heartwooddMode = false
+            }
+          } catch { /* non-fatal */ }
+        }
       }
 
       this._connected = true
@@ -197,6 +201,7 @@ export class HttpTransport {
         // heartwoodd: /api/status returns { masters: [...], daemon: {...} }
         const res = await this.fetch('/api/status')
         if (res.status === 423) return
+        if (!res.ok) return
         const data = await res.json()
         const payload = new TextEncoder().encode(JSON.stringify(data.masters))
         this.emit({

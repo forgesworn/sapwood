@@ -29,46 +29,90 @@ function jsonResponse(data: unknown, status = 200): Response {
 
 describe('HttpTransport', () => {
   describe('connect', () => {
-    it('connects successfully and saves address', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ mode: 'device-decrypts' }))
+    it('connects via heartwoodd /api/info and saves address', async () => {
+      // Heartwoodd path: /api/info returns 200 → bridge probe is skipped.
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main', mode: 'device-decrypts' }))
 
       const transport = new HttpTransport()
       await transport.connect('192.168.1.50:3100')
 
       expect(transport.connected).toBe(true)
-      expect(mockFetch).toHaveBeenCalledWith('http://192.168.1.50:3100/api/bridge/info')
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://192.168.1.50:3100/api/info',
+        expect.objectContaining({ headers: expect.any(Object) }),
+      )
       expect(localStorage.getItem('sapwood-bridge-address')).toBe('192.168.1.50:3100')
     })
 
+    it('falls back to /api/bridge/info when heartwoodd absent', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response('not found', { status: 404 })) // /api/info
+        .mockResolvedValueOnce(jsonResponse({ masters: [] }))              // /api/bridge/info
+
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      expect(transport.connected).toBe(true)
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        'http://pi:3100/api/bridge/info',
+        expect.objectContaining({ headers: expect.any(Object) }),
+      )
+    })
+
     it('normalises address without protocol', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({}))
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
 
       const transport = new HttpTransport()
       await transport.connect('10.0.0.5:3100')
 
-      expect(mockFetch).toHaveBeenCalledWith('http://10.0.0.5:3100/api/bridge/info')
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://10.0.0.5:3100/api/info',
+        expect.objectContaining({ headers: expect.any(Object) }),
+      )
     })
 
     it('preserves https if provided', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({}))
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
 
       const transport = new HttpTransport()
       await transport.connect('https://mypi.local:3100')
 
-      expect(mockFetch).toHaveBeenCalledWith('https://mypi.local:3100/api/bridge/info')
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://mypi.local:3100/api/info',
+        expect.objectContaining({ headers: expect.any(Object) }),
+      )
     })
 
     it('strips trailing slash', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({}))
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
 
       const transport = new HttpTransport()
       await transport.connect('http://pi:3100/')
 
-      expect(mockFetch).toHaveBeenCalledWith('http://pi:3100/api/bridge/info')
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://pi:3100/api/info',
+        expect.objectContaining({ headers: expect.any(Object) }),
+      )
+    })
+
+    it('connects in setup mode when both probes return 404', async () => {
+      // Fresh Heartwood: no info yet, but the user must be able to provision.
+      mockFetch
+        .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+        .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+
+      const transport = new HttpTransport()
+      await transport.connect('fresh.local:3100')
+
+      expect(transport.connected).toBe(true)
     })
 
     it('fails on network error', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'))
+      // Both probes hit a network error → connect rejects.
+      mockFetch
+        .mockRejectedValueOnce(new Error('Failed to fetch'))
+        .mockRejectedValueOnce(new Error('Failed to fetch'))
 
       const transport = new HttpTransport()
       const events: string[] = []
@@ -79,8 +123,11 @@ describe('HttpTransport', () => {
       expect(events).toContain('error')
     })
 
-    it('fails on non-200 response', async () => {
-      mockFetch.mockResolvedValueOnce(new Response('not found', { status: 404 }))
+    it('fails on non-404 bridge error', async () => {
+      // /api/info absent (404), /api/bridge/info returns 500 → connect rejects.
+      mockFetch
+        .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+        .mockResolvedValueOnce(new Response('server error', { status: 500 }))
 
       const transport = new HttpTransport()
       await expect(transport.connect('pi:3100')).rejects.toThrow()

@@ -5,9 +5,9 @@
   let httpAddress = $state(HttpTransport.savedAddress() ?? '')
   let connecting = $state(false)
 
-  // If Sapwood is loaded from the bridge itself (e.g. http://mypi.local:3100/),
-  // auto-connect to the same origin. When loaded from GitHub Pages the probe 404s
-  // and we fall through to the manual USB / bridge-address picker.
+  // If Sapwood is loaded from the bridge itself (e.g. http://bitcoin5.local:3100/),
+  // auto-connect to the same origin. When loaded from GitHub Pages or localhost dev,
+  // the probe 404s and we fall through to the manual USB / bridge-address picker.
   $effect(() => {
     if (device.connected || connecting) return
     const origin = window.location.origin
@@ -15,9 +15,12 @@
     void (async () => {
       try {
         // Try heartwoodd (/api/info) first, then ESP32 bridge (/api/bridge/info).
+        // Skip auto-connect on localhost dev servers.
+        if (origin.includes('localhost')) return
+
         let res = await fetch(`${origin}/api/info`, { cache: 'no-store' }).catch(() => null)
-        if (!res?.ok) res = await fetch(`${origin}/api/bridge/info`, { cache: 'no-store' })
-        if (!res.ok) return
+        if (!res?.ok) res = await fetch(`${origin}/api/bridge/info`, { cache: 'no-store' }).catch(() => null)
+        if (!res?.ok) return
         connecting = true
         try { await connectHttp(origin) } catch { /* emitted via listener */ }
         finally { connecting = false }
