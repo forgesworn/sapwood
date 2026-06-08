@@ -3,7 +3,7 @@
 
 import { transport as serialTransport, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
-import { FrameType, buildProvisionList, buildPolicyListRequest } from './frame.js'
+import { buildSetNetConfig, FrameType, buildProvisionList, buildPolicyListRequest, type NetConfig } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
 
 // --- Reactive state ---
@@ -196,6 +196,12 @@ export async function refreshSlots(slot?: number) {
 export async function bridgeRestart() {
   if (device.mode !== 'http') return
   await httpTransport.bridgeRestart()
+}
+
+export async function configureNetwork(cfg: NetConfig): Promise<boolean> {
+  const frame = buildSetNetConfig(cfg)
+  const resp = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 30_000)
+  return resp.type === FrameType.ACK
 }
 
 export { serialTransport, httpTransport, HttpTransport }

@@ -8,8 +8,9 @@
   import OtaUpdate from './components/OtaUpdate.svelte'
   import LogMonitor from './components/LogMonitor.svelte'
   import Settings from './components/Settings.svelte'
+  import Connectivity from './components/Connectivity.svelte'
 
-  let currentTab = $state<'masters' | 'clients' | 'provision' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
+  let currentTab = $state<'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
 
 <svelte:head>
@@ -40,6 +41,9 @@
     <button class:active={currentTab === 'provision'} onclick={() => currentTab = 'provision'}>
       Provision
     </button>
+    <button class:active={currentTab === 'connectivity'} onclick={() => currentTab = 'connectivity'}>
+      Connectivity
+    </button>
     <button class:active={currentTab === 'firmware'} onclick={() => currentTab = 'firmware'}>
       Firmware
     </button>
@@ -61,6 +65,8 @@
       <ClientList />
     {:else if currentTab === 'provision'}
       <Provision />
+    {:else if currentTab === 'connectivity'}
+      <Connectivity />
     {:else if currentTab === 'firmware'}
       <OtaUpdate />
     {:else if currentTab === 'logs'}
