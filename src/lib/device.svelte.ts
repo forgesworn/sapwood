@@ -199,8 +199,10 @@ export async function bridgeRestart() {
 }
 
 export async function configureNetwork(cfg: NetConfig): Promise<boolean> {
+  if (!device.connected) return false
   const frame = buildSetNetConfig(cfg)
-  const resp = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 30_000)
+  // 60s: must exceed the device's 30s button-approval window so a late confirm isn't lost.
+  const resp = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 60_000)
   return resp.type === FrameType.ACK
 }
 
