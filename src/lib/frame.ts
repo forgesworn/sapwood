@@ -40,6 +40,7 @@ export const FrameType = {
   OTA_CHUNK:             0x31,
   OTA_FINISH:            0x32,
   OTA_STATUS:            0x33,
+  SET_NET_CONFIG:        0x54,
 } as const
 
 export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType]
@@ -163,6 +164,19 @@ export function buildFactoryReset(): Uint8Array {
 export function buildSetPin(pin: string): Uint8Array {
   const encoder = new TextEncoder()
   return buildFrame(FrameType.SET_PIN, encoder.encode(pin))
+}
+
+export interface NetConfig {
+  ssid: string
+  password: string
+  relays: string[]
+  mode: 'usb' | 'wifi'
+}
+
+/** Build a SET_NET_CONFIG frame. Payload: JSON-encoded NetConfig. */
+export function buildSetNetConfig(cfg: NetConfig): Uint8Array {
+  const payload = new TextEncoder().encode(JSON.stringify(cfg))
+  return buildFrame(FrameType.SET_NET_CONFIG, payload)
 }
 
 /**

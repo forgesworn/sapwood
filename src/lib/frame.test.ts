@@ -9,6 +9,7 @@ import {
   buildPolicyUpdate,
   buildProvisionList,
   buildFactoryReset,
+  buildSetNetConfig,
 } from './frame.js'
 
 describe('crc32', () => {
@@ -174,5 +175,19 @@ describe('cross-crate compatibility', () => {
     expect(bytes[2]).toBe(0x01) // FRAME_TYPE_PROVISION
     expect(bytes[3]).toBe(0x00) // length high byte
     expect(bytes[4]).toBe(0x20) // length low byte (32)
+  })
+})
+
+describe('network config frame', () => {
+  it('SET_NET_CONFIG value matches Rust 0x54', () => {
+    expect(FrameType.SET_NET_CONFIG).toBe(0x54)
+  })
+
+  it('buildSetNetConfig roundtrips', () => {
+    const cfg = { ssid: 'h', password: 'p', relays: ['wss://r'], mode: 'wifi' as const }
+    const bytes = buildSetNetConfig(cfg)
+    const frame = parseFrame(bytes)
+    expect(frame.type).toBe(FrameType.SET_NET_CONFIG)
+    expect(JSON.parse(new TextDecoder().decode(frame.payload))).toEqual(cfg)
   })
 })
