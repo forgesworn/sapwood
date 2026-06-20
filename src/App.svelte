@@ -70,7 +70,7 @@
     {:else if currentTab === 'masters'}
       <MasterList />
     {:else if currentTab === 'clients'}
-      {#if device.mode === 'relay'}
+      {#if device.mode === 'relay' || device.mode === 'serial'}
         <RelayClients />
       {:else}
         <ClientList />

@@ -3,7 +3,11 @@
 
 import { transport as serialTransport, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
-import { buildSetNetConfig, FrameType, buildProvisionList, buildPolicyListRequest, type NetConfig } from './frame.js'
+import {
+  buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
+  buildSessionAuth, buildSetBridgeSecret,
+  buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
+} from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
 import { RelayTransport } from './relay-transport.js'
 import { getOrCreateOperator } from './op-mgmt.js'
@@ -42,6 +46,8 @@ export const device = $state({
   error: null as string | null,
   bridgeInfo: null as Record<string, unknown> | null,
   relayStatus: null as RelayStatus | null,
+  /** USB-direct: true once the bridge session is authenticated (client mgmt allowed). */
+  bridgeAuthed: false,
 })
 
 const MAX_LOG_LINES = 500
@@ -64,6 +70,7 @@ serialTransport.on((event: SerialEvent) => {
         device.portInfo = ''
         device.masters = []
         device.slots = []
+        device.bridgeAuthed = false
       }
       break
     case 'frame':
@@ -240,8 +247,8 @@ async function relayRefresh() {
       label: String(c.label ?? ''),
       secret: '',
       current_pubkey: (c.current_pubkey as string | null) ?? null,
-      allowed_methods: [],
-      allowed_kinds: [],
+      allowed_methods: (c.allowed_methods as string[]) ?? [],
+      allowed_kinds: (c.allowed_kinds as number[]) ?? [],
       auto_approve: Boolean(c.auto_approve),
       signing_approved: Boolean(c.signing_approved),
     }))
@@ -276,6 +283,23 @@ export async function relayCreateClient(
 export async function relayApproveSigning(slotIndex: number): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
   await relayTransport.request('approve_signing', { slot_index: slotIndex })
+  await relayRefresh()
+}
+
+/** Revoke a client slot over the relay (operator-authorised). */
+export async function relayRevokeClient(slotIndex: number): Promise<void> {
+  if (!relayTransport) throw new Error('not connected over relay')
+  await relayTransport.request('revoke_client', { slot_index: slotIndex })
+  await relayRefresh()
+}
+
+/** Update a client slot (label / kind perms / auto-approve) over the relay. */
+export async function relayUpdateClient(
+  slotIndex: number,
+  changes: { label?: string; allowed_kinds?: number[]; auto_approve?: boolean },
+): Promise<void> {
+  if (!relayTransport) throw new Error('not connected over relay')
+  await relayTransport.request('update_client', { slot_index: slotIndex, ...changes })
   await relayRefresh()
 }
 
@@ -318,13 +342,135 @@ export async function refreshSlots(slot?: number) {
   }
   const s = slot ?? device.selectedSlot
   if (device.mode === 'serial') {
-    // Serial mode: TODO when serial CONNSLOT frames are implemented.
-    try { await serialTransport.write(buildPolicyListRequest(s)) } catch (e) {
+    // CONNSLOT_LIST needs no bridge auth (secrets redacted). The 0x43 response
+    // is parsed into device.slots by handleFrame.
+    try { await serialTransport.write(buildConnSlotList(s)) } catch (e) {
       device.error = e instanceof Error ? e.message : 'Failed to fetch slots'
     }
   } else if (device.mode === 'http') {
     await httpTransport.fetchSlots(s)
   }
+}
+
+// --- USB-direct client management (CONNSLOT_* frames, behind bridge auth) ---
+
+const BRIDGE_SECRET_KEY = 'heartwood.bridgeSecret'
+
+function bridgeSecret(): string {
+  let s = localStorage.getItem(BRIDGE_SECRET_KEY) ?? ''
+  if (!/^[0-9a-f]{64}$/.test(s)) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32))
+    s = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    localStorage.setItem(BRIDGE_SECRET_KEY, s)
+  }
+  return s
+}
+
+/**
+ * Authenticate the bridge session so CONNSLOT create/update/revoke/uri are
+ * accepted. SESSION_ACK payload: 0x00 ok, 0x01 wrong secret, 0x02 no secret set.
+ * On 0x02 we set our secret (button-confirmed) then re-auth — so a fresh device
+ * pairs to this browser on first management action.
+ */
+export async function ensureBridgeAuth(): Promise<void> {
+  if (device.mode !== 'serial') return
+  if (device.bridgeAuthed) return
+  const secret = bridgeSecret()
+  const ack = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], 6_000)
+  const code = ack.payload[0]
+  if (code === 0x00) { device.bridgeAuthed = true; return }
+  if (code === 0x02) {
+    // No secret on device — set ours (requires a PRG press) then retry.
+    const resp = await serialTransport.sendAndReceive(buildSetBridgeSecret(secret), [FrameType.ACK, FrameType.NACK], 35_000)
+    if (resp.type !== FrameType.ACK) throw new Error('Pairing rejected on the device')
+    const ack2 = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], 6_000)
+    if (ack2.payload[0] !== 0x00) throw new Error('Bridge auth failed after pairing')
+    device.bridgeAuthed = true
+    return
+  }
+  throw new Error('Device is paired to a different bridge secret (factory-reset to re-pair).')
+}
+
+function lastRelays(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
+    if (Array.isArray(saved) && saved.length) return saved
+  } catch { /* default */ }
+  return []
+}
+
+/** Create a client slot over USB. Returns the bunker URI + secret (shown once). */
+export async function serialCreateClient(
+  label: string,
+): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }> {
+  await ensureBridgeAuth()
+  const ms = device.selectedSlot
+  const resp = await serialTransport.sendAndReceive(buildConnSlotCreate(ms, label), [FrameType.CONNSLOT_CREATE_RESP, FrameType.NACK], 15_000)
+  if (resp.type !== FrameType.CONNSLOT_CREATE_RESP) throw new Error('Create rejected (slots full?)')
+  const info = JSON.parse(new TextDecoder().decode(resp.payload)) as { slot_index: number; secret: string }
+  const bunker_uri = await serialGetUri(info.slot_index).catch(() => '')
+  await refreshSlots()
+  return { bunker_uri, secret: info.secret, signing_approved: false, slot_index: info.slot_index }
+}
+
+/** Revoke a client slot over USB. */
+export async function serialRevokeClient(slotIndex: number): Promise<void> {
+  await ensureBridgeAuth()
+  const resp = await serialTransport.sendAndReceive(buildConnSlotRevoke(device.selectedSlot, slotIndex), [FrameType.CONNSLOT_REVOKE_RESP, FrameType.NACK], 10_000)
+  if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) throw new Error('Revoke rejected')
+  await refreshSlots()
+}
+
+/** Update a client slot (label / kinds / auto-approve) over USB. Button-confirmed on device. */
+export async function serialUpdateClient(slotIndex: number, changes: { label?: string; allowed_kinds?: number[]; auto_approve?: boolean }): Promise<void> {
+  await ensureBridgeAuth()
+  const resp = await serialTransport.sendAndReceive(buildConnSlotUpdate(device.selectedSlot, { slot_index: slotIndex, ...changes }), [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK], 35_000)
+  if (resp.type !== FrameType.CONNSLOT_UPDATE_RESP) throw new Error('Update denied on the device')
+  await refreshSlots()
+}
+
+/** Fetch the bunker URI for a slot over USB (relays from the last wifi flash). */
+export async function serialGetUri(slotIndex: number): Promise<string> {
+  await ensureBridgeAuth()
+  const resp = await serialTransport.sendAndReceive(buildConnSlotUri(device.selectedSlot, slotIndex, lastRelays()), [FrameType.CONNSLOT_URI_RESP, FrameType.NACK], 10_000)
+  if (resp.type !== FrameType.CONNSLOT_URI_RESP) throw new Error('URI fetch failed')
+  return new TextDecoder().decode(resp.payload)
+}
+
+// --- Mode-dispatching client management (serial OR relay) ---
+// One Clients view drives both transports; the ESP32 supports the same set over
+// USB (CONNSLOT_*) and over relays (kind 24134). The one asymmetry: signing
+// approval is a software op over relays (operator authority) but a physical
+// button press over USB — so `mgmtCanApproveSigning` is relay-only.
+
+export function mgmtCanApproveSigning(): boolean {
+  return device.mode === 'relay'
+}
+
+export async function mgmtCreateClient(
+  label: string,
+  approveSigning: boolean,
+): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }> {
+  if (device.mode === 'relay') return relayCreateClient(label, approveSigning)
+  if (device.mode === 'serial') return serialCreateClient(label)
+  throw new Error('not connected')
+}
+
+export async function mgmtRevokeClient(slotIndex: number): Promise<void> {
+  if (device.mode === 'relay') return relayRevokeClient(slotIndex)
+  if (device.mode === 'serial') return serialRevokeClient(slotIndex)
+  throw new Error('not connected')
+}
+
+export async function mgmtUpdateClient(slotIndex: number, changes: { label?: string; allowed_kinds?: number[]; auto_approve?: boolean }): Promise<void> {
+  if (device.mode === 'relay') return relayUpdateClient(slotIndex, changes)
+  if (device.mode === 'serial') return serialUpdateClient(slotIndex, changes)
+  throw new Error('not connected')
+}
+
+export async function mgmtApproveSigning(slotIndex: number): Promise<void> {
+  if (device.mode === 'relay') return relayApproveSigning(slotIndex)
+  throw new Error('Over USB, approve signing with a physical PRG press on the next sign.')
 }
 
 export async function bridgeRestart() {

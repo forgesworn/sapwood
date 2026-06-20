@@ -1,15 +1,28 @@
 <script lang="ts">
-  import { device, refreshSlots, relayCreateClient, relayApproveSigning } from '../lib/device.svelte.js'
+  import {
+    device, refreshSlots, mgmtCreateClient, mgmtApproveSigning,
+    mgmtRevokeClient, mgmtUpdateClient, mgmtCanApproveSigning,
+  } from '../lib/device.svelte.js'
+  import KindPermissions from './KindPermissions.svelte'
 
   let creating = $state(false)
   let newLabel = $state('')
   let preApprove = $state(true)
   let createError = $state<string | null>(null)
+  let updatingSlot = $state<number | null>(null)
 
   // The created connection — the ONE time the secret/URI is shown.
   let created = $state<{ bunker_uri: string; secret: string; signing_approved: boolean } | null>(null)
   let copied = $state<'uri' | 'secret' | null>(null)
   let approvingSlot = $state<number | null>(null)
+
+  const canApprove = $derived(mgmtCanApproveSigning())
+  const overUsb = $derived(device.mode === 'serial')
+  const transportLabel = $derived(overUsb ? 'over USB' : 'over relay')
+
+  // Load the slot list on connect. Relay mode also polls every 4s; serial relies
+  // on this (CONNSLOT_LIST → device.slots via handleFrame).
+  $effect(() => { if (device.connected) refreshSlots() })
 
   async function handleCreate() {
     const label = newLabel.trim()
@@ -18,7 +31,7 @@
     createError = null
     created = null
     try {
-      const res = await relayCreateClient(label, preApprove)
+      const res = await mgmtCreateClient(label, canApprove && preApprove)
       created = { bunker_uri: res.bunker_uri, secret: res.secret, signing_approved: res.signing_approved }
       newLabel = ''
     } catch (e) {
@@ -31,11 +44,34 @@
   async function handleApprove(slotIndex: number) {
     approvingSlot = slotIndex
     try {
-      await relayApproveSigning(slotIndex)
+      await mgmtApproveSigning(slotIndex)
     } catch (e) {
       device.error = e instanceof Error ? e.message : 'Approve failed'
     } finally {
       approvingSlot = null
+    }
+  }
+
+  async function handleRevoke(slotIndex: number, label: string) {
+    if (!confirm(`Revoke "${label || `slot ${slotIndex}`}"? The client will lose access.`)) return
+    updatingSlot = slotIndex
+    try {
+      await mgmtRevokeClient(slotIndex)
+    } catch (e) {
+      device.error = e instanceof Error ? e.message : 'Revoke failed'
+    } finally {
+      updatingSlot = null
+    }
+  }
+
+  async function handleUpdate(slotIndex: number, changes: { label?: string; allowed_kinds?: number[]; auto_approve?: boolean }) {
+    updatingSlot = slotIndex
+    try {
+      await mgmtUpdateClient(slotIndex, changes)
+    } catch (e) {
+      device.error = e instanceof Error ? e.message : 'Update failed'
+    } finally {
+      updatingSlot = null
     }
   }
 
@@ -56,9 +92,7 @@
   <div class="head">
     <h2>Clients</h2>
     <div class="head-controls">
-      {#if device.relayStatus}
-        <span class="status">{device.relayStatus.slots} slot{device.relayStatus.slots === 1 ? '' : 's'} · over relay</span>
-      {/if}
+      <span class="status">{device.slots.length} slot{device.slots.length === 1 ? '' : 's'} · {transportLabel}</span>
       <button class="btn-refresh" onclick={() => refreshSlots()}>Refresh</button>
     </div>
   </div>
@@ -73,15 +107,21 @@
           <button class="btn-text btn-muted" onclick={() => (created = null)}>Dismiss</button>
         </div>
         <p class="hint">Paste this bunker URI into the client. It carries the slot secret — shown once.</p>
-        <div class="uri-box">
-          <code>{created.bunker_uri}</code>
-          <button class="btn-copy" class:copied={copied === 'uri'} onclick={() => copy(created!.bunker_uri, 'uri')}>
-            {copied === 'uri' ? 'Copied' : 'Copy'}
-          </button>
-        </div>
+        {#if created.bunker_uri}
+          <div class="uri-box">
+            <code>{created.bunker_uri}</code>
+            <button class="btn-copy" class:copied={copied === 'uri'} onclick={() => copy(created!.bunker_uri, 'uri')}>
+              {copied === 'uri' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        {:else}
+          <p class="warn">Created, but no bunker URI yet — this device has no relay configured.
+            Flash it in wifi mode (or set a relay) so clients can reach it; the secret is
+            <code class="inline-secret">{created.secret}</code>.</p>
+        {/if}
         {#if !created.signing_approved}
           <p class="warn">Signing not yet approved — this client can connect but its first sign needs
-            approval (tick “Pre-approve signing”, use <em>Approve signing</em> below, or one physical PRG press).</p>
+            {overUsb ? 'one physical PRG press on the device' : 'approval (tick “Pre-approve signing”, use Approve signing below, or one PRG press)'}.</p>
         {/if}
       </div>
     {:else}
@@ -96,10 +136,15 @@
           {creating ? 'Creating…' : 'New connection'}
         </button>
       </form>
-      <label class="approve-toggle">
-        <input type="checkbox" bind:checked={preApprove} disabled={creating} />
-        <span>Pre-approve signing — client auto-signs once it connects (operator authority, no button)</span>
-      </label>
+      {#if canApprove}
+        <label class="approve-toggle">
+          <input type="checkbox" bind:checked={preApprove} disabled={creating} />
+          <span>Pre-approve signing — client auto-signs once it connects (operator authority, no button)</span>
+        </label>
+      {:else}
+        <p class="usb-note">USB-direct: the first management action prompts a PRG press to pair this browser,
+          and the client's first sign is approved by a physical press.</p>
+      {/if}
       {#if createError}<p class="form-error">{createError}</p>{/if}
     {/if}
   </section>
@@ -112,24 +157,45 @@
       <h3 class="section-label">Connected slots</h3>
       {#each device.slots as slot (slot.slot_index)}
         <div class="client-card">
-          <div class="client-identity">
-            <span class="client-name">{slot.label || `slot ${slot.slot_index}`}</span>
-            {#if slot.current_pubkey}
-              <span class="client-pk">{shortPubkey(slot.current_pubkey)}</span>
-            {:else}
-              <span class="client-pk dim">unbound — waiting for client to connect</span>
-            {/if}
-          </div>
-          <div class="client-actions">
-            {#if slot.signing_approved}
-              <span class="tag tag--blue">SIGNED</span>
-            {:else}
-              <button class="btn-approve" disabled={approvingSlot === slot.slot_index} onclick={() => handleApprove(slot.slot_index)}>
-                {approvingSlot === slot.slot_index ? 'Approving…' : 'Approve signing'}
+          <div class="client-row">
+            <div class="client-identity">
+              <span class="client-name">{slot.label || `slot ${slot.slot_index}`}</span>
+              {#if slot.current_pubkey}
+                <span class="client-pk">{shortPubkey(slot.current_pubkey)}</span>
+              {:else}
+                <span class="client-pk dim">unbound — waiting for client to connect</span>
+              {/if}
+            </div>
+            <div class="client-actions">
+              {#if slot.signing_approved}
+                <span class="tag tag--blue">SIGNED</span>
+              {:else if canApprove}
+                <button class="btn-approve" disabled={approvingSlot === slot.slot_index} onclick={() => handleApprove(slot.slot_index)}>
+                  {approvingSlot === slot.slot_index ? 'Approving…' : 'Approve signing'}
+                </button>
+              {:else}
+                <span class="tag" title="First sign approved by a physical PRG press">BUTTON</span>
+              {/if}
+              <button
+                class="tag tag--toggle"
+                class:on={slot.auto_approve}
+                disabled={updatingSlot === slot.slot_index}
+                onclick={() => handleUpdate(slot.slot_index, { auto_approve: !slot.auto_approve })}
+              >
+                {slot.auto_approve ? 'AUTO' : 'MANUAL'}
               </button>
-            {/if}
-            <span class="tag" class:on={slot.auto_approve}>{slot.auto_approve ? 'AUTO' : 'MANUAL'}</span>
+              <button class="btn-revoke" disabled={updatingSlot === slot.slot_index} onclick={() => handleRevoke(slot.slot_index, slot.label)}>
+                Revoke
+              </button>
+            </div>
           </div>
+          <KindPermissions
+            allowedKinds={slot.allowed_kinds}
+            unrestricted={slot.allowed_kinds.length === 0}
+            signingApproved={slot.signing_approved}
+            updating={updatingSlot === slot.slot_index}
+            onchange={(kinds) => handleUpdate(slot.slot_index, { allowed_kinds: kinds ?? [] })}
+          />
         </div>
       {/each}
     </section>
@@ -166,6 +232,8 @@
     font-size: 0.78rem; color: var(--text-dim); line-height: 1.4;
   }
   .approve-toggle input { margin-top: 0.15rem; accent-color: var(--green); }
+  .usb-note { font-size: 0.75rem; color: var(--text-dim); margin: 0.6rem 0 0; line-height: 1.4; }
+  .inline-secret { color: var(--green); word-break: break-all; user-select: all; }
 
   .btn-primary {
     background: var(--green); color: #050505; border: none; padding: 0.5rem 1.25rem;
@@ -203,10 +271,10 @@
   }
 
   .client-card {
-    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
     background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
     padding: 1rem 1.25rem; margin-bottom: 0.5rem;
   }
+  .client-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
   .client-identity { min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
   .client-name { color: #fff; font-size: 1rem; font-weight: 600; }
   .client-pk { font-size: 0.8rem; color: var(--text-muted); letter-spacing: 0.02em; }
@@ -220,6 +288,15 @@
   }
   .tag.on { background: #001a0a; border-color: #003a1a; color: var(--green); }
   .tag--blue { background: #001520; border-color: #003a5c; color: #44aaee; }
+  .tag--toggle { cursor: pointer; transition: all 0.12s; }
+  .tag--toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-revoke {
+    background: none; border: none; color: var(--red); font-family: inherit;
+    font-size: 0.8rem; cursor: pointer; padding: 0.3rem 0.5rem; border-radius: 3px;
+  }
+  .btn-revoke:hover:not(:disabled) { background: #1a0808; }
+  .btn-revoke:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-approve {
     background: #001a0a; border: 1px solid var(--green-dim); color: var(--green);

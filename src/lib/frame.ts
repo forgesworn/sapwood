@@ -40,6 +40,16 @@ export const FrameType = {
   OTA_CHUNK:             0x31,
   OTA_FINISH:            0x32,
   OTA_STATUS:            0x33,
+  CONNSLOT_CREATE:       0x40,
+  CONNSLOT_CREATE_RESP:  0x41,
+  CONNSLOT_LIST:         0x42,
+  CONNSLOT_LIST_RESP:    0x43,
+  CONNSLOT_UPDATE:       0x44,
+  CONNSLOT_UPDATE_RESP:  0x45,
+  CONNSLOT_REVOKE:       0x46,
+  CONNSLOT_REVOKE_RESP:  0x47,
+  CONNSLOT_URI:          0x48,
+  CONNSLOT_URI_RESP:     0x49,
   SET_NET_CONFIG:        0x54,
 } as const
 
@@ -187,9 +197,58 @@ export function buildSetNetConfig(cfg: NetConfig): Uint8Array {
  * Requires button confirmation. Rejected if bridge is currently authenticated.
  */
 export function buildSetBridgeSecret(hexSecret: string): Uint8Array {
+  return buildFrame(FrameType.SET_BRIDGE_SECRET, hexToBytes32(hexSecret))
+}
+
+/** Build a SESSION_AUTH frame. Payload: the 32-byte bridge secret. */
+export function buildSessionAuth(hexSecret: string): Uint8Array {
+  return buildFrame(FrameType.SESSION_AUTH, hexToBytes32(hexSecret))
+}
+
+function hexToBytes32(hexSecret: string): Uint8Array {
   const bytes = new Uint8Array(32)
   for (let i = 0; i < 32; i++) {
     bytes[i] = parseInt(hexSecret.slice(i * 2, i * 2 + 2), 16)
   }
-  return buildFrame(FrameType.SET_BRIDGE_SECRET, bytes)
+  return bytes
+}
+
+// --- Connection-slot (client) management over serial (mirrors CONNSLOT_* frames) ---
+
+/** CONNSLOT_CREATE: payload [master_slot][label utf8]. Requires bridge auth. */
+export function buildConnSlotCreate(masterSlot: number, label: string): Uint8Array {
+  const labelBytes = new TextEncoder().encode(label)
+  const payload = new Uint8Array(1 + labelBytes.length)
+  payload[0] = masterSlot
+  payload.set(labelBytes, 1)
+  return buildFrame(FrameType.CONNSLOT_CREATE, payload)
+}
+
+/** CONNSLOT_LIST: payload [master_slot]. No auth required (secrets redacted). */
+export function buildConnSlotList(masterSlot: number): Uint8Array {
+  return buildFrame(FrameType.CONNSLOT_LIST, new Uint8Array([masterSlot]))
+}
+
+/** CONNSLOT_UPDATE: payload [master_slot][JSON {slot_index, label?, allowed_kinds?, auto_approve?}]. Button-confirmed. */
+export function buildConnSlotUpdate(masterSlot: number, changes: Record<string, unknown>): Uint8Array {
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(changes))
+  const payload = new Uint8Array(1 + jsonBytes.length)
+  payload[0] = masterSlot
+  payload.set(jsonBytes, 1)
+  return buildFrame(FrameType.CONNSLOT_UPDATE, payload)
+}
+
+/** CONNSLOT_REVOKE: payload [master_slot][slot_index]. Requires bridge auth. */
+export function buildConnSlotRevoke(masterSlot: number, slotIndex: number): Uint8Array {
+  return buildFrame(FrameType.CONNSLOT_REVOKE, new Uint8Array([masterSlot, slotIndex]))
+}
+
+/** CONNSLOT_URI: payload [master_slot][slot_index][relays JSON]. Returns the bunker URI. */
+export function buildConnSlotUri(masterSlot: number, slotIndex: number, relays: string[]): Uint8Array {
+  const relayBytes = new TextEncoder().encode(JSON.stringify(relays))
+  const payload = new Uint8Array(2 + relayBytes.length)
+  payload[0] = masterSlot
+  payload[1] = slotIndex
+  payload.set(relayBytes, 2)
+  return buildFrame(FrameType.CONNSLOT_URI, payload)
 }
