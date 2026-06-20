@@ -3,6 +3,8 @@
   import StatusBar from './components/StatusBar.svelte'
   import MasterList from './components/MasterList.svelte'
   import ClientList from './components/ClientList.svelte'
+  import RelayClients from './components/RelayClients.svelte'
+  import { device } from './lib/device.svelte.js'
   import Provision from './components/Provision.svelte'
   import DangerZone from './components/DangerZone.svelte'
   import OtaUpdate from './components/OtaUpdate.svelte'
@@ -68,7 +70,11 @@
     {:else if currentTab === 'masters'}
       <MasterList />
     {:else if currentTab === 'clients'}
-      <ClientList />
+      {#if device.mode === 'relay'}
+        <RelayClients />
+      {:else}
+        <ClientList />
+      {/if}
     {:else if currentTab === 'provision'}
       <Provision />
     {:else if currentTab === 'connectivity'}

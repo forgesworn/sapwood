@@ -25,7 +25,7 @@
       <div class="card">
         <div class="card-header">
           <span class="slot">SLOT {master.slot}</span>
-          <span class="mode">{MODE_LABELS[master.mode] ?? `MODE ${master.mode}`}</span>
+          <span class="mode">{master.modeLabel ?? MODE_LABELS[master.mode] ?? `MODE ${master.mode}`}</span>
         </div>
         {#if master.label}
           <div class="label">{master.label}</div>

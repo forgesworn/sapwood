@@ -32,6 +32,8 @@ export interface MasterInfo {
   label: string
   mode: number
   npub: string
+  /** Display override for the mode tag (e.g. 'WIFI-STANDALONE' over relay). */
+  modeLabel?: string
   /** Bunker URI for this identity (Pi multi-instance mode). */
   bunkerUri?: string
   /** Heartwood instance name (Pi mode, e.g. 'personal', 'forgesworn'). */

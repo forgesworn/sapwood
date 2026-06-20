@@ -5,10 +5,22 @@ import { transport as serialTransport, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import { buildSetNetConfig, FrameType, buildProvisionList, buildPolicyListRequest, type NetConfig } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
+import { RelayTransport } from './relay-transport.js'
+import { getOrCreateOperator } from './op-mgmt.js'
+import { rememberDevice, npubShort } from './known-devices.js'
+import { nip19 } from 'nostr-tools'
 
 // --- Reactive state ---
 
-export type TransportMode = 'none' | 'serial' | 'http'
+export type TransportMode = 'none' | 'serial' | 'http' | 'relay'
+
+/** Live device status reported by a wifi device over the relay (kind 24134). */
+export interface RelayStatus {
+  master_count: number
+  slots: number
+  mode: string
+  relay: string
+}
 
 export interface PendingClient {
   pubkey: string
@@ -29,6 +41,7 @@ export const device = $state({
   logs: [] as string[],
   error: null as string | null,
   bridgeInfo: null as Record<string, unknown> | null,
+  relayStatus: null as RelayStatus | null,
 })
 
 const MAX_LOG_LINES = 500
@@ -160,12 +173,127 @@ export async function connectHttp(address: string) {
   }, 3000)
 }
 
+// --- Relay transport (wifi-standalone devices, kind 24134) ---
+
+let relayTransport: RelayTransport | null = null
+
+/**
+ * Connect to a wifi-standalone device over its relay, as the operator.
+ * `devicePubHex` is the device MASTER pubkey (the kind-24134 mgmt address);
+ * `relays` is where it listens. Uses the persisted operator secret to sign.
+ */
+export async function connectRelay(devicePubHex: string, relays: string[], label?: string) {
+  const op = getOrCreateOperator()
+  const t = new RelayTransport(devicePubHex, relays, op.skHex)
+  await t.connect()
+  relayTransport = t
+  device.connected = true
+  device.mode = 'relay'
+  device.portInfo = `${npubShort(devicePubHex)} · ${relays[0] ?? ''}`
+  device.error = null
+  device.masters = []
+  device.slots = []
+  device.relayStatus = null
+  rememberDevice(devicePubHex, relays, label)
+
+  // First load, then poll for live status/clients every 4s while connected.
+  await relayRefresh()
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(() => {
+    if (!device.connected || device.mode !== 'relay') {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      return
+    }
+    void relayRefresh()
+  }, 4000)
+}
+
+/** Refresh masters (get_status) and clients (list_clients) over the relay. */
+async function relayRefresh() {
+  if (!relayTransport) return
+  try {
+    const raw = await relayTransport.request('get_status')
+    const status: RelayStatus = {
+      master_count: Number(raw.master_count ?? 0),
+      slots: Number(raw.slots ?? 0),
+      mode: String(raw.mode ?? 'wifi-standalone'),
+      relay: String(raw.relay ?? ''),
+    }
+    device.relayStatus = status
+    const masterHex = String(raw.master_npub_hex ?? '')
+    if (masterHex) {
+      let npub = masterHex
+      try { npub = nip19.npubEncode(masterHex) } catch { /* keep hex */ }
+      const known = device.masters[0]
+      device.masters = [{
+        slot: 0,
+        label: known?.label ?? 'master',
+        mode: -1,
+        modeLabel: status.mode.toUpperCase(),
+        npub,
+      }]
+    }
+    const res = await relayTransport.request('list_clients')
+    const clients = (res.clients as Array<Record<string, unknown>>) ?? []
+    device.slots = clients.map((c) => ({
+      slot_index: Number(c.slot_index),
+      label: String(c.label ?? ''),
+      secret: '',
+      current_pubkey: (c.current_pubkey as string | null) ?? null,
+      allowed_methods: [],
+      allowed_kinds: [],
+      auto_approve: Boolean(c.auto_approve),
+      signing_approved: Boolean(c.signing_approved),
+    }))
+    device.error = null
+  } catch (e) {
+    device.error = e instanceof Error ? e.message : 'Relay request failed'
+  }
+}
+
+/**
+ * Create a client over the relay. Returns the device's bunker URI + secret
+ * (the only time the secret is exposed). `approveSigning` pre-authorises
+ * sign_event so the client can auto-sign once it connects (operator authority
+ * substitutes for the physical button — see relay-mediated-management design).
+ */
+export async function relayCreateClient(
+  label: string,
+  approveSigning = false,
+): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }> {
+  if (!relayTransport) throw new Error('not connected over relay')
+  const res = await relayTransport.request('create_client', { label, approve_signing: approveSigning })
+  await relayRefresh()
+  return {
+    bunker_uri: String(res.bunker_uri ?? ''),
+    secret: String(res.secret ?? ''),
+    signing_approved: Boolean(res.signing_approved),
+    slot_index: Number(res.slot_index ?? -1),
+  }
+}
+
+/** Grant a slot signing authority over the relay (operator-authorised). */
+export async function relayApproveSigning(slotIndex: number): Promise<void> {
+  if (!relayTransport) throw new Error('not connected over relay')
+  await relayTransport.request('approve_signing', { slot_index: slotIndex })
+  await relayRefresh()
+}
+
 export async function disconnect() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   if (device.mode === 'serial') {
     await serialTransport.disconnect()
   } else if (device.mode === 'http') {
     await httpTransport.disconnect()
+  } else if (device.mode === 'relay') {
+    relayTransport?.close()
+    relayTransport = null
+    device.connected = false
+    device.mode = 'none'
+    device.portInfo = ''
+    device.masters = []
+    device.slots = []
+    device.relayStatus = null
   }
 }
 
@@ -177,11 +305,17 @@ export async function refreshMasters() {
     }
   } else if (device.mode === 'http') {
     await httpTransport.fetchStatus()
+  } else if (device.mode === 'relay') {
+    await relayRefresh()
   }
 }
 
 export async function refreshSlots(slot?: number) {
   if (!device.connected) return
+  if (device.mode === 'relay') {
+    await relayRefresh()
+    return
+  }
   const s = slot ?? device.selectedSlot
   if (device.mode === 'serial') {
     // Serial mode: TODO when serial CONNSLOT frames are implemented.

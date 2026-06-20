@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters, connectRelay } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
@@ -10,6 +10,45 @@
     zeroize,
     type ProvisionMode,
   } from '../lib/provision.js'
+  import { rememberDevice } from '../lib/known-devices.js'
+  import { nip19 } from 'nostr-tools'
+
+  // The just-provisioned wifi device, if any — drives the "Manage over WiFi"
+  // handoff. Only set when this device was flashed in wifi mode (lastRelays present).
+  let handoff = $state<{ hex: string; relays: string[] } | null>(null)
+  let handoffConnecting = $state(false)
+  let handoffError = $state('')
+
+  /** Remember a just-provisioned master so it's connectable over the relay later. */
+  function rememberProvisioned(npub: string, deviceLabel: string) {
+    try {
+      const decoded = nip19.decode(npub)
+      if (decoded.type !== 'npub') return
+      const hex = decoded.data as string
+      let relays: string[] | null = null
+      try {
+        const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
+        if (Array.isArray(saved) && saved.length) relays = saved
+      } catch { /* not a wifi flash */ }
+      rememberDevice(hex, relays ?? ['wss://relay.trotters.cc'], deviceLabel || undefined)
+      // Only offer the WiFi handoff for devices flashed in wifi mode.
+      handoff = relays ? { hex, relays } : null
+    } catch { /* non-fatal */ }
+  }
+
+  async function handleManageWifi() {
+    if (!handoff) return
+    handoffConnecting = true
+    handoffError = ''
+    try {
+      await connectRelay(handoff.hex, handoff.relays, label)
+      // device.mode is now 'relay'; the Masters/Clients tabs work over the relay.
+    } catch (e) {
+      handoffError = e instanceof Error ? e.message : 'Could not reach the device yet — give it ~10s to reboot and join wifi, then retry.'
+    } finally {
+      handoffConnecting = false
+    }
+  }
 
   let mode = $state<ProvisionMode>('tree-mnemonic')
   let label = $state('default')
@@ -68,6 +107,9 @@
       if (resp.type === FrameType.ACK) {
         status = 'done'
         message = `Master '${label}' provisioned.`
+        // Remember this device so it can be managed over the relay once it
+        // boots into wifi-standalone mode (Connect WiFi in the top bar).
+        rememberProvisioned(npubPreview, label)
         await refreshMasters()
       } else {
         status = 'error'
@@ -94,17 +136,43 @@
     npubPreview = ''
     secret = ''
     passphrase = ''
+    handoff = null
+    handoffError = ''
   }
 </script>
 
 <div class="provision">
   <h2>Provision Master</h2>
 
-  {#if device.mode !== 'serial'}
-    <p class="warning">Provisioning requires a direct USB connection. Secrets never travel over the network.</p>
-  {:else if status === 'done'}
+  {#if status === 'done'}
+    <!-- Checked before the USB guard: the device may have already rebooted into
+         wifi mode (USB dropped), but the operator still needs this result + handoff. -->
     <p class="success">{message}</p>
+    {#if npubPreview}
+      <div class="provisioned-npub">
+        <span class="np-label">Device identity</span>
+        <code class="np-value">{npubPreview}</code>
+      </div>
+    {/if}
+    {#if handoff}
+      <div class="handoff">
+        <p class="handoff-hint">
+          This is now a wifi signer — it manages over the relay, not USB. Give it ~10s to reboot
+          and join wifi, then:
+        </p>
+        {#if device.mode === 'relay'}
+          <p class="handoff-ok">✓ Connected over WiFi — open the Masters or Clients tab.</p>
+        {:else}
+          <button class="btn manage-wifi" onclick={handleManageWifi} disabled={handoffConnecting}>
+            {handoffConnecting ? 'Connecting…' : 'Manage over WiFi'}
+          </button>
+        {/if}
+        {#if handoffError}<p class="handoff-error">{handoffError}</p>{/if}
+      </div>
+    {/if}
     <button class="btn" onclick={handleCancel}>Provision Another</button>
+  {:else if device.mode !== 'serial'}
+    <p class="warning">Provisioning requires a direct USB connection. Secrets never travel over the network.</p>
   {:else if status === 'confirming'}
     <div class="confirm">
       <p class="info">Confirm this is the correct pubkey:</p>
@@ -235,4 +303,13 @@
   .error { font-size: 0.8rem; color: #a44; margin-top: 0.5rem; }
   .success { font-size: 0.85rem; color: #4a9; }
   .security-note { font-size: 0.7rem; color: #444; margin-top: 1.5rem; border-top: 1px solid #1a1a1a; padding-top: 0.75rem; }
+
+  .provisioned-npub { display: flex; flex-direction: column; gap: 0.25rem; margin: 0.75rem 0; }
+  .np-label { font-size: 0.7rem; color: #666; letter-spacing: 0.08em; text-transform: uppercase; }
+  .np-value { font-size: 0.72rem; color: #4a9; word-break: break-all; background: #111; padding: 0.5rem; border-radius: 3px; user-select: all; }
+  .handoff { border: 1px solid #1c3a2a; border-radius: 4px; padding: 0.75rem 1rem; margin: 0.75rem 0; background: #06120e; }
+  .handoff-hint { font-size: 0.78rem; color: #9a9; margin: 0 0 0.6rem; line-height: 1.4; }
+  .handoff-ok { font-size: 0.82rem; color: #4a9; margin: 0; }
+  .handoff-error { font-size: 0.75rem; color: #a93; margin: 0.5rem 0 0; line-height: 1.4; }
+  .manage-wifi { border-color: #4a9; color: #4a9; }
 </style>

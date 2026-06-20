@@ -120,8 +120,17 @@ export async function flashDevice(board: BoardSpec, cfg: NetConfig, h: FlashHand
         h.onProgress?.(Math.round(frac * 100), labels[fileIndex] ?? `region ${fileIndex + 1}`)
       },
     })
+    // Reset into the new firmware. On the S3's native USB-Serial-JTAG the
+    // auto-reset is unreliable (no real DTR/RTS lines), so treat it as
+    // best-effort: the flash itself already succeeded. The caller tells the
+    // user to press RESET / replug if the device doesn't reboot on its own.
     log('Flash complete — resetting…')
-    await esploader.after('hard_reset')
+    try {
+      await esploader.after('hard_reset')
+      log('Reset sent. If the device does not reboot, press its RESET button (or unplug/replug).')
+    } catch (e) {
+      log(`Auto-reset failed (${e instanceof Error ? e.message : e}). Press RESET on the device (or unplug/replug) to boot the new firmware.`)
+    }
     h.onProgress?.(100, 'done')
   } finally {
     try {

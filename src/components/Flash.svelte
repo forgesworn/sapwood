@@ -43,6 +43,11 @@
     // management (kind 24134) over relays. USB mode has no relay channel.
     const op = mode === 'wifi' ? getOrCreateOperator() : null
     const cfg: NetConfig = { ssid: ssid.trim(), password, relays, mode, op_mgmt: op?.pubHex ?? '' }
+    // Remember the relays so the Provision tab can default this device's relay
+    // (the device's mgmt address is its master pubkey, known only at provision).
+    if (mode === 'wifi' && relays.length) {
+      try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(relays)) } catch { /* ignore */ }
+    }
     status = 'flashing'
     pct = 0
     stage = 'starting'
@@ -60,7 +65,9 @@
       })
       status = 'done'
       operator = op
-      message = `${board.label} flashed and configured — it will reboot and connect to ${relays[0] ?? 'the relay'}.`
+      message = fullErase
+        ? `${board.label} wiped, flashed and configured. If it doesn't reboot on its own, press RESET (or replug) — it will boot to "provision me", ready for a fresh master.`
+        : `${board.label} flashed and configured. If it doesn't reboot on its own, press RESET (or replug) — it will then connect to ${relays[0] ?? 'the relay'}.`
     } catch (e) {
       status = 'error'
       message = e instanceof Error ? e.message : String(e)
