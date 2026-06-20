@@ -9,6 +9,7 @@
   let ssid = $state('')
   let password = $state('')
   let relaysText = $state('wss://relay.trotters.cc')
+  let fullErase = $state(false)
 
   let status = $state<'idle' | 'flashing' | 'done' | 'error'>('idle')
   let pct = $state(0)
@@ -50,6 +51,7 @@
     operator = null
     try {
       await flashDevice(board, cfg, {
+        fullErase,
         onLog: appendLog,
         onProgress: (p, label) => {
           pct = p
@@ -110,8 +112,17 @@
     </label>
   {/if}
 
+  <label class="erase-field">
+    <input type="checkbox" bind:checked={fullErase} disabled={status === 'flashing'} />
+    <span>
+      <strong>Wipe device first (full erase)</strong> — clears NVS incl. any provisioned master, so the
+      device boots into provision-wait mode ready for a fresh master. Tick this for a clean slate;
+      leave it off to keep the existing master. <em>Destroys all keys on the device.</em>
+    </span>
+  </label>
+
   <button class="btn flash-btn" onclick={flash} disabled={status === 'flashing' || !webSerial || device.connected}>
-    {status === 'flashing' ? 'Flashing…' : 'Flash & Configure'}
+    {status === 'flashing' ? 'Flashing…' : fullErase ? 'Wipe, Flash & Configure' : 'Flash & Configure'}
   </button>
 
   {#if status !== 'idle'}
@@ -167,6 +178,13 @@
   .btn:hover:not(:disabled) { background: #222; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .flash-btn { border-color: #4a9; color: #4a9; margin-top: 0.25rem; }
+  .erase-field {
+    display: flex; gap: 0.5rem; align-items: flex-start; margin: 0.25rem 0 0.75rem;
+    font-size: 0.72rem; color: #886; line-height: 1.4;
+  }
+  .erase-field input { margin-top: 0.15rem; accent-color: #a93; }
+  .erase-field strong { color: #a93; }
+  .erase-field em { color: #a44; font-style: normal; }
   .progress { height: 6px; background: #1a1a1a; border-radius: 3px; margin-top: 1rem; overflow: hidden; }
   .bar { height: 100%; background: #4a9; transition: width 0.2s; }
   .stage { font-size: 0.75rem; color: #888; margin: 0.4rem 0 0; }

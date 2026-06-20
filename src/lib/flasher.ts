@@ -48,6 +48,14 @@ async function fetchBin(url: string): Promise<Uint8Array> {
 export interface FlashHandlers {
   onLog?: (line: string) => void
   onProgress?: (pct: number, stage: string) => void
+  /**
+   * Erase the *entire* flash (incl. the NVS partition holding provisioned
+   * master seeds) before writing. Needed for a clean slate: a re-flash with
+   * `eraseAll: false` keeps any existing master, which makes the device boot
+   * straight into wifi-standalone mode and refuse USB provisioning. Wipe first
+   * and the device boots into provision-wait mode instead. DESTRUCTIVE.
+   */
+  fullErase?: boolean
 }
 
 /**
@@ -88,6 +96,16 @@ export async function flashDevice(board: BoardSpec, cfg: NetConfig, h: FlashHand
   try {
     const chip = await esploader.main() // reset into download mode + detect chip
     log(`Connected: ${chip}`)
+
+    // 3a. Optional full chip erase — wipes NVS (master seeds) for a clean slate
+    // so the device boots into provision-wait mode rather than reusing an old
+    // master. Slow (whole flash), so it gets its own indeterminate progress.
+    if (h.fullErase) {
+      log('Full erase requested — wiping entire flash (incl. master seeds)…')
+      h.onProgress?.(0, 'erasing flash')
+      await esploader.eraseFlash()
+      log('Flash erased — device will boot fresh.')
+    }
 
     // 4. Flash all regions; report smooth overall progress across them.
     await esploader.writeFlash({
