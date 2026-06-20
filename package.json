@@ -41,6 +41,7 @@
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@scure/bip32": "^2.2.0",
-    "@scure/bip39": "^2.2.0"
+    "@scure/bip39": "^2.2.0",
+    "esptool-js": "^0.6.0"
   }
 }

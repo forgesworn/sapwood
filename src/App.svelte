@@ -9,8 +9,9 @@
   import LogMonitor from './components/LogMonitor.svelte'
   import Settings from './components/Settings.svelte'
   import Connectivity from './components/Connectivity.svelte'
+  import Flash from './components/Flash.svelte'
 
-  let currentTab = $state<'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
+  let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
 
 <svelte:head>
@@ -32,6 +33,9 @@
   <StatusBar />
 
   <nav>
+    <button class:active={currentTab === 'flash'} onclick={() => currentTab = 'flash'}>
+      Flash
+    </button>
     <button class:active={currentTab === 'masters'} onclick={() => currentTab = 'masters'}>
       Masters
     </button>
@@ -59,7 +63,9 @@
   </nav>
 
   <section class="panel">
-    {#if currentTab === 'masters'}
+    {#if currentTab === 'flash'}
+      <Flash />
+    {:else if currentTab === 'masters'}
       <MasterList />
     {:else if currentTab === 'clients'}
       <ClientList />

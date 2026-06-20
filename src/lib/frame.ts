@@ -171,6 +171,9 @@ export interface NetConfig {
   password: string
   relays: string[]
   mode: 'usb' | 'wifi'
+  /** Operator x-only pubkey (hex) authorised for relay management (kind 24134).
+   *  Empty/omitted disables the management channel. */
+  op_mgmt?: string
 }
 
 /** Build a SET_NET_CONFIG frame. Payload: JSON-encoded NetConfig. */

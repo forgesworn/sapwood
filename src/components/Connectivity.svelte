@@ -5,7 +5,7 @@
   let mode = $state<'usb' | 'wifi'>('usb')
   let ssid = $state('')
   let password = $state('')
-  let relaysText = $state('wss://relay.damus.io')
+  let relaysText = $state('wss://relay.trotters.cc')
   let status = $state<'idle' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
 

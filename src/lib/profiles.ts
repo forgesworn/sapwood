@@ -1,7 +1,7 @@
 // Profile resolver -- fetches kind 0 (metadata) events from a Nostr relay
 // to resolve hex pubkeys to human-readable names.
 
-const DEFAULT_RELAY = 'wss://relay.damus.io'
+const DEFAULT_RELAY = 'wss://relay.trotters.cc'
 const TIMEOUT_MS = 5000
 
 export interface Profile {

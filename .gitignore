@@ -12,3 +12,6 @@ dist/
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Flasher firmware binaries (build artifacts from heartwood-esp32 — populate via save-image)
+public/firmware/
