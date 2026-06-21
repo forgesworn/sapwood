@@ -53,6 +53,35 @@ test('connect-an-app flow opens and gates on a name', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Messages only/ })).toBeVisible()
 })
 
+test('a device with no identity yet leads with guided setup', async ({ page }) => {
+  await enableAdminTestSeam(page)
+  await page.goto('/#/')
+  // Connected over USB but not provisioned — the just-flashed first-run state.
+  await page.evaluate(() =>
+    (window as unknown as { __sapwoodConnect: (o: unknown) => void }).__sapwoodConnect({ masters: [], slots: [], mode: 'serial' }),
+  )
+
+  await expect(page.getByText("Let's give your signer its identity")).toBeVisible()
+  // The connect-an-app hero is hidden until there is an identity to connect to.
+  await expect(heroButton(page)).toBeHidden()
+
+  // Create a fresh identity → a recovery phrase appears, gated on confirmation.
+  await page.getByRole('button', { name: /Create a fresh identity/ }).click()
+  await expect(page.getByRole('listitem')).toHaveCount(12)
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+  await page.getByRole('checkbox').check()
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+})
+
+test('the disconnected console offers plain-language connect options', async ({ page }) => {
+  await page.goto('/#/')
+  await expect(page.getByRole('button', { name: 'Connect by USB cable' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect over your network' })).toBeVisible()
+  // The bridge (advanced) option is tucked behind a disclosure, not flat in the list.
+  await expect(page.getByText('Other ways to connect')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect to a bridge' })).toBeHidden()
+})
+
 test.describe('mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 

@@ -14,9 +14,13 @@ const NPUB = nip19.npubEncode(HEX)
 vi.mock('../lib/device.svelte.js', () => ({
   device: { connected: true, mode: 'relay', error: null, masters: [], slots: [] },
   refreshSlots: vi.fn(),
+  refreshMasters: vi.fn().mockResolvedValue(undefined),
   mgmtApproveSigning: vi.fn().mockResolvedValue(undefined),
   mgmtRevokeClient: vi.fn().mockResolvedValue(undefined),
   mgmtCanApproveSigning: vi.fn(() => true),
+  // Pulled in transitively by FirstIdentity (rendered only in the no-master case).
+  serialTransport: { sendAndReceive: vi.fn() },
+  connectRelay: vi.fn().mockResolvedValue(undefined),
 }))
 
 beforeEach(() => {
@@ -65,5 +69,21 @@ describe('Home', () => {
     await fireEvent.input(input, { target: { value: 'home rig' } })
     await fireEvent.click(screen.getByText('Save'))
     expect(screen.getByText('home rig')).toBeTruthy()
+  })
+
+  it('leads with guided setup when the device has no identity yet (over USB)', () => {
+    ;(device as { masters: unknown[] }).masters = []
+    ;(device as { mode: string }).mode = 'serial'
+    render(Home)
+    expect(screen.getByText("Let's give your signer its identity")).toBeTruthy()
+    // The connect-an-app hero is hidden until there is an identity to connect to.
+    expect(screen.queryByText('Your signer is live')).toBeNull()
+  })
+
+  it('asks for a USB cable when there is no identity and no USB link', () => {
+    ;(device as { masters: unknown[] }).masters = []
+    ;(device as { mode: string }).mode = 'http'
+    render(Home)
+    expect(screen.getByText('This signer needs an identity')).toBeTruthy()
   })
 })

@@ -7,8 +7,11 @@ import {
   useRawNsec,
   decodeNsec,
   buildProvisionFrame,
+  generateMnemonic,
   zeroize,
 } from './provision.js'
+import { validateMnemonic } from '@scure/bip39'
+import { wordlist } from '@scure/bip39/wordlists/english.js'
 import { parseFrame, FrameType } from './frame.js'
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -43,6 +46,32 @@ describe('mnemonic derivation', () => {
 
   it('rejects invalid mnemonic', async () => {
     await expect(deriveFromMnemonic('invalid words here', '')).rejects.toThrow('Invalid mnemonic')
+  })
+})
+
+describe('generateMnemonic', () => {
+  it('generates a valid 12-word phrase by default', () => {
+    const phrase = generateMnemonic()
+    expect(phrase.split(/\s+/)).toHaveLength(12)
+    expect(validateMnemonic(phrase, wordlist)).toBe(true)
+  })
+
+  it('generates a valid 24-word phrase at 256 bits', () => {
+    const phrase = generateMnemonic(256)
+    expect(phrase.split(/\s+/)).toHaveLength(24)
+    expect(validateMnemonic(phrase, wordlist)).toBe(true)
+  })
+
+  it('is fresh each call (not constant)', () => {
+    expect(generateMnemonic()).not.toBe(generateMnemonic())
+  })
+
+  it('produces a phrase that derives a valid device identity', async () => {
+    const phrase = generateMnemonic()
+    const result = await deriveFromMnemonic(phrase, '')
+    expect(result.secret.length).toBe(32)
+    expect(result.npub).toMatch(/^npub1/)
+    zeroize(result.secret)
   })
 })
 
