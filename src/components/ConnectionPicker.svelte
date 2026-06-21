@@ -2,6 +2,7 @@
   import { device, connectSerial, connectHttp, connectRelay, disconnect, HttpTransport } from '../lib/device.svelte.js'
   import { listKnownDevices, type KnownDevice } from '../lib/known-devices.js'
   import { probeBridge } from '../lib/bridge-probe.js'
+  import { navigate } from '../lib/route.svelte.js'
   import { nip19 } from 'nostr-tools'
 
   let showHttpForm = $state(false)
@@ -143,9 +144,13 @@
       </form>
       {#if relayError}<p class="error">{relayError}</p>{/if}
     {:else if !showHttpForm}
+      <button class="btn btn-setup" onclick={() => navigate('flash')}>
+        Set up a new device →
+      </button>
+      <p class="connect-hint">Already have one? Connect to manage it:</p>
       <div class="connect-buttons">
         <button
-          class="btn btn-primary"
+          class="btn btn-secondary"
           onclick={handleConnectSerial}
           disabled={connecting || !('serial' in navigator)}
         >
@@ -228,10 +233,32 @@
     color: var(--text-dim);
   }
 
+  .btn-setup {
+    display: block;
+    width: 100%;
+    margin-top: 1.25rem;
+    background: var(--green);
+    color: #050505;
+    border-color: var(--green);
+    font-weight: 600;
+    font-size: 1.05rem;
+    padding: 0.85rem 1.5rem;
+  }
+  .btn-setup:hover:not(:disabled) {
+    background: #00ff88;
+    box-shadow: var(--green-glow);
+  }
+
+  .connect-hint {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin: 1.5rem 0 0.6rem;
+  }
+
   .connect-buttons {
     display: flex;
     gap: 0.75rem;
-    margin-top: 1.25rem;
+    margin-top: 0;
   }
 
   .btn {
