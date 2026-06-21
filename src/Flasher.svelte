@@ -3,6 +3,7 @@
   // Desktop + USB only. Walks a newcomer from "plug it in" to "your signer is
   // live" in one calm flow. All decisions delegate to the pure wizard lib; the
   // flash itself goes through flashDevice (same path the old Flash tab used).
+  import { encodeQR } from '@paulmillr/qr'
   import { flashDevice, BOARDS, type FlasherBackend } from './lib/flasher.js'
   import { getOrCreateOperator, type Operator } from './lib/op-mgmt.js'
   import { device, disconnect } from './lib/device.svelte.js'
@@ -37,6 +38,14 @@
 
   const board = $derived(BOARDS.find((b) => b.id === data.boardId))
   const netError = $derived(networkError(data))
+
+  // "Connect your phone": a QR encoding a deep link that carries the operator key
+  // in the URL fragment (never sent to a server). Scanning it on a phone opens
+  // the console there with the key loaded. See lib/import-link.
+  const importUrl = $derived(
+    operator ? `${location.origin}${location.pathname}#/import?op=${operator.skHex}` : '',
+  )
+  const qrSvg = $derived(importUrl ? encodeQR(importUrl, 'svg') : '')
   const userStepNo = $derived(USER_STEPS.indexOf(step) + 1) // 1..4, or 0 outside
 
   function goNext() {
@@ -270,9 +279,17 @@
         </div>
       {/if}
 
+      {#if qrSvg}
+        <div class="qr-block">
+          <p class="qr-label">Manage from your phone</p>
+          <div class="qr">{@html qrSvg}</div>
+          <p class="note">Scan with your phone's camera to open the console there with this operator key already loaded.</p>
+        </div>
+      {/if}
+
       <div class="next">
         <p class="next-title">Next</p>
-        <p class="note">Open the console to provision an identity and connect your apps. It works on your phone too.</p>
+        <p class="note">Or open the console here to provision an identity and connect your apps. It works on your phone too.</p>
         <div class="actions">
           <button class="btn primary" onclick={() => navigate('admin')}>Open the console</button>
           <button class="btn ghost" onclick={restart}>Set up another</button>
@@ -377,6 +394,11 @@
   .op-desc { font-size: 0.8rem; color: #9a9; margin: 0 0 0.6rem; line-height: 1.5; }
   .op-desc strong { color: var(--text); }
   .op-secret { background: #030303; border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-size: 0.68rem; color: var(--green); white-space: pre-wrap; word-break: break-all; margin: 0 0 0.6rem; }
+
+  .qr-block { margin: 1.25rem 0; }
+  .qr-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 0.6rem; }
+  .qr { width: 168px; padding: 12px; background: #fff; border-radius: 6px; }
+  .qr :global(svg) { display: block; width: 100%; height: auto; }
 
   .next { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1.25rem; }
   .next-title { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
