@@ -104,9 +104,7 @@ async function fetchBin(url: string): Promise<Uint8Array> {
 /** The production backend: esptool-js over Web Serial. Coupling isolated here. */
 export const defaultBackend: FlasherBackend = {
   hasWebSerial: () => typeof navigator !== 'undefined' && 'serial' in navigator,
-  // Local cast: the repo doesn't pull in @types/w3c-web-serial (would also need
-  // to retype serial.ts). hasWebSerial() guards the call, so this is safe.
-  requestPort: () => (navigator as unknown as { serial: { requestPort(): Promise<unknown> } }).serial.requestPort(),
+  requestPort: () => navigator.serial.requestPort(),
   fetchBin,
   async openSession(port, { baudrate, terminal }) {
     const transport = new Transport(port as never, false)
