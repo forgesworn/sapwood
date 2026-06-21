@@ -1,6 +1,7 @@
 <script lang="ts">
   import { device, connectSerial, connectHttp, connectRelay, disconnect, HttpTransport } from '../lib/device.svelte.js'
   import { listKnownDevices, type KnownDevice } from '../lib/known-devices.js'
+  import { probeBridge } from '../lib/bridge-probe.js'
   import { nip19 } from 'nostr-tools'
 
   let showHttpForm = $state(false)
@@ -68,13 +69,12 @@
     if (!origin.startsWith('http')) return
     void (async () => {
       try {
-        // Try heartwoodd (/api/info) first, then ESP32 bridge (/api/bridge/info).
         // Skip auto-connect on localhost dev servers.
         if (origin.includes('localhost')) return
-
-        let res = await fetch(`${origin}/api/info`, { cache: 'no-store' }).catch(() => null)
-        if (!res?.ok) res = await fetch(`${origin}/api/bridge/info`, { cache: 'no-store' }).catch(() => null)
-        if (!res?.ok) return
+        // Only auto-connect when this origin actually serves a bridge API. A
+        // static host (GitHub Pages, sapwood.forgesworn.dev) answers unknown
+        // paths with the SPA's index.html — which must not be taken for a bridge.
+        if (!(await probeBridge(origin))) return
         connecting = true
         try { await connectHttp(origin) } catch { /* emitted via listener */ }
         finally { connecting = false }

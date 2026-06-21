@@ -162,22 +162,27 @@ export async function flashDevice(
   }
   const log = (s: string) => h.onLog?.(s.replace(/\s+$/, ''))
 
-  // 1. Fetch firmware binaries for the selected board.
+  // 1. Ask for the serial port FIRST, before any other await. requestPort() must
+  //    run within the click's user-gesture activation; fetching the firmware
+  //    first (a multi-MB download) consumes the activation, and Chrome then
+  //    rejects requestPort with "Must be handling a user gesture".
+  log('Select the device serial port…')
+  const port = await backend.requestPort()
+
+  // 2. Fetch firmware binaries for the selected board.
   log(`Fetching firmware for ${board.label}…`)
   const regions: FlashRegion[] = await Promise.all(
     FIRMWARE_REGIONS.map(async (r) => ({ address: r.address, data: await backend.fetchBin(`${board.assets}/${r.file}`) })),
   )
   const labels = FIRMWARE_REGIONS.map((r) => r.label)
 
-  // 2. Build the config blob and append it at the config-partition offset.
+  // 3. Build the config blob and append it at the config-partition offset.
   const configBlob = buildConfigBlob(cfg)
   regions.push({ address: board.configOffset, data: configBlob })
   labels.push('config')
   log(`Config blob: ${configBlob.length} bytes → 0x${board.configOffset.toString(16)}`)
 
-  // 3. Ask for the serial port and open an esptool session.
-  log('Select the device serial port…')
-  const port = await backend.requestPort()
+  // 4. Open an esptool session on the chosen port.
   const terminal: FlashTerminal = {
     clean() {},
     writeLine: (data: string) => log(data),

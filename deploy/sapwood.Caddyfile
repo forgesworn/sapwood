@@ -8,14 +8,26 @@
 # and issues a Let's Encrypt cert. HTTPS is required for the flasher's Web Serial.
 sapwood.forgesworn.dev {
 	encode gzip zstd
-	root * /opt/sapwood
-	# SPA: unknown paths fall back to index.html (routing is hash-based anyway).
-	try_files {path} /index.html
-	file_server
+
 	header {
 		# Privacy + hardening. The app's own CSP ships in index.html.
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
 		-Server
+	}
+
+	# The public site has no bridge API. handle blocks are matched in source
+	# order, so /api/* is answered with 404 BEFORE the SPA fallback can serve
+	# index.html for it — otherwise the admin's auto-connect probe mistakes that
+	# HTML 200 for a bridge and chokes parsing it as JSON.
+	handle /api/* {
+		respond 404
+	}
+
+	# Static SPA: unknown paths fall back to index.html (routing is hash-based).
+	handle {
+		root * /opt/sapwood
+		try_files {path} /index.html
+		file_server
 	}
 }

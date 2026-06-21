@@ -194,6 +194,16 @@ describe('flashDevice — ordering and chip detection', () => {
     expect(order).toEqual(['port', 'open', 'detect', 'write'])
   })
 
+  it('requests the serial port before fetching firmware (preserves the user gesture)', async () => {
+    const order: string[] = []
+    const h = makeHarness()
+    ;(h.backend.requestPort as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('port'); return {} })
+    ;(h.backend.fetchBin as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('fetch'); return new Uint8Array([1]) })
+    await flashDevice(BOARD, CFG, {}, h.backend)
+    expect(order[0]).toBe('port')
+    expect(order.indexOf('port')).toBeLessThan(order.indexOf('fetch'))
+  })
+
   it('logs the detected chip description', async () => {
     const logs: string[] = []
     const h = makeHarness({ detectChip: async () => 'ESP32-S3 (QFN56)' })
