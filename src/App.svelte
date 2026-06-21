@@ -38,7 +38,11 @@
     </div>
   {/if}
 
-  <ConnectionPicker />
+  <!-- On the connected Home the signer card owns the connection state + Disconnect,
+       so the picker only shows when disconnected or in the Advanced cockpit. -->
+  {#if !device.connected || view === 'advanced'}
+    <ConnectionPicker />
+  {/if}
 
   {#if device.connected}
     {#if view === 'advanced'}
