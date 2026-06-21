@@ -3,6 +3,17 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.2.1 — 2026-06-21
+
+### Fixed
+
+- **Serial port "in use" lock.** A flash or USB connect left the Web Serial port
+  open — and the ESP32-S3's native USB re-enumerates when esptool resets the
+  chip, orphaning the handle — so the next attempt failed with "port in use"
+  until the device was physically unplugged. Sapwood now closes any open granted
+  port before opening a new one (after the port picker, so the click's user
+  gesture is preserved), on both the flasher and the admin USB connect.
+
 ## 0.2.0 — 2026-06-21
 
 A near-complete rework toward a "world-class" setup experience: a focused flasher,
