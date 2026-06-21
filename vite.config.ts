@@ -12,7 +12,9 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "font-src 'self'",
+  // data: for the small JetBrains Mono subsets Vite inlines as data URIs
+  // (inline — no network request, so no privacy impact).
+  "font-src 'self' data:",
   "img-src 'self' data:",
   "connect-src 'self' ws: wss: http: https:",
   "object-src 'none'",
