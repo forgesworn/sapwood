@@ -46,6 +46,8 @@ export const device = $state({
   error: null as string | null,
   bridgeInfo: null as Record<string, unknown> | null,
   relayStatus: null as RelayStatus | null,
+  /** Relay: the operator pubkey Sapwood signs management with (must match the device's baked op_mgmt). */
+  operatorPub: '',
   /** USB-direct: true once the bridge session is authenticated (client mgmt allowed). */
   bridgeAuthed: false,
 })
@@ -196,6 +198,7 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   relayTransport = t
   device.connected = true
   device.mode = 'relay'
+  device.operatorPub = t.operatorPub
   device.portInfo = `${npubShort(devicePubHex)} · ${relays[0] ?? ''}`
   device.error = null
   device.masters = []

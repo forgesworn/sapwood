@@ -26,6 +26,7 @@
       <p class="err-lead">⚠ Connected, but the device isn't answering over the relay.</p>
       <p class="err-detail">{device.error}</p>
       <p class="err-talking">Sapwood is talking to: <code>{device.portInfo}</code></p>
+      <p class="err-talking">Signing management with operator key: <code>{device.operatorPub}</code></p>
       <p class="err-hint">This almost always means one of two things:</p>
       <ul>
         <li><strong>Different relays.</strong> Sapwood and the device must share at least one relay. Check the device booted onto the relay shown above (its boot log prints “WiFi-standalone mode — entering relay loop”).</li>
