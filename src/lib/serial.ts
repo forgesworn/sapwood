@@ -4,8 +4,9 @@
 // Reads incoming bytes, hunts for frame magic, and emits parsed frames.
 // Non-frame bytes (ESP-IDF log output) are emitted as log lines.
 
-import { MAGIC, OVERHEAD, MAX_PAYLOAD, HEADER_SIZE, CRC_SIZE, parseFrame } from './frame.js'
+import { MAGIC, MAX_PAYLOAD, HEADER_SIZE, CRC_SIZE, parseFrame } from './frame.js'
 import type { Frame, FrameTypeValue } from './frame.js'
+import { releaseGrantedPorts } from './serial-ports.js'
 
 export type SerialEvent =
   | { kind: 'connected'; port: string }
@@ -61,14 +62,19 @@ export class SerialTransport {
         ],
       })
 
-      // Handle port that's already open (e.g. browser kept it from a previous session).
+      // Close any port left open by a previous flash/connect (or an ESP32-S3 USB
+      // re-enumeration) so open() below doesn't fail with "port in use". Done
+      // AFTER requestPort so its awaits don't consume the click's user gesture.
+      await releaseGrantedPorts()
+
+      // If the port still reports open, reuse it; otherwise open it fresh.
       if (!port.readable) {
         try {
           await port.open({ baudRate, bufferSize: 4096 })
         } catch (openErr) {
           const msg = openErr instanceof Error ? openErr.message : String(openErr)
           if (msg.includes('Failed to open')) {
-            throw new Error('Port is in use. Close the bridge, serial monitor, or other tool first.')
+            throw new Error('The device port is busy. Unplug the device, plug it back in, then try again.')
           }
           throw openErr
         }
