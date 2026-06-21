@@ -490,3 +490,23 @@ export async function configureNetwork(cfg: NetConfig): Promise<boolean> {
 }
 
 export { serialTransport, httpTransport, HttpTransport }
+
+// --- E2E test seam -------------------------------------------------------
+// Lets Playwright put the UI in a "connected" state without a real device or
+// relay, so the connected admin surfaces (Home, Advanced) can be regression
+// tested. Inert in normal use: the hook is only installed when the harness sets
+// `window.__sapwoodE2E` before load — it is never set in production, makes no
+// network calls, and touches no secrets. Mirrors `__sapwoodFlashBackend`.
+if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: boolean }).__sapwoodE2E) {
+  ;(window as unknown as { __sapwoodConnect?: unknown }).__sapwoodConnect = (
+    opts: { masters?: MasterInfo[]; slots?: ConnectSlot[]; mode?: TransportMode } = {},
+  ) => {
+    device.connected = true
+    device.mode = opts.mode ?? 'relay'
+    device.portInfo = 'test-device'
+    device.masters = opts.masters ?? []
+    device.slots = opts.slots ?? []
+    device.relayStatus = null
+    device.error = null
+  }
+}

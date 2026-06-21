@@ -1,31 +1,37 @@
 <script lang="ts">
   import ConnectionPicker from './components/ConnectionPicker.svelte'
   import StatusBar from './components/StatusBar.svelte'
-  import MasterList from './components/MasterList.svelte'
-  import ClientList from './components/ClientList.svelte'
-  import RelayClients from './components/RelayClients.svelte'
+  import Home from './components/Home.svelte'
+  import Cockpit from './components/Cockpit.svelte'
   import { device } from './lib/device.svelte.js'
-  import Provision from './components/Provision.svelte'
-  import DangerZone from './components/DangerZone.svelte'
-  import OtaUpdate from './components/OtaUpdate.svelte'
-  import LogMonitor from './components/LogMonitor.svelte'
-  import Settings from './components/Settings.svelte'
-  import Connectivity from './components/Connectivity.svelte'
-  import Flash from './components/Flash.svelte'
   import { navigate } from './lib/route.svelte.js'
   import { importNotice } from './lib/import-link.svelte.js'
 
-  let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
+  // Two connected surfaces: the guided Home (default) and the advanced cockpit.
+  let view = $state<'home' | 'advanced'>('home')
+
+  // A fresh connection always lands on Home, never deep inside the cockpit.
+  $effect(() => { if (!device.connected) view = 'home' })
+
+  const showBottomNav = $derived(device.connected && view === 'advanced')
 </script>
 
-<main>
+<main class:has-bottom-nav={showBottomNav}>
   <header>
     <div class="brand">
       <h1>SAPWOOD</h1>
       <span class="divider"></span>
       <p class="tagline">SHAPE YOUR SIGNER</p>
     </div>
-    <button class="setup-link" onclick={() => navigate('flash')}>Set up a new device →</button>
+    {#if device.connected}
+      {#if view === 'home'}
+        <button class="header-link" onclick={() => (view = 'advanced')}>Advanced ⚙</button>
+      {:else}
+        <button class="header-link" onclick={() => (view = 'home')}>← Home</button>
+      {/if}
+    {:else}
+      <button class="header-link" onclick={() => navigate('flash')}>Set up a new device →</button>
+    {/if}
   </header>
 
   {#if importNotice.shown}
@@ -36,63 +42,16 @@
   {/if}
 
   <ConnectionPicker />
-  <StatusBar />
 
-  <nav>
-    <button class:active={currentTab === 'flash'} onclick={() => currentTab = 'flash'}>
-      Flash
-    </button>
-    <button class:active={currentTab === 'masters'} onclick={() => currentTab = 'masters'}>
-      Masters
-    </button>
-    <button class:active={currentTab === 'clients'} onclick={() => currentTab = 'clients'}>
-      Clients
-    </button>
-    <button class:active={currentTab === 'provision'} onclick={() => currentTab = 'provision'}>
-      Provision
-    </button>
-    <button class:active={currentTab === 'connectivity'} onclick={() => currentTab = 'connectivity'}>
-      Connectivity
-    </button>
-    <button class:active={currentTab === 'firmware'} onclick={() => currentTab = 'firmware'}>
-      Firmware
-    </button>
-    <button class:active={currentTab === 'logs'} onclick={() => currentTab = 'logs'}>
-      Logs
-    </button>
-    <button class:active={currentTab === 'settings'} onclick={() => currentTab = 'settings'}>
-      Settings
-    </button>
-    <button class:active={currentTab === 'danger'} class="danger-tab" onclick={() => currentTab = 'danger'}>
-      Danger
-    </button>
-  </nav>
-
-  <section class="panel">
-    {#if currentTab === 'flash'}
-      <Flash />
-    {:else if currentTab === 'masters'}
-      <MasterList />
-    {:else if currentTab === 'clients'}
-      {#if device.mode === 'relay' || device.mode === 'serial'}
-        <RelayClients />
-      {:else}
-        <ClientList />
-      {/if}
-    {:else if currentTab === 'provision'}
-      <Provision />
-    {:else if currentTab === 'connectivity'}
-      <Connectivity />
-    {:else if currentTab === 'firmware'}
-      <OtaUpdate />
-    {:else if currentTab === 'logs'}
-      <LogMonitor />
-    {:else if currentTab === 'settings'}
-      <Settings />
-    {:else if currentTab === 'danger'}
-      <DangerZone />
+  {#if device.connected}
+    {#if view === 'advanced'}
+      <!-- The cockpit speaks the technical language (masters, clients, slots). -->
+      <StatusBar />
+      <Cockpit />
+    {:else}
+      <Home onadvanced={() => (view = 'advanced')} />
     {/if}
-  </section>
+  {/if}
 </main>
 
 <style>
@@ -148,7 +107,7 @@
     gap: 1rem;
   }
 
-  .setup-link {
+  .header-link {
     background: none;
     border: none;
     padding: 0;
@@ -158,7 +117,7 @@
     cursor: pointer;
     white-space: nowrap;
   }
-  .setup-link:hover { color: var(--green); }
+  .header-link:hover { color: var(--green); }
 
   .import-banner {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem;
@@ -195,74 +154,14 @@
     letter-spacing: 0.2em;
   }
 
-  nav {
-    display: flex;
-    gap: 0;
-    margin: 1.5rem 0;
-    border-bottom: 2px solid var(--border);
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  nav::-webkit-scrollbar { display: none; }
-
-  nav button {
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    color: var(--text-muted);
-    padding: 0.75rem 1.25rem;
-    font-family: inherit;
-    font-size: 1rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: color 0.2s, border-color 0.2s;
-    white-space: nowrap;
-    letter-spacing: 0.02em;
-  }
-
-  nav button:hover {
-    color: var(--text-dim);
-  }
-
-  nav button.active {
-    color: #fff;
-    border-bottom-color: var(--green);
-  }
-
-  nav button.danger-tab.active {
-    border-bottom-color: var(--red);
-  }
-
-  .panel {
-    min-height: 400px;
-    padding-top: 1.5rem;
-  }
-
-  /* Mobile-first: tighten the shell and dock the tab bar to the bottom — the
-     thumb zone — with comfortable (44px+) touch targets. */
+  /* Mobile-first: tighten the shell. The advanced cockpit docks a fixed tab bar
+     to the bottom, so reserve room for it only in that view. */
   @media (max-width: 640px) {
-    main { padding: 1.25rem 1rem 5.5rem; } /* leave room for the fixed bottom nav */
+    main { padding: 1.25rem 1rem; }
+    main.has-bottom-nav { padding-bottom: 5.5rem; }
     h1 { font-size: 1.5rem; letter-spacing: 0.08em; }
     .divider { height: 1rem; }
     .tagline { font-size: 0.68rem; }
-    .setup-link { font-size: 0.72rem; }
-    .panel { min-height: 0; padding-top: 1.25rem; }
-
-    /* Fixed bottom bar, still horizontally scrollable for all nine tabs. The
-       active marker moves to the top edge so it shows above the bar. */
-    nav {
-      position: fixed;
-      left: 0; right: 0; bottom: 0;
-      margin: 0;
-      padding: 0 0.5rem;
-      padding-bottom: env(safe-area-inset-bottom, 0);
-      background: var(--surface);
-      border-top: 2px solid var(--border);
-      border-bottom: none;
-      z-index: 20;
-    }
-    nav button { padding: 0.9rem 0.85rem; border-bottom: none; border-top: 3px solid transparent; }
-    nav button.active { border-bottom-color: transparent; border-top-color: var(--green); }
-    nav button.danger-tab.active { border-bottom-color: transparent; border-top-color: var(--red); }
+    .header-link { font-size: 0.72rem; }
   }
 </style>

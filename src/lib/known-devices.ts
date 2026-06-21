@@ -51,6 +51,43 @@ export function npubShort(pubHex: string): string {
   }
 }
 
+/** x-only hex for an npub (or a hex string passed straight through). null if neither. */
+export function npubToHex(input: string): string | null {
+  const s = input.trim()
+  if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase()
+  try {
+    const d = nip19.decode(s)
+    if (d.type === 'npub') return (d.data as string).toLowerCase()
+  } catch { /* not an npub */ }
+  return null
+}
+
+/** The friendly label remembered for a device, or null if none is stored. */
+export function getDeviceLabel(pubHex: string): string | null {
+  const key = pubHex.toLowerCase()
+  return load().find((d) => d.pubHex.toLowerCase() === key)?.label ?? null
+}
+
+/**
+ * Set the friendly label for a device, keyed by pubkey. Upserts: if the device
+ * is not yet remembered (e.g. connected over USB, not relay), a relay-less entry
+ * is created so the name persists. A blank label is ignored.
+ */
+export function setDeviceLabel(pubHex: string, label: string): void {
+  const clean = label.trim()
+  if (!/^[0-9a-f]{64}$/i.test(pubHex) || !clean) return
+  const key = pubHex.toLowerCase()
+  const devices = load()
+  const existing = devices.find((d) => d.pubHex.toLowerCase() === key)
+  if (existing) {
+    existing.label = clean
+    existing.lastSeen = new Date().toISOString()
+  } else {
+    devices.push({ pubHex: key, relays: [], label: clean, lastSeen: new Date().toISOString() })
+  }
+  save(devices)
+}
+
 /** Insert or update a device, keyed by pubHex. Relays/label are merged, not lost. */
 export function rememberDevice(pubHex: string, relays: string[], label?: string): KnownDevice {
   const key = pubHex.toLowerCase()
