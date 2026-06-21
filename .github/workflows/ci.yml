@@ -8,6 +8,43 @@ on:
     branches: [main]
 
 jobs:
+  # Server-side enforcement of the check-in identity rule: the local pre-commit
+  # hook can be bypassed with --no-verify, this gate cannot. Fails if the banned
+  # account authored/committed anything in range, or its name is in tracked
+  # content. The banned string is assembled at runtime so this file stays clean
+  # and never trips its own check.
+  identity-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Forbid the banned commit identity
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          banned="$(printf 'd%s' 'bowles')"
+          fail=0
+          # 1. No tracked file may contain the banned word (the hook dir may name it).
+          if git grep -nIi "$banned" -- . ':(exclude).githooks/'; then
+            echo "::error::tracked content contains the banned identity"
+            fail=1
+          fi
+          # 2. No commit in range may be authored/committed by the banned account.
+          if [ -n "${BASE:-}" ] && [ -n "${HEAD:-}" ]; then
+            range="$BASE..$HEAD"
+          else
+            range="HEAD~1..HEAD"
+          fi
+          if git log --format='%an <%ae>%n%cn <%ce>' "$range" | grep -i "$banned"; then
+            echo "::error::a commit in $range is authored/committed by the banned identity"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "OK: banned identity absent from content and commits ($range)"
+          exit "$fail"
+
   test:
     runs-on: ubuntu-latest
     steps:
