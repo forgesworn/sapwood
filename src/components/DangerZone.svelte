@@ -1,10 +1,37 @@
 <script lang="ts">
-  import { device, serialTransport, httpTransport, bridgeRestart } from '../lib/device.svelte.js'
+  import { device, serialTransport, httpTransport, bridgeRestart, mgmtRevokeClient } from '../lib/device.svelte.js'
   import { FrameType, buildFactoryReset } from '../lib/frame.js'
 
   let resetPending = $state(false)
   let resetResult = $state<string | null>(null)
   let stopPending = $state(false)
+
+  // Disconnect every app at once (relay/USB management).
+  let revokeAllPending = $state(false)
+  let revokeAllResult = $state<string | null>(null)
+  const canManageClients = $derived(device.mode === 'relay' || device.mode === 'serial')
+
+  async function handleRevokeAll() {
+    const n = device.slots.length
+    if (n === 0) { revokeAllResult = 'No apps are connected.'; return }
+    if (!confirm(`Disconnect all ${n} app${n === 1 ? '' : 's'}? Each will lose access to your signer. This cannot be undone.`)) return
+    revokeAllPending = true
+    revokeAllResult = null
+    let done = 0
+    try {
+      // Revoke highest slot first so indices stay stable as the list shrinks.
+      const slots = [...device.slots].sort((a, b) => b.slot_index - a.slot_index)
+      for (const slot of slots) {
+        await mgmtRevokeClient(slot.slot_index)
+        done++
+      }
+      revokeAllResult = `Disconnected ${done} app${done === 1 ? '' : 's'}.`
+    } catch (e) {
+      revokeAllResult = `Disconnected ${done} of ${n}, then stopped: ${e instanceof Error ? e.message : 'failed'}`
+    } finally {
+      revokeAllPending = false
+    }
+  }
 
   async function handleReset() {
     if (!confirm('This will erase all keys and policies. The device will require button confirmation. Continue?')) return
@@ -75,6 +102,21 @@
     </p>
   {:else if device.mode === 'serial'}
     <p class="info">Connected via USB. To use bridge mode, start the bridge and reconnect.</p>
+  {/if}
+
+  {#if canManageClients}
+    <h2>Disconnect All Apps</h2>
+    <p class="warning">Revokes every connected app at once. Each loses access immediately and must be reconnected. The signer and its keys are untouched.</p>
+    <button
+      class="btn-danger"
+      disabled={revokeAllPending || device.slots.length === 0}
+      onclick={handleRevokeAll}
+    >
+      {revokeAllPending ? 'Disconnecting…' : `Disconnect all ${device.slots.length} app${device.slots.length === 1 ? '' : 's'}`}
+    </button>
+    {#if revokeAllResult}
+      <p class="result">{revokeAllResult}</p>
+    {/if}
   {/if}
 
   <h2>Factory Reset</h2>

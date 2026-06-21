@@ -3,6 +3,42 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.3.0 — 2026-06-21
+
+A guided admin to match the guided flasher: once connected you land on a warm
+**Home** instead of the bare cockpit, with the full power surface one tap away.
+
+### Added
+
+- **Guided admin Home** — the default connected view. Shows your signer in plain
+  language (with a one-tap rename), makes **Connect an app** the obvious next
+  step, lists what is connected, and carries the *manage from your phone* QR.
+- **Connect an app flow** — name it → choose what it can sign (presets:
+  *Everything*, *Posting only*, *Messages only*, or *Let me choose*) → a QR to
+  scan straight into the app. Works the same over WiFi (relay) and USB.
+- **Advanced toggle** — the full nine-tab cockpit (Masters, Clients, Provision,
+  Connectivity, Firmware, Logs, Settings, Danger) is unchanged, now tucked behind
+  an *Advanced ⚙* switch and reachable from Home.
+- **Disconnect all apps** — a single Danger-zone action to revoke every connected
+  app at once (the signer and its keys are untouched).
+- **Rename your signer** — a friendly local label, stored only in your browser.
+
+### Changed
+
+- A fresh connection always lands on Home; the disconnected state still leads
+  with *Set up a new device*.
+- **Plain language on Home** — the technical readout (masters, clients, slots)
+  now lives only in Advanced. Home labels the signer's address ("safe to share")
+  and describes the management key in everyday terms, so it reads for a newcomer
+  while Advanced keeps the full vocabulary and every tool.
+
+### Tests
+
+- New pure-logic units (`client-presets`, `connect-flow`, device-label helpers),
+  component tests for the connect-an-app flow and Home, and an E2E seam that
+  exercises the connected Home, the Advanced cockpit, and mobile no-overflow —
+  all without a relay or hardware. 181 unit + 13 E2E, green.
+
 ## 0.2.1 — 2026-06-21
 
 ### Fixed

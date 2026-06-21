@@ -27,6 +27,17 @@ export async function installFakeFlasher(page: Page): Promise<void> {
   })
 }
 
+/**
+ * Arm the connected-admin test seam: sets `window.__sapwoodE2E` before load so
+ * `window.__sapwoodConnect(...)` becomes available to fake a connected device
+ * (no relay/hardware needed). Call before page.goto.
+ */
+export async function enableAdminTestSeam(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    ;(window as unknown as { __sapwoodE2E: boolean }).__sapwoodE2E = true
+  })
+}
+
 /** Force Web Serial to be absent, so the unsupported-browser path renders. */
 export async function disableWebSerial(page: Page): Promise<void> {
   await page.addInitScript(() => {
