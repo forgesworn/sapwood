@@ -13,6 +13,7 @@
   import Connectivity from './components/Connectivity.svelte'
   import Flash from './components/Flash.svelte'
   import { navigate } from './lib/route.svelte.js'
+  import { importNotice } from './lib/import-link.svelte.js'
 
   let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
@@ -26,6 +27,13 @@
     </div>
     <button class="setup-link" onclick={() => navigate('flash')}>Set up a new device →</button>
   </header>
+
+  {#if importNotice.shown}
+    <div class="import-banner" role="status">
+      <span>Operator key loaded — you can manage this signer from here.</span>
+      <button class="import-dismiss" onclick={() => (importNotice.shown = false)} aria-label="Dismiss">×</button>
+    </div>
+  {/if}
 
   <ConnectionPicker />
   <StatusBar />
@@ -152,6 +160,17 @@
   }
   .setup-link:hover { color: var(--green); }
 
+  .import-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    background: #06120e; border: 1px solid var(--green-dim); border-radius: 6px;
+    padding: 0.7rem 1rem; margin-bottom: 1rem; color: var(--green); font-size: 0.85rem;
+  }
+  .import-dismiss {
+    background: none; border: none; color: var(--text-dim); font-size: 1.2rem;
+    line-height: 1; cursor: pointer; padding: 0 0.25rem; flex-shrink: 0;
+  }
+  .import-dismiss:hover { color: var(--text); }
+
   h1 {
     margin: 0;
     font-size: 2.2rem;
@@ -219,16 +238,31 @@
     padding-top: 1.5rem;
   }
 
-  /* Mobile-first: tighten the shell and let the tab bar scroll edge-to-edge
-     with comfortable (44px+) touch targets. */
+  /* Mobile-first: tighten the shell and dock the tab bar to the bottom — the
+     thumb zone — with comfortable (44px+) touch targets. */
   @media (max-width: 640px) {
-    main { padding: 1.25rem 1rem 2rem; }
+    main { padding: 1.25rem 1rem 5.5rem; } /* leave room for the fixed bottom nav */
     h1 { font-size: 1.5rem; letter-spacing: 0.08em; }
     .divider { height: 1rem; }
     .tagline { font-size: 0.68rem; }
     .setup-link { font-size: 0.72rem; }
-    nav { margin: 1rem -1rem; padding: 0 1rem; }
-    nav button { padding: 0.85rem 0.9rem; }
     .panel { min-height: 0; padding-top: 1.25rem; }
+
+    /* Fixed bottom bar, still horizontally scrollable for all nine tabs. The
+       active marker moves to the top edge so it shows above the bar. */
+    nav {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      margin: 0;
+      padding: 0 0.5rem;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+      background: var(--surface);
+      border-top: 2px solid var(--border);
+      border-bottom: none;
+      z-index: 20;
+    }
+    nav button { padding: 0.9rem 0.85rem; border-bottom: none; border-top: 3px solid transparent; }
+    nav button.active { border-bottom-color: transparent; border-top-color: var(--green); }
+    nav button.danger-tab.active { border-bottom-color: transparent; border-top-color: var(--red); }
   }
 </style>
