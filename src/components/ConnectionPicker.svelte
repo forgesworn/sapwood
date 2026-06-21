@@ -45,7 +45,7 @@
 
   async function handleConnectRelay() {
     const hex = toHex(relayPubInput)
-    if (!hex) { relayError = 'Enter a valid device npub or 64-char hex pubkey.'; return }
+    if (!hex) { relayError = "That doesn't look like a device address — it should start with npub1…"; return }
     const relays = relayUrlInput.split(/[\n,]/).map((r) => r.trim()).filter(Boolean)
     if (!relays.length) { relayError = 'Enter at least one relay URL.'; return }
     relayError = ''
@@ -115,6 +115,10 @@
       <span class="conn-label">DISCONNECTED</span>
     </div>
     {#if showRelayForm}
+      <p class="relay-help">
+        Enter your device's address — its public key, starting with <code>npub1…</code> (safe to
+        share). Easiest: scan the QR from the computer where you set it up — then there's nothing to type.
+      </p>
       <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectRelay() }}>
         {#if knownDevices.length}
           <select class="relay-known" onchange={pickKnown}>
@@ -126,7 +130,7 @@
         <input
           type="text"
           bind:value={relayPubInput}
-          placeholder="device npub or 64-char hex"
+          placeholder="your device's address (npub1…)"
           disabled={connecting}
         />
         <input
@@ -253,6 +257,19 @@
     font-size: 0.85rem;
     color: var(--text-dim);
     margin: 1.5rem 0 0.6rem;
+  }
+
+  .relay-help {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin: 1.25rem 0 0.75rem;
+  }
+  .relay-help code {
+    color: var(--green-dim);
+    background: #0a0a0a;
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
   }
 
   .connect-buttons {

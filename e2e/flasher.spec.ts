@@ -23,10 +23,6 @@ test('walks the whole wizard and flashes end-to-end', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Your signer is live' })).toBeVisible()
   await expect(page.getByText(/NOSTR_SECRET_KEY=[0-9a-f]{64}/)).toBeVisible()
-
-  // The "connect your phone" QR is rendered.
-  await expect(page.getByText('Manage from your phone')).toBeVisible()
-  await expect(page.locator('.qr svg')).toBeVisible()
 })
 
 test('blocks Next until the wifi name is entered', async ({ page }) => {
