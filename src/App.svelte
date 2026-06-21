@@ -12,6 +12,7 @@
   import Settings from './components/Settings.svelte'
   import Connectivity from './components/Connectivity.svelte'
   import Flash from './components/Flash.svelte'
+  import { navigate } from './lib/route.svelte.js'
 
   let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
@@ -29,6 +30,7 @@
       <span class="divider"></span>
       <p class="tagline">SHAPE YOUR SIGNER</p>
     </div>
+    <button class="setup-link" onclick={() => navigate('flash')}>Set up a new device →</button>
   </header>
 
   <ConnectionPicker />
@@ -131,6 +133,11 @@
 
   header {
     margin-bottom: 2rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
   }
 
   .brand {
@@ -138,6 +145,18 @@
     align-items: baseline;
     gap: 1rem;
   }
+
+  .setup-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 0.8rem;
+    color: var(--green-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .setup-link:hover { color: var(--green); }
 
   h1 {
     margin: 0;

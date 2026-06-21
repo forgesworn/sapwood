@@ -1,0 +1,35 @@
+/* Shared global tokens + base, loaded once in main.ts so both the admin app and
+   the /flash wizard share one design language. No third-party requests here:
+   the font is the system monospace stack (self-hosting JetBrains Mono is a
+   separate privacy hardening step). */
+
+:root {
+  --green: #00e87b;
+  --green-dim: #00a858;
+  --green-glow: 0 0 12px rgba(0, 232, 123, 0.3);
+  --red: #ff4444;
+  --red-dim: #cc2222;
+  --amber: #ffaa00;
+  --surface: #0c0c0c;
+  --surface-raised: #131313;
+  --surface-hover: #1a1a1a;
+  --border: #1e1e1e;
+  --border-bright: #2a2a2a;
+  --text: #e8e8e8;
+  --text-dim: #888;
+  --text-muted: #555;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  background: #050505;
+  color: #e8e8e8;
+  line-height: 1.6;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
