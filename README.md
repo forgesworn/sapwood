@@ -4,7 +4,7 @@
 
 **Shape your signer** -- browser-based management UI for the [Heartwood](https://github.com/forgesworn/heartwood-esp32) ESP32 signing device.
 
-Connect your Heartwood via USB, open [sapwood.dev](https://forgesworn.github.io/sapwood/) in Chrome, and manage your signing device from the browser. No server, no install, no dependencies.
+Connect your Heartwood via USB, open [sapwood.forgesworn.dev](https://sapwood.forgesworn.dev/) in Chrome, and manage your signing device from the browser. No server, no install, no dependencies.
 
 ## Features
 
@@ -30,7 +30,7 @@ Secrets never leave the ESP32. The serial protocol only carries public keys, pol
 
 ## Quick start
 
-Visit [forgesworn.github.io/sapwood](https://forgesworn.github.io/sapwood/) in Chrome or Edge, plug in your Heartwood, and click **Connect USB**.
+Visit [sapwood.forgesworn.dev](https://sapwood.forgesworn.dev/) in Chrome or Edge, plug in your Heartwood, and click **Connect USB**.
 
 ### Local development
 
