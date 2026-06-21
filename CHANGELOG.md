@@ -3,6 +3,39 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.4.0 — 2026-06-21
+
+Closes the first-run gap: a brand-new device, just flashed, has no identity yet,
+and creating one was buried in Advanced with no "generate a fresh key" path. Now
+Home walks a newcomer through it, and the connect surface speaks plain English.
+
+### Added
+
+- **Guided first identity** — when a connected device has no identity yet, Home
+  leads with a calm setup flow: generate a fresh **recovery phrase**, write it
+  down (confirmed before you continue), name the signer, review its public
+  address, and write it to the device over USB. A WiFi signer then hands off to
+  *Manage over WiFi* automatically. Power users with an existing key still take
+  *I already have a recovery phrase or key* through to Advanced › Provision.
+- **`generateMnemonic`** in the provision library — the first time Sapwood can
+  create a brand-new identity, not just import one (12-word BIP-39, 24 optional).
+
+### Changed
+
+- **Plain-language connect surface.** *Connect USB* → **Connect by USB cable**,
+  *Connect WiFi (relay)* → **Connect over your network**, and the bridge option
+  moves behind an *Other ways to connect* disclosure (kept, just demoted).
+- The disconnected console no longer shows *Set up a new device* twice — the
+  prominent button stays; the duplicate header link is gone.
+
+### Tests
+
+- New pure-logic units (`first-identity`, `generateMnemonic`), a component test
+  for the whole first-identity flow (generate → confirm → write over a mocked
+  USB → WiFi handoff, plus NACK handling), Home coverage for the no-identity
+  branch, and E2E for the guided setup surface and the de-jargoned connect
+  options. 204 unit + 15 E2E, green.
+
 ## 0.3.0 — 2026-06-21
 
 A guided admin to match the guided flasher: once connected you land on a warm

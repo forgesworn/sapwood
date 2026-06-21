@@ -158,18 +158,22 @@
           onclick={handleConnectSerial}
           disabled={connecting || !('serial' in navigator)}
         >
-          {connecting ? 'Connecting...' : 'Connect USB'}
+          {connecting ? 'Connecting...' : 'Connect by USB cable'}
         </button>
         <button class="btn btn-secondary" onclick={openRelayForm} disabled={connecting}>
-          Connect WiFi (relay)
-        </button>
-        <button class="btn btn-secondary" onclick={() => showHttpForm = true} disabled={connecting}>
-          Connect to Bridge
+          Connect over your network
         </button>
       </div>
       {#if !('serial' in navigator)}
-        <p class="notice">Web Serial requires Chrome or Edge.</p>
+        <p class="notice">Connecting by USB cable needs Chrome or Edge.</p>
       {/if}
+      <details class="more-ways">
+        <summary>Other ways to connect</summary>
+        <button class="btn btn-secondary more-ways-btn" onclick={() => showHttpForm = true} disabled={connecting}>
+          Connect to a bridge
+        </button>
+        <p class="more-ways-note">For a device run through a bridge on your network (advanced).</p>
+      </details>
     {:else}
       <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectHttp() }}>
         <input
@@ -360,6 +364,15 @@
     font-size: 0.95rem;
   }
   .relay-known:focus { outline: none; border-color: var(--green-dim); }
+
+  .more-ways { margin-top: 1rem; }
+  .more-ways summary {
+    cursor: pointer; font-size: 0.82rem; color: var(--text-dim); letter-spacing: 0.02em;
+    list-style: revert; padding: 0.2rem 0;
+  }
+  .more-ways summary:hover { color: var(--text); }
+  .more-ways-btn { margin-top: 0.75rem; }
+  .more-ways-note { font-size: 0.78rem; color: var(--text-muted); margin: 0.5rem 0 0; line-height: 1.45; }
 
   .notice { font-size: 0.85rem; color: var(--amber); margin-top: 0.75rem; }
   .error { font-size: 0.9rem; color: var(--red); margin-top: 0.75rem; }

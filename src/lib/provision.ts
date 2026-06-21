@@ -8,7 +8,7 @@
 // The derived secret is sent to the ESP32 as a PROVISION frame. It is never
 // stored in the browser and is zeroed after transmission.
 
-import { mnemonicToSeed, validateMnemonic } from '@scure/bip39'
+import { generateMnemonic as bip39GenerateMnemonic, mnemonicToSeed, validateMnemonic } from '@scure/bip39'
 import { wordlist } from '@scure/bip39/wordlists/english.js'
 import { HDKey } from '@scure/bip32'
 import { hmac } from '@noble/hashes/hmac.js'
@@ -27,6 +27,15 @@ export type ProvisionMode = 'tree-mnemonic' | 'tree-nsec' | 'bunker'
 export interface ProvisionResult {
   secret: Uint8Array    // 32 bytes -- zeroize after use
   npub: string          // bech32 npub for confirmation
+}
+
+/**
+ * Generate a fresh BIP-39 recovery phrase. 128 bits of entropy -> 12 words,
+ * 256 -> 24. This is the newcomer path: the device's identity is created from
+ * this phrase, so it is the one thing the owner must write down and keep.
+ */
+export function generateMnemonic(strength: 128 | 256 = 128): string {
+  return bip39GenerateMnemonic(wordlist, strength)
 }
 
 /** Derive the 32-byte root secret from a BIP-39 mnemonic. */

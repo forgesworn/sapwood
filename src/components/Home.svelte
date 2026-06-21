@@ -4,10 +4,11 @@
   // next step, lists what is connected, and offers the phone handoff. The full
   // 9-tab cockpit is one tap away via `onadvanced` (the Advanced toggle).
   import {
-    device, refreshSlots, mgmtRevokeClient, mgmtApproveSigning, mgmtCanApproveSigning,
+    device, refreshSlots, refreshMasters, mgmtRevokeClient, mgmtApproveSigning, mgmtCanApproveSigning,
   } from '../lib/device.svelte.js'
   import { npubShort, npubToHex, getDeviceLabel, setDeviceLabel } from '../lib/known-devices.js'
   import ConnectApp from './ConnectApp.svelte'
+  import FirstIdentity from './FirstIdentity.svelte'
   import PhoneHandoff from './PhoneHandoff.svelte'
 
   interface Props {
@@ -16,6 +17,9 @@
   }
   let { onadvanced }: Props = $props()
 
+  // A brand-new device (just flashed) has no master until it's provisioned.
+  // Until then the signer has no identity, so Home leads with the guided setup.
+  const hasIdentity = $derived(device.masters.length > 0)
   const master = $derived(device.masters[0] ?? null)
   const pubHex = $derived(master ? npubToHex(master.npub) : null)
   const address = $derived(pubHex ? npubShort(pubHex) : (master?.npub ?? ''))
@@ -69,6 +73,21 @@
     <p class="home-error" role="status">⚠ {device.error}</p>
   {/if}
 
+  {#if !hasIdentity}
+    <!-- No master yet — the just-flashed first-run state. Lead with setup. -->
+    {#if device.mode === 'serial'}
+      <FirstIdentity onadvanced={() => onadvanced?.()} ondone={() => refreshMasters()} />
+    {:else}
+      <section class="needs-usb">
+        <h2 class="needs-usb-title">This signer needs an identity</h2>
+        <p class="needs-usb-body">
+          It doesn't have one yet. Creating it hands over the master key, so it only happens down a
+          cable you can hold — never over the network. Plug the device into a computer with a USB
+          cable, connect over USB, and the setup step appears here.
+        </p>
+      </section>
+    {/if}
+  {:else}
   <!-- Your signer -->
   <section class="signer">
     <span class="live-dot"></span>
@@ -147,6 +166,7 @@
 
   <!-- Manage from your phone -->
   <PhoneHandoff />
+  {/if}
 
   <!-- Footer: the escape hatch + the safety net -->
   <section class="footer">
@@ -172,6 +192,15 @@
     border-radius: 6px;
     word-break: break-word;
   }
+
+  .needs-usb {
+    background: #120f06;
+    border: 1px solid #3a3320;
+    border-radius: 8px;
+    padding: 1.4rem;
+  }
+  .needs-usb-title { font-size: 1.2rem; font-weight: 700; color: #cba24a; margin: 0 0 0.6rem; }
+  .needs-usb-body { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0; }
 
   .signer {
     display: flex;

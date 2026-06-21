@@ -4,7 +4,6 @@
   import Home from './components/Home.svelte'
   import Cockpit from './components/Cockpit.svelte'
   import { device } from './lib/device.svelte.js'
-  import { navigate } from './lib/route.svelte.js'
   import { importNotice } from './lib/import-link.svelte.js'
 
   // Two connected surfaces: the guided Home (default) and the advanced cockpit.
@@ -29,8 +28,6 @@
       {:else}
         <button class="header-link" onclick={() => (view = 'home')}>← Home</button>
       {/if}
-    {:else}
-      <button class="header-link" onclick={() => navigate('flash')}>Set up a new device →</button>
     {/if}
   </header>
 
