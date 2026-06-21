@@ -18,6 +18,7 @@
 import { ESPLoader, Transport } from 'esptool-js'
 import type { NetConfig } from './frame'
 import { buildConfigBlob } from './flash-config'
+import { releaseGrantedPorts } from './serial-ports'
 
 export interface BoardSpec {
   id: string
@@ -168,6 +169,12 @@ export async function flashDevice(
   //    rejects requestPort with "Must be handling a user gesture".
   log('Select the device serial port…')
   const port = await backend.requestPort()
+
+  // Close any port left open by a previous flash (or an ESP32-S3 USB
+  // re-enumeration after reset) before esptool opens this one — without this,
+  // the open fails with "port in use" until the device is unplugged. Run AFTER
+  // requestPort so its awaits don't consume the click's user-gesture activation.
+  await releaseGrantedPorts()
 
   // 2. Fetch firmware binaries for the selected board.
   log(`Fetching firmware for ${board.label}…`)
