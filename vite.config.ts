@@ -1,8 +1,40 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
+// Content-Security-Policy for the deployed app. Locks every resource-load vector
+// to our own origin so no third party (fonts, scripts, images, frames) can ever
+// be loaded — the font is self-hosted, so there is no IP leak, and this stops
+// one from being reintroduced. connect-src is necessarily open (ws/wss for
+// arbitrary Nostr relays, http(s) for a user's bridge); style 'unsafe-inline'
+// covers Svelte's inline width styles. Injected at BUILD only, so it never
+// breaks the dev server's HMR (which needs inline scripts + eval).
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self'",
+  "img-src 'self' data:",
+  "connect-src 'self' ws: wss: http: https:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ')
+
+function cspPlugin(): Plugin {
+  return {
+    name: 'inject-csp',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return html.replace(
+        '</head>',
+        `    <meta http-equiv="Content-Security-Policy" content="${CSP}" />\n  </head>`,
+      )
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [svelte(), cspPlugin()],
   // Relative base so the same build works at GitHub Pages' /sapwood/ subpath
   // (Web Serial initial provisioning) and at the bridge's / root on mypi.
   base: './',

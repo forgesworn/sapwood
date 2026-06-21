@@ -12,15 +12,10 @@
   import Settings from './components/Settings.svelte'
   import Connectivity from './components/Connectivity.svelte'
   import Flash from './components/Flash.svelte'
+  import { navigate } from './lib/route.svelte.js'
 
   let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
-
-<svelte:head>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-</svelte:head>
 
 <main>
   <header>
@@ -29,6 +24,7 @@
       <span class="divider"></span>
       <p class="tagline">SHAPE YOUR SIGNER</p>
     </div>
+    <button class="setup-link" onclick={() => navigate('flash')}>Set up a new device →</button>
   </header>
 
   <ConnectionPicker />
@@ -131,6 +127,11 @@
 
   header {
     margin-bottom: 2rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
   }
 
   .brand {
@@ -138,6 +139,18 @@
     align-items: baseline;
     gap: 1rem;
   }
+
+  .setup-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 0.8rem;
+    color: var(--green-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .setup-link:hover { color: var(--green); }
 
   h1 {
     margin: 0;
@@ -169,7 +182,9 @@
     margin: 1.5rem 0;
     border-bottom: 2px solid var(--border);
     overflow-x: auto;
+    scrollbar-width: none;
   }
+  nav::-webkit-scrollbar { display: none; }
 
   nav button {
     background: none;
@@ -202,5 +217,18 @@
   .panel {
     min-height: 400px;
     padding-top: 1.5rem;
+  }
+
+  /* Mobile-first: tighten the shell and let the tab bar scroll edge-to-edge
+     with comfortable (44px+) touch targets. */
+  @media (max-width: 640px) {
+    main { padding: 1.25rem 1rem 2rem; }
+    h1 { font-size: 1.5rem; letter-spacing: 0.08em; }
+    .divider { height: 1rem; }
+    .tagline { font-size: 0.68rem; }
+    .setup-link { font-size: 0.72rem; }
+    nav { margin: 1rem -1rem; padding: 0 1rem; }
+    nav button { padding: 0.85rem 0.9rem; }
+    .panel { min-height: 0; padding-top: 1.25rem; }
   }
 </style>

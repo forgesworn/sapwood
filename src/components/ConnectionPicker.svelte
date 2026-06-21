@@ -319,4 +319,16 @@
 
   .notice { font-size: 0.85rem; color: var(--amber); margin-top: 0.75rem; }
   .error { font-size: 0.9rem; color: var(--red); margin-top: 0.75rem; }
+
+  /* Mobile: stack the connect actions and let forms fill the width. */
+  @media (max-width: 640px) {
+    .connection { padding: 1rem; }
+    .connect-buttons { flex-direction: column; }
+    .connect-buttons .btn { width: 100%; }
+    .http-form { flex-direction: column; align-items: stretch; }
+    .http-form input { width: 100%; }
+    .relay-known { width: 100%; }
+    .status-row { flex-wrap: wrap; }
+    .btn-disconnect { margin-left: 0; width: 100%; }
+  }
 </style>
