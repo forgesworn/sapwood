@@ -7,6 +7,10 @@ import { HttpTransport } from './http.js'
 const mockFetch = vi.fn()
 
 beforeEach(() => {
+  // Reset call history + queued responses so order-sensitive assertions
+  // (toHaveBeenNthCalledWith) don't see calls leaked from prior tests —
+  // mockFetch is module-level and vi.restoreAllMocks() doesn't clear a vi.fn().
+  mockFetch.mockReset()
   vi.stubGlobal('fetch', mockFetch)
   vi.stubGlobal('localStorage', {
     store: {} as Record<string, string>,
