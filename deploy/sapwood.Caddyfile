@@ -1,0 +1,21 @@
+# sapwood.forgesworn.dev — the Flasher + admin SPA, served as static files from
+# /opt/sapwood on the shared "routing" box (95.217.39.110).
+#
+# Install: copy to /etc/caddy/conf.d/ (imported by the main Caddyfile), validate,
+# reload. This block is fully self-contained and touches no other tenant.
+#
+# Auto-TLS: the A record is grey-cloud (DNS-only), so Caddy sees the real client
+# and issues a Let's Encrypt cert. HTTPS is required for the flasher's Web Serial.
+sapwood.forgesworn.dev {
+	encode gzip zstd
+	root * /opt/sapwood
+	# SPA: unknown paths fall back to index.html (routing is hash-based anyway).
+	try_files {path} /index.html
+	file_server
+	header {
+		# Privacy + hardening. The app's own CSP ships in index.html.
+		Referrer-Policy no-referrer
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}

@@ -1,0 +1,44 @@
+name: Deploy to Hetzner
+
+# Deploys the built SPA to sapwood.forgesworn.dev on the shared "routing" box.
+# Additive and tenant-isolated: only ever rsyncs into /opt/sapwood. The Caddy
+# vhost (deploy/sapwood.Caddyfile) is installed once by hand — see deploy/README.md.
+#
+# Requires repo secret HETZNER_SSH_KEY (a private key whose public half is in the
+# box's deploy@ authorized_keys). Until that secret exists this workflow no-ops.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-sapwood-hetzner
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy to Hetzner (sapwood.forgesworn.dev)
+        env:
+          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+        run: |
+          if [ -z "$HETZNER_SSH_KEY" ]; then
+            echo "HETZNER_SSH_KEY not set — skipping deploy (set the secret to enable)."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$HETZNER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 95.217.39.110 >> ~/.ssh/known_hosts
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            dist/ deploy@95.217.39.110:/opt/sapwood/
