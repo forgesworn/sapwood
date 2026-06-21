@@ -46,3 +46,17 @@ export function regenerateOperator(): Operator {
   localStorage.removeItem(LS_KEY)
   return getOrCreateOperator()
 }
+
+/**
+ * Persist a specific operator secret (import), e.g. to match the key baked into
+ * a device that was flashed from a different browser. Validates 64-hex.
+ */
+export function importOperator(skHex: string): Operator {
+  const clean = skHex.trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(clean)) {
+    throw new Error('operator secret must be 64 hex characters (32 bytes)')
+  }
+  const op = deriveOperator(clean) // throws if the secret can't derive a pubkey
+  localStorage.setItem(LS_KEY, clean)
+  return op
+}
