@@ -1,5 +1,6 @@
 <script lang="ts">
   import { device, refreshMasters } from '../lib/device.svelte.js'
+  import PhoneHandoff from './PhoneHandoff.svelte'
 
   const MODE_LABELS: Record<number, string> = {
     0: 'BUNKER',
@@ -50,6 +51,10 @@
         <div class="npub">{master.npub}</div>
       </div>
     {/each}
+  {/if}
+
+  {#if device.connected && device.masters.length > 0}
+    <PhoneHandoff />
   {/if}
 </div>
 
