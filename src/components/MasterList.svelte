@@ -18,6 +18,8 @@
 
   {#if !device.connected}
     <p class="empty">Connect to view masters.</p>
+  {:else if device.mode === 'relay' && device.relayStatus === null && !device.error}
+    <p class="empty">Loading masters over the relay…</p>
   {:else if device.mode === 'relay' && device.relayStatus === null && device.error}
     <!-- Connected over the relay but get_status never came back. A wifi device
          always has a master, so this is a round-trip failure, not an empty list.
