@@ -3,6 +3,29 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.4.2 — 2026-06-21
+
+Make the *Connect over your network* (WiFi) form readable, and let you point at a
+device by `npub1…` **or** a NIP-05 name.
+
+### Added
+
+- **NIP-05 names in WiFi connect.** The device address box now accepts a name like
+  `you@example.com` as well as an `npub1…` or hex key. The name is resolved to the
+  device's key only when you press **Connect** — never while you type — so no
+  passive lookup leaks your IP. If the name advertises its own relays and the relay
+  box is empty, those are used.
+
+### Changed
+
+- **Roomier, self-explaining WiFi connect.** The relay form no longer borrows the
+  bridge form's cramped fixed-width inputs. It now has full-width, labelled boxes
+  with numbered steps and plain-language hints: what your device's address is
+  (an `npub1…` or NIP-05 name, *safe to share, like a postal address*) and what a
+  relay is (*a shared postbox on the internet — your browser drops off a message
+  and the device picks it up*). The known-device picker prefills a real `npub1…`
+  instead of raw hex, so the on-screen hint matches what you see.
+
 ## 0.4.1 — 2026-06-21
 
 Home polish: one signer panel instead of two, and no jarring browser dialogs.

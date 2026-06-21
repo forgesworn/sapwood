@@ -3,7 +3,7 @@
   import { listKnownDevices, type KnownDevice } from '../lib/known-devices.js'
   import { probeBridge } from '../lib/bridge-probe.js'
   import { navigate } from '../lib/route.svelte.js'
-  import { nip19 } from 'nostr-tools'
+  import { nip05, nip19 } from 'nostr-tools'
 
   let showHttpForm = $state(false)
   let httpAddress = $state(HttpTransport.savedAddress() ?? '')
@@ -19,7 +19,7 @@
   function openRelayForm() {
     knownDevices = listKnownDevices()
     if (knownDevices.length) {
-      relayPubInput = knownDevices[0].pubHex
+      relayPubInput = nip19.npubEncode(knownDevices[0].pubHex)
       relayUrlInput = knownDevices[0].relays[0] ?? relayUrlInput
     }
     relayError = ''
@@ -29,7 +29,7 @@
   function pickKnown(e: Event) {
     const hex = (e.target as HTMLSelectElement).value
     const d = knownDevices.find((k) => k.pubHex === hex)
-    if (d) { relayPubInput = d.pubHex; relayUrlInput = d.relays[0] ?? relayUrlInput }
+    if (d) { relayPubInput = nip19.npubEncode(d.pubHex); relayUrlInput = d.relays[0] ?? relayUrlInput }
   }
 
   /** Accept an npub or 64-char hex; return x-only hex or null. */
@@ -44,13 +44,34 @@
   }
 
   async function handleConnectRelay() {
-    const hex = toHex(relayPubInput)
-    if (!hex) { relayError = "That doesn't look like a device address — it should start with npub1…"; return }
-    const relays = relayUrlInput.split(/[\n,]/).map((r) => r.trim()).filter(Boolean)
-    if (!relays.length) { relayError = 'Enter at least one relay URL.'; return }
     relayError = ''
     connecting = true
     try {
+      const raw = relayPubInput.trim()
+      let hex = toHex(raw)
+      let discoveredRelays: string[] = []
+      // A NIP-05 name (you@example.com) is resolved to the device's key here, on
+      // submit only — nothing is looked up while you type, so no IP leak.
+      if (!hex && nip05.isNip05(raw)) {
+        const profile = await nip05.queryProfile(raw)
+        if (!profile?.pubkey) {
+          relayError = `Couldn't find a device for "${raw}". Check the name, or paste its npub1… address instead.`
+          return
+        }
+        hex = profile.pubkey
+        discoveredRelays = profile.relays ?? []
+      }
+      if (!hex) {
+        relayError = "That doesn't look like a device — use its npub1… address or a name like you@example.com."
+        return
+      }
+      // The relay box wins; fall back to any relays the name advertised.
+      let relays = relayUrlInput.split(/[\n,]/).map((r) => r.trim()).filter(Boolean)
+      if (!relays.length) relays = discoveredRelays
+      if (!relays.length) {
+        relayError = 'Add at least one relay (or use a name that lists its own).'
+        return
+      }
       const label = knownDevices.find((k) => k.pubHex === hex)?.label
       await connectRelay(hex, relays, label)
       showRelayForm = false
@@ -115,38 +136,69 @@
       <span class="conn-label">DISCONNECTED</span>
     </div>
     {#if showRelayForm}
-      <p class="relay-help">
-        Enter your device's address — its public key, starting with <code>npub1…</code> (safe to
-        share). Easiest: scan the QR from the computer where you set it up — then there's nothing to type.
-      </p>
-      <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectRelay() }}>
-        {#if knownDevices.length}
-          <select class="relay-known" onchange={pickKnown}>
-            {#each knownDevices as d (d.pubHex)}
-              <option value={d.pubHex}>{d.label}</option>
-            {/each}
-          </select>
-        {/if}
-        <input
-          type="text"
-          bind:value={relayPubInput}
-          placeholder="your device's address (npub1…)"
-          disabled={connecting}
-        />
-        <input
-          type="text"
-          bind:value={relayUrlInput}
-          placeholder="wss://relay.trotters.cc"
-          disabled={connecting}
-        />
-        <button type="submit" class="btn btn-primary" disabled={connecting || !relayPubInput.trim()}>
-          {connecting ? 'Connecting...' : 'Connect'}
-        </button>
-        <button type="button" class="btn btn-ghost" onclick={() => showRelayForm = false}>
-          Cancel
-        </button>
-      </form>
-      {#if relayError}<p class="error">{relayError}</p>{/if}
+      <div class="relay-setup">
+        <h3 class="relay-title">Connect over your network</h3>
+        <p class="relay-lead">
+          No cable needed — your Heartwood is on your WiFi. To find it, fill in the two boxes
+          below. Easiest of all: on the computer where you first set the device up, show its QR
+          code and scan it — both boxes then fill themselves in.
+        </p>
+        <form class="relay-form" onsubmit={(e) => { e.preventDefault(); handleConnectRelay() }}>
+          {#if knownDevices.length}
+            <label class="field">
+              <span class="field-label">A device you've used before</span>
+              <select class="field-input" onchange={pickKnown} disabled={connecting}>
+                {#each knownDevices as d (d.pubHex)}
+                  <option value={d.pubHex}>{d.label}</option>
+                {/each}
+              </select>
+              <span class="field-hint">Pick one to fill in both boxes, or type a new device below.</span>
+            </label>
+          {/if}
+
+          <label class="field">
+            <span class="field-label">1 · Your device's address</span>
+            <input
+              class="field-input"
+              type="text"
+              bind:value={relayPubInput}
+              placeholder="npub1… or you@example.com"
+              disabled={connecting}
+            />
+            <span class="field-hint">
+              Its <code>npub1…</code> address, or a name like <code>you@example.com</code> if it has
+              one — both are safe to share. You chose this when setting the device up, so if that was
+              on this computer it's already filled in.
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">2 · The relay it talks through</span>
+            <input
+              class="field-input"
+              type="text"
+              bind:value={relayUrlInput}
+              placeholder="wss://relay.trotters.cc"
+              disabled={connecting}
+            />
+            <span class="field-hint">
+              A relay is a shared postbox on the internet: your browser drops off a message and the
+              device picks it up. Use the same one you chose during setup.
+            </span>
+          </label>
+
+          {#if relayError}<p class="error">{relayError}</p>{/if}
+
+          <div class="relay-actions">
+            <button type="submit" class="btn btn-primary" disabled={connecting || !relayPubInput.trim()}>
+              {connecting ? 'Connecting…' : 'Connect'}
+            </button>
+            <button type="button" class="btn btn-ghost" onclick={() => showRelayForm = false}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
     {:else if !showHttpForm}
       <button class="btn btn-setup" onclick={() => navigate('flash')}>
         Set up a new device →
@@ -263,18 +315,60 @@
     margin: 1.5rem 0 0.6rem;
   }
 
-  .relay-help {
-    font-size: 0.82rem;
+  /* WiFi (relay) connect: a roomy, labelled form that explains itself. */
+  .relay-setup { margin-top: 1.25rem; }
+  .relay-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 0.5rem;
+    letter-spacing: 0.02em;
+  }
+  .relay-lead {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.55;
+    margin: 0 0 1.4rem;
+  }
+  .relay-form { display: flex; flex-direction: column; gap: 1.2rem; }
+
+  .field { display: flex; flex-direction: column; gap: 0.45rem; }
+  .field-label {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  .field-input {
+    width: 100%;
+    background: #080808;
+    border: 1px solid var(--border-bright);
+    color: var(--text);
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 1rem;
+  }
+  .field-input::placeholder { color: #444; }
+  .field-input:focus {
+    outline: none;
+    border-color: var(--green-dim);
+    box-shadow: var(--green-glow);
+  }
+  .field-hint {
+    font-size: 0.8rem;
     color: var(--text-dim);
     line-height: 1.5;
-    margin: 1.25rem 0 0.75rem;
   }
-  .relay-help code {
+  .field-hint code {
     color: var(--green-dim);
     background: #0a0a0a;
     padding: 0.05rem 0.3rem;
     border-radius: 3px;
   }
+
+  .relay-actions { display: flex; gap: 0.75rem; margin-top: 0.25rem; }
+  .relay-actions .btn-primary { flex: 1; }
 
   .connect-buttons {
     display: flex;
@@ -354,17 +448,6 @@
   .http-form input:focus { outline: none; border-color: var(--green-dim); }
   .http-form { flex-wrap: wrap; }
 
-  .relay-known {
-    background: #080808;
-    border: 1px solid var(--border-bright);
-    color: var(--text);
-    padding: 0.65rem 1rem;
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 0.95rem;
-  }
-  .relay-known:focus { outline: none; border-color: var(--green-dim); }
-
   .more-ways { margin-top: 1rem; }
   .more-ways summary {
     cursor: pointer; font-size: 0.82rem; color: var(--text-dim); letter-spacing: 0.02em;
@@ -384,7 +467,8 @@
     .connect-buttons .btn { width: 100%; }
     .http-form { flex-direction: column; align-items: stretch; }
     .http-form input { width: 100%; }
-    .relay-known { width: 100%; }
+    .relay-actions { flex-direction: column; }
+    .relay-actions .btn { width: 100%; }
     .status-row { flex-wrap: wrap; }
     .btn-disconnect { margin-left: 0; width: 100%; }
   }
