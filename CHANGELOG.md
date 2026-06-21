@@ -3,6 +3,21 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.4.1 — 2026-06-21
+
+Home polish: one signer panel instead of two, and no jarring browser dialogs.
+
+### Changed
+
+- **One connection panel on Home.** The technical *CONNECTED · WIFI — …* row no
+  longer stacks above the *Your signer is live* card. The signer card now owns
+  the connection state ("Connected over WiFi/USB cable") and the **Disconnect**
+  action; the picker only shows when disconnected or in Advanced. A device with
+  no identity yet keeps a slim connection line above the setup flow.
+- **In-app disconnect confirmation.** Disconnecting an app now asks inline on the
+  card (*Disconnect this app? · Yes, disconnect · Cancel*) instead of a native
+  `confirm()` dialog, so the flow stays in Sapwood's own look.
+
 ## 0.4.0 — 2026-06-21
 
 Closes the first-run gap: a brand-new device, just flashed, has no identity yet,

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, fireEvent, screen } from '@testing-library/svelte'
+import { render, fireEvent, screen, within } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
 import Home from './Home.svelte'
-import { device, refreshSlots, mgmtApproveSigning } from '../lib/device.svelte.js'
+import { device, refreshSlots, mgmtApproveSigning, mgmtRevokeClient } from '../lib/device.svelte.js'
 import { setDeviceLabel } from '../lib/known-devices.js'
 
 const HEX = 'c'.repeat(64)
@@ -15,6 +15,7 @@ vi.mock('../lib/device.svelte.js', () => ({
   device: { connected: true, mode: 'relay', error: null, masters: [], slots: [] },
   refreshSlots: vi.fn(),
   refreshMasters: vi.fn().mockResolvedValue(undefined),
+  disconnect: vi.fn().mockResolvedValue(undefined),
   mgmtApproveSigning: vi.fn().mockResolvedValue(undefined),
   mgmtRevokeClient: vi.fn().mockResolvedValue(undefined),
   mgmtCanApproveSigning: vi.fn(() => true),
@@ -31,6 +32,7 @@ beforeEach(() => {
   ;(device as { slots: unknown[] }).slots = []
   vi.mocked(refreshSlots).mockClear()
   vi.mocked(mgmtApproveSigning).mockClear()
+  vi.mocked(mgmtRevokeClient).mockClear()
 })
 
 describe('Home', () => {
@@ -69,6 +71,26 @@ describe('Home', () => {
     await fireEvent.input(input, { target: { value: 'home rig' } })
     await fireEvent.click(screen.getByText('Save'))
     expect(screen.getByText('home rig')).toBeTruthy()
+  })
+
+  it('shows the connection + Disconnect in the signer card (no separate panel)', () => {
+    render(Home)
+    expect(screen.getByText(/Connected over/)).toBeTruthy()
+    expect(screen.getByText('Disconnect')).toBeTruthy()
+  })
+
+  it('confirms in-app before disconnecting an app (no native dialog)', async () => {
+    ;(device as { slots: unknown[] }).slots = [
+      { slot_index: 2, label: 'Amethyst', current_pubkey: 'e'.repeat(64), signing_approved: true, allowed_kinds: [], auto_approve: true },
+    ]
+    render(Home)
+    const card = screen.getByText('Amethyst').closest('.app-card') as HTMLElement
+    await fireEvent.click(within(card).getByText('Disconnect'))
+    // Inline confirmation appears; nothing is revoked until confirmed.
+    expect(screen.getByText('Disconnect this app?')).toBeTruthy()
+    expect(vi.mocked(mgmtRevokeClient)).not.toHaveBeenCalled()
+    await fireEvent.click(screen.getByText('Yes, disconnect'))
+    expect(vi.mocked(mgmtRevokeClient)).toHaveBeenCalledWith(2)
   })
 
   it('leads with guided setup when the device has no identity yet (over USB)', () => {

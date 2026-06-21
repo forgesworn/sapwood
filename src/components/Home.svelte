@@ -4,7 +4,8 @@
   // next step, lists what is connected, and offers the phone handoff. The full
   // 9-tab cockpit is one tap away via `onadvanced` (the Advanced toggle).
   import {
-    device, refreshSlots, refreshMasters, mgmtRevokeClient, mgmtApproveSigning, mgmtCanApproveSigning,
+    device, refreshSlots, refreshMasters, disconnect,
+    mgmtRevokeClient, mgmtApproveSigning, mgmtCanApproveSigning,
   } from '../lib/device.svelte.js'
   import { npubShort, npubToHex, getDeviceLabel, setDeviceLabel } from '../lib/known-devices.js'
   import ConnectApp from './ConnectApp.svelte'
@@ -25,11 +26,19 @@
   const address = $derived(pubHex ? npubShort(pubHex) : (master?.npub ?? ''))
   const canApprove = $derived(mgmtCanApproveSigning())
 
+  // How this signer is reached, in plain words — folded into the signer card so
+  // Home shows one connection panel, not two.
+  const transportLabel = $derived(
+    device.mode === 'serial' ? 'USB cable' : device.mode === 'relay' ? 'WiFi' : 'a bridge',
+  )
+
   // Friendly name: a saved label wins; otherwise a gentle default.
   let customLabel = $state<string | null>(null)
   let editing = $state(false)
   let nameInput = $state('')
   let busySlot = $state<number | null>(null)
+  // Which app card is asking to confirm a disconnect (inline, not a native dialog).
+  let confirmingSlot = $state<number | null>(null)
 
   // Re-read the saved label whenever the connected device changes.
   $effect(() => {
@@ -59,8 +68,8 @@
     finally { busySlot = null }
   }
 
-  async function revoke(slotIndex: number, label: string) {
-    if (!confirm(`Disconnect "${label || `app ${slotIndex}`}"? It will lose access to your signer.`)) return
+  async function revoke(slotIndex: number) {
+    confirmingSlot = null
     busySlot = slotIndex
     try { await mgmtRevokeClient(slotIndex) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Disconnect failed' }
@@ -74,7 +83,13 @@
   {/if}
 
   {#if !hasIdentity}
-    <!-- No master yet — the just-flashed first-run state. Lead with setup. -->
+    <!-- No master yet — the just-flashed first-run state. Lead with setup. A slim
+         connection line stands in for the signer card (there's no identity yet). -->
+    <div class="conn-line">
+      <span class="conn-dot"></span>
+      <span class="conn-text">Connected over {transportLabel}</span>
+      <button class="conn-disconnect" onclick={() => disconnect()}>Disconnect</button>
+    </div>
     {#if device.mode === 'serial'}
       <FirstIdentity onadvanced={() => onadvanced?.()} ondone={() => refreshMasters()} />
     {:else}
@@ -114,6 +129,10 @@
         <p class="signer-addr"><span class="addr-tag">address</span>{address}</p>
         <p class="signer-hint">This is your signer's public address — safe to share.</p>
       {/if}
+      <div class="signer-foot">
+        <span class="signer-conn">Connected over {transportLabel}</span>
+        <button class="signer-disconnect" onclick={() => disconnect()}>Disconnect</button>
+      </div>
     </div>
   </section>
 
@@ -147,14 +166,22 @@
             </span>
           </div>
           <div class="app-actions">
-            {#if slot.current_pubkey && !slot.signing_approved && canApprove}
-              <button class="btn-allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot.slot_index)}>
-                {busySlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
+            {#if confirmingSlot === slot.slot_index}
+              <span class="confirm-q">Disconnect this app?</span>
+              <button class="btn-revoke confirm-yes" disabled={busySlot === slot.slot_index} onclick={() => revoke(slot.slot_index)}>
+                {busySlot === slot.slot_index ? 'Disconnecting…' : 'Yes, disconnect'}
+              </button>
+              <button class="link-btn" onclick={() => (confirmingSlot = null)}>Cancel</button>
+            {:else}
+              {#if slot.current_pubkey && !slot.signing_approved && canApprove}
+                <button class="btn-allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot.slot_index)}>
+                  {busySlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
+                </button>
+              {/if}
+              <button class="btn-revoke" onclick={() => (confirmingSlot = slot.slot_index)}>
+                Disconnect
               </button>
             {/if}
-            <button class="btn-revoke" disabled={busySlot === slot.slot_index} onclick={() => revoke(slot.slot_index, slot.label)}>
-              Disconnect
-            </button>
           </div>
         </div>
       {/each}
@@ -227,6 +254,32 @@
     padding: 0.05rem 0.35rem; margin-right: 0.5rem; vertical-align: middle;
   }
   .signer-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.3rem 0 0; }
+  .signer-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid #0e2c1f;
+  }
+  .signer-conn { font-size: 0.78rem; color: var(--text-dim); }
+  .signer-disconnect {
+    background: none; border: 1px solid #442222; color: var(--red); cursor: pointer;
+    font-family: inherit; font-size: 0.78rem; padding: 0.3rem 0.8rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .signer-disconnect:hover { background: #1a0808; }
+
+  /* The no-identity stand-in for the signer card. */
+  .conn-line { display: flex; align-items: center; gap: 0.6rem; padding: 0.2rem 0.1rem; }
+  .conn-dot {
+    width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+    background: var(--green); box-shadow: var(--green-glow);
+  }
+  .conn-text { font-size: 0.82rem; color: var(--text-dim); flex: 1; }
+  .conn-disconnect {
+    background: none; border: 1px solid #442222; color: var(--red); cursor: pointer;
+    font-family: inherit; font-size: 0.78rem; padding: 0.3rem 0.8rem; border-radius: 4px;
+  }
+  .conn-disconnect:hover { background: #1a0808; }
+
+  .confirm-q { font-size: 0.8rem; color: var(--text-dim); }
+  .confirm-yes { border: 1px solid #442222; border-radius: 4px; padding: 0.35rem 0.7rem; }
 
   .rename-pencil {
     background: none; border: none; color: var(--text-muted); cursor: pointer;
