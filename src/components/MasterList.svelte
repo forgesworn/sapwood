@@ -18,6 +18,20 @@
 
   {#if !device.connected}
     <p class="empty">Connect to view masters.</p>
+  {:else if device.mode === 'relay' && device.relayStatus === null && device.error}
+    <!-- Connected over the relay but get_status never came back. A wifi device
+         always has a master, so this is a round-trip failure, not an empty list.
+         Surface it instead of the misleading "No masters provisioned". -->
+    <div class="relay-error">
+      <p class="err-lead">⚠ Connected, but the device isn't answering over the relay.</p>
+      <p class="err-detail">{device.error}</p>
+      <p class="err-talking">Sapwood is talking to: <code>{device.portInfo}</code></p>
+      <p class="err-hint">This almost always means one of two things:</p>
+      <ul>
+        <li><strong>Different relays.</strong> Sapwood and the device must share at least one relay. Check the device booted onto the relay shown above (its boot log prints “WiFi-standalone mode — entering relay loop”).</li>
+        <li><strong>Operator-key mismatch.</strong> The device only accepts management signed by the operator key baked in when you flashed it. If this browser’s key differs (re-flashed from a different browser/machine, or storage was cleared), the device silently ignores the request.</li>
+      </ul>
+    </div>
   {:else if device.masters.length === 0}
     <p class="empty">No masters provisioned.</p>
   {:else}
@@ -106,4 +120,28 @@
   }
 
   .empty { color: var(--text-muted); font-size: 1rem; }
+
+  .relay-error {
+    border: 1px solid #3a2320;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    background: #160c0a;
+  }
+  .err-lead { color: var(--amber); font-weight: 600; margin: 0 0 0.6rem; }
+  .err-detail {
+    font-size: 0.8rem;
+    color: #c77;
+    font-family: inherit;
+    background: #0a0a0a;
+    border-radius: 3px;
+    padding: 0.4rem 0.6rem;
+    margin: 0 0 0.8rem;
+    word-break: break-word;
+  }
+  .err-talking { font-size: 0.78rem; color: var(--text-dim); margin: 0 0 0.8rem; }
+  .err-talking code { color: var(--green-dim); word-break: break-all; }
+  .err-hint { font-size: 0.82rem; color: var(--text-dim); margin: 0 0 0.4rem; }
+  .relay-error ul { margin: 0; padding-left: 1.2rem; }
+  .relay-error li { font-size: 0.8rem; color: #999; line-height: 1.5; margin-bottom: 0.5rem; }
+  .relay-error strong { color: #ccc; }
 </style>

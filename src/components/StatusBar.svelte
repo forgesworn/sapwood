@@ -12,6 +12,8 @@
       <span class="stat">{device.bridgeInfo.mode}</span>
     {/if}
   </div>
+{:else if device.connected && device.error}
+  <div class="status-error">⚠ {device.error}</div>
 {/if}
 
 <style>
@@ -24,6 +26,16 @@
   }
 
   .stat { color: var(--text-dim); }
+
+  .status-error {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    color: var(--amber);
+    background: #160c0a;
+    border: 1px solid #3a2320;
+    border-radius: 4px;
+    word-break: break-word;
+  }
   .dot {
     width: 4px;
     height: 4px;
