@@ -172,7 +172,21 @@
     {/if}
     <button class="btn" onclick={handleCancel}>Provision Another</button>
   {:else if device.mode !== 'serial'}
-    <p class="warning">Provisioning requires a direct USB connection. Secrets never travel over the network.</p>
+    <div class="usb-gate">
+      <p class="usb-gate-lead">🔌 Plug in a USB cable to set up this device.</p>
+      <p class="usb-gate-why">
+        Setting up creates the device's <strong>master key</strong> — the one secret that
+        every account on it is built from. Think of it as the master key to a whole building:
+        if it ever gets out, every door is open and you can't change the locks.
+      </p>
+      <p class="usb-gate-why">
+        Because it matters that much, we only ever hand it over down a <strong>cable you can
+        see and hold</strong> — never over WiFi or the internet, where it would pass through
+        routers and computers you don't control. Once the device is set up, everything else
+        (adding apps, approving, revoking) <em>can</em> be done over WiFi — just not this.
+      </p>
+      <p class="usb-gate-todo">→ Connect the device to this computer with a USB cable, then come back to this tab.</p>
+    </div>
   {:else if status === 'confirming'}
     <div class="confirm">
       <p class="info">Confirm this is the correct pubkey:</p>
@@ -300,6 +314,13 @@
 
   .info { font-size: 0.8rem; color: #888; margin: 0; }
   .warning { font-size: 0.8rem; color: #a93; }
+
+  .usb-gate { border: 1px solid #3a3320; border-radius: 4px; padding: 0.9rem 1.1rem; background: #120f06; }
+  .usb-gate-lead { font-size: 0.9rem; color: #cba24a; font-weight: 600; margin: 0 0 0.7rem; }
+  .usb-gate-why { font-size: 0.8rem; color: #999; line-height: 1.55; margin: 0 0 0.6rem; }
+  .usb-gate-why strong { color: #cba24a; font-weight: 600; }
+  .usb-gate-why em { color: #4a9; font-style: normal; }
+  .usb-gate-todo { font-size: 0.8rem; color: #4a9; line-height: 1.45; margin: 0.4rem 0 0; }
   .error { font-size: 0.8rem; color: #a44; margin-top: 0.5rem; }
   .success { font-size: 0.85rem; color: #4a9; }
   .security-note { font-size: 0.7rem; color: #444; margin-top: 1.5rem; border-top: 1px solid #1a1a1a; padding-top: 0.75rem; }
