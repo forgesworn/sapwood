@@ -3,7 +3,7 @@
   // Desktop + USB only. Walks a newcomer from "plug it in" to "your signer is
   // live" in one calm flow. All decisions delegate to the pure wizard lib; the
   // flash itself goes through flashDevice (same path the old Flash tab used).
-  import { flashDevice, BOARDS } from './lib/flasher.js'
+  import { flashDevice, BOARDS, type FlasherBackend } from './lib/flasher.js'
   import { getOrCreateOperator, type Operator } from './lib/op-mgmt.js'
   import { device, disconnect } from './lib/device.svelte.js'
   import { navigate } from './lib/route.svelte.js'
@@ -27,6 +27,13 @@
   let flashError = $state('')
   let operator = $state<Operator | null>(null)
   let copied = $state(false)
+
+  // E2E seam: tests inject a fake backend on window so the whole flash flow can
+  // run in a real browser without hardware. Undefined in production, so
+  // flashDevice falls back to its default esptool-js backend.
+  function flashBackend(): FlasherBackend | undefined {
+    return (globalThis as unknown as { __sapwoodFlashBackend?: FlasherBackend }).__sapwoodFlashBackend
+  }
 
   const board = $derived(BOARDS.find((b) => b.id === data.boardId))
   const netError = $derived(networkError(data))
@@ -75,7 +82,7 @@
         fullErase: data.fullErase,
         onLog: appendLog,
         onProgress: (p, label) => { pct = p; rawStage = label },
-      })
+      }, flashBackend())
       operator = op
       step = 'done'
     } catch (e) {
