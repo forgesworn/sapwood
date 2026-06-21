@@ -85,6 +85,9 @@
       }, flashBackend())
       operator = op
       step = 'done'
+      // Tell the console this is a freshly-flashed device still on USB, so it
+      // leads with "finish setting up" rather than "set up a new device".
+      try { sessionStorage.setItem('heartwood.justFlashed', '1') } catch { /* ignore */ }
     } catch (e) {
       flashError = e instanceof Error ? e.message : String(e)
     }
@@ -260,24 +263,33 @@
 
       {#if operator}
         <div class="operator">
-          <p class="op-title">⚿ Your operator key</p>
-          <p class="op-desc">
-            This is how you manage the device remotely from now on. Keep it safe — it is the
-            management authority, <strong>not</strong> the device's secret key.
-          </p>
-          <pre class="op-secret">NOSTR_SECRET_KEY={operator.skHex}</pre>
-          <button class="btn small" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy'}</button>
+          {#if operator.mnemonic}
+            <p class="op-title">✍ Write down these 12 words</p>
+            <p class="op-desc">
+              They're the master key to manage this signer from anywhere later. Keep them safe and
+              private — like the keys to your house. You don't need them for the next steps.
+            </p>
+            <pre class="op-phrase">{operator.mnemonic}</pre>
+          {:else}
+            <p class="op-title">⚿ Your operator key</p>
+            <p class="op-desc">Keep this safe — it's how you manage this signer remotely later.</p>
+          {/if}
+          <details class="op-advanced">
+            <summary>Advanced — connect bray to this signer</summary>
+            <pre class="op-secret">NOSTR_SECRET_KEY={operator.skHex}</pre>
+            <button class="btn small" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy'}</button>
+          </details>
         </div>
       {/if}
 
       <div class="next">
-        <p class="next-title">Next</p>
+        <p class="next-title">One more step</p>
         <p class="note">
-          Open the console to give your device an identity and connect your apps. Once it's set up,
-          you can manage it from your phone — the console shows a QR to scan.
+          Leave it plugged in. Next we'll give your signer a <strong>name</strong> and create its
+          <strong>keys</strong> — the console picks up the cable automatically and walks you through it.
         </p>
         <div class="actions">
-          <button class="btn primary" onclick={() => navigate('admin')}>Open the console</button>
+          <button class="btn primary" onclick={() => navigate('admin')}>Continue setup →</button>
           <button class="btn ghost" onclick={restart}>Set up another</button>
         </div>
       </div>
@@ -378,8 +390,11 @@
   .operator { margin: 1.25rem 0; border: 1px solid var(--green-dim); border-radius: 6px; padding: 1rem; background: #06120e; }
   .op-title { font-size: 0.9rem; color: var(--green); margin: 0 0 0.4rem; font-weight: 600; }
   .op-desc { font-size: 0.8rem; color: #9a9; margin: 0 0 0.6rem; line-height: 1.5; }
-  .op-desc strong { color: var(--text); }
   .op-secret { background: #030303; border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-size: 0.68rem; color: var(--green); white-space: pre-wrap; word-break: break-all; margin: 0 0 0.6rem; }
+  .op-phrase { background: #030303; border: 1px solid var(--amber, #d9a441); border-radius: 4px; padding: 0.7rem; font-size: 0.85rem; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-spacing: 0.3rem; margin: 0 0 0.8rem; }
+  .op-advanced { margin-top: 0.5rem; }
+  .op-advanced summary { font-size: 0.72rem; color: var(--text-muted); cursor: pointer; }
+  .op-advanced .op-secret { margin-top: 0.5rem; }
 
   .next { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1.25rem; }
   .next-title { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }

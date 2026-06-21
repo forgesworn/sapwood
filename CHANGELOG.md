@@ -3,6 +3,51 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.5.0 — 2026-06-21
+
+Back the operator key — your sole authority to manage a WiFi device over
+relays — with a written-down recovery phrase, so it is no longer trapped in
+one browser.
+
+### Added
+
+- **Operator recovery phrase.** The operator key (`op_mgmt`) is now derived from
+  a 12-word BIP-39 phrase (NIP-06 path `m/44'/1237'/0'/0/0`) instead of being an
+  opaque random secret stuck in one browser's `localStorage`. Write the words
+  down and you can restore the exact same operator key on any device. The flasher
+  shows the phrase on the "your signer is live" screen ("write these 12 words
+  down"); **Settings › Operator Key** reveals/backs up the phrase and restores
+  from one. The phone-handoff QR still carries the *derived* secret (compact,
+  same authority) — the phrase is the human backup.
+
+- **Guided post-flash handoff.** A freshly-flashed device no longer dumps you at
+  the generic connect picker (whose biggest button — *Set up a new device* — sent
+  a just-flashed newcomer back to the flasher). The console now leads with a
+  single obvious card: *"✓ Flashed! Now let's finish your signer"* and one button,
+  *Connect to my new signer →*, with *Connect a different way* as the escape hatch.
+  The flasher's own success screen ends with *Continue setup →* and sets
+  expectations ("next we'll name it and make its keys").
+
+### Changed
+
+- **Less jargon on the success screen.** The "your signer is live" screen now
+  leads with the recovery phrase to write down; the technical `NOSTR_SECRET_KEY=…`
+  (for connecting bray) moves behind an *Advanced* disclosure.
+- **Raw-hex operator import demoted to Advanced.** Restoring an operator is now
+  phrase-first; pasting a 64-hex secret lives behind an *Advanced* disclosure
+  (a raw secret has no phrase, so it's for matching a device flashed elsewhere).
+- Operators created before this release (raw-hex, no phrase) keep working
+  unchanged — a device already flashed with one is still manageable. Rotating to
+  a phrase-backed key mints a new key and needs a re-flash.
+
+### Security
+
+- The device side this pairs with (heartwood-esp32) now **persists its kind-24134
+  replay seen-set across reboots** (NVS), closing a window where a management
+  command captured off the relay could be replayed after the device restarted.
+  The guard keys on the request's inner (encrypted) id, so it cannot be forged or
+  altered without the operator secret.
+
 ## 0.4.2 — 2026-06-21
 
 Make the *Connect over your network* (WiFi) form readable, and let you point at a

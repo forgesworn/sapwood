@@ -148,6 +148,10 @@
         The device now accepts remote management (create clients, list, status) over relays
         <strong>only</strong> from this operator key. Load it into bray to manage it from anywhere:
       </p>
+      {#if operator.mnemonic}
+        <p class="op-phrase-label">✍ Write these 12 words down — they restore this operator key on any device:</p>
+        <pre class="op-phrase">{operator.mnemonic}</pre>
+      {/if}
       <pre class="op-secret">NOSTR_SECRET_KEY={operator.skHex}</pre>
       <button class="btn" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy secret'}</button>
       <p class="op-warn">
@@ -213,4 +217,9 @@
   }
   .op-warn { font-size: 0.68rem; color: #886; margin: 0.5rem 0 0; line-height: 1.4; }
   .op-warn strong { color: #a93; }
+  .op-phrase-label { font-size: 0.74rem; color: #d9a441; margin: 0 0 0.35rem; font-weight: 600; }
+  .op-phrase {
+    background: #050505; border: 1px solid #d9a441; border-radius: 3px; padding: 0.6rem;
+    font-size: 0.82rem; line-height: 1.6; color: #ddd; white-space: pre-wrap; word-spacing: 0.3rem; margin: 0 0 0.6rem;
+  }
 </style>
