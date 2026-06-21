@@ -375,4 +375,14 @@
   .next-title { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
 
   .security-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 2.5rem; border-top: 1px solid var(--border); padding-top: 1rem; line-height: 1.6; }
+
+  /* The flasher is desktop-only, but degrade gracefully if opened on a phone:
+     wrap the header and let the step buttons share the row. */
+  @media (max-width: 640px) {
+    main { padding: 1.75rem 1rem 2.5rem; }
+    header { flex-wrap: wrap; gap: 0.5rem; }
+    h1 { font-size: 1.55rem; }
+    .actions { flex-wrap: wrap; }
+    .actions .btn { flex: 1; min-width: 8rem; }
+  }
 </style>

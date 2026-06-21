@@ -188,7 +188,9 @@
     margin: 1.5rem 0;
     border-bottom: 2px solid var(--border);
     overflow-x: auto;
+    scrollbar-width: none;
   }
+  nav::-webkit-scrollbar { display: none; }
 
   nav button {
     background: none;
@@ -221,5 +223,18 @@
   .panel {
     min-height: 400px;
     padding-top: 1.5rem;
+  }
+
+  /* Mobile-first: tighten the shell and let the tab bar scroll edge-to-edge
+     with comfortable (44px+) touch targets. */
+  @media (max-width: 640px) {
+    main { padding: 1.25rem 1rem 2rem; }
+    h1 { font-size: 1.5rem; letter-spacing: 0.08em; }
+    .divider { height: 1rem; }
+    .tagline { font-size: 0.68rem; }
+    .setup-link { font-size: 0.72rem; }
+    nav { margin: 1rem -1rem; padding: 0 1rem; }
+    nav button { padding: 0.85rem 0.9rem; }
+    .panel { min-height: 0; padding-top: 1.25rem; }
   }
 </style>

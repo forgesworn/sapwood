@@ -311,4 +311,15 @@
   .btn-muted:hover { color: var(--text-dim); }
 
   .empty { color: var(--text-muted); font-size: 0.95rem; text-align: center; padding: 2rem 0; }
+
+  /* Mobile: stack the create form, wrap client rows, full-width copy/URI. */
+  @media (max-width: 640px) {
+    .head { flex-wrap: wrap; gap: 0.5rem; }
+    .create-form { flex-direction: column; align-items: stretch; }
+    .create-form .btn-primary { width: 100%; }
+    .client-row { flex-wrap: wrap; }
+    .client-actions { width: 100%; justify-content: flex-end; }
+    .uri-box { flex-direction: column; }
+    .uri-box .btn-copy { width: 100%; }
+  }
 </style>
