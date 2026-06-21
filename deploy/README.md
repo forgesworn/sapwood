@@ -41,6 +41,25 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://sapwood.forgesworn.dev/
 
 Rollback: `sudo rm /etc/caddy/conf.d/sapwood.Caddyfile && sudo systemctl reload caddy`.
 
+## Firmware (managed separately — important)
+
+The ESP32 binaries under `public/firmware/` are **gitignored** (build artefacts
+from heartwood-esp32, populated locally via save-image). So a CI checkout has no
+firmware, and **CI deploys exclude `/firmware/`** — otherwise `rsync --delete`
+would wipe it. Push firmware to the box by hand whenever it changes:
+
+```bash
+npm run build   # copies local public/firmware/* into dist/
+rsync -az -e "ssh -i ~/.ssh/id_rsa_thecryptodonkey" \
+  dist/firmware/ deploy@95.217.39.110:/opt/sapwood/firmware/
+# verify (real app.bin is ~1.8 MB, not the ~1 KB index.html SPA fallback):
+curl -s -o /dev/null -w '%{size_download}\n' https://sapwood.forgesworn.dev/firmware/v4/app.bin
+```
+
+> For fully-automated firmware deploys, either commit the binaries (drop the
+> gitignore line) or add a CI step that fetches them from a heartwood-esp32
+> release. Until then firmware is a manual push.
+
 ## CI auto-deploy
 
 `deploy-hetzner.yml` builds and rsyncs `dist/` to `/opt/sapwood/` on every push to
