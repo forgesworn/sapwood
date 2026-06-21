@@ -7,56 +7,145 @@
 // src/relay.rs `handle_mgmt_event`. The operator holds the matching secret and
 // loads it into bray (`NOSTR_SECRET_KEY=<skHex>`).
 //
-// The secret is persisted in localStorage so re-flashing the same machine keeps
-// the same operator (bray keeps working). Use `regenerateOperator()` to rotate.
+// ## The key is a 12-word recovery phrase
+//
+// The operator authority is the one credential that lets you manage a shelf
+// device remotely, so — like the device's master seed — it is backed by a
+// BIP-39 recovery phrase. Write the phrase down and you can restore the exact
+// same operator key in any browser; lose the browser and the phrase brings it
+// back. The secret key is derived deterministically from the phrase
+// (NIP-06 path `m/44'/1237'/0'/0/0`), so the phrase and the key are two views
+// of the same authority.
+//
 // This is NOT the device master seed — it is a separate, lower-stakes authority
-// key; the master seed never touches the browser or a relay.
+// key; the master seed never touches the browser or a relay, and uses a
+// different derivation path (`m/44'/1237'/727'/0'/0'`), so the two never collide.
+//
+// Backwards compatibility: operators created before the phrase existed are a
+// raw 32-byte secret with no phrase. Those keep working unchanged (so a device
+// already flashed with one is still manageable); they simply have no phrase to
+// write down until you rotate to a phrase-backed key (`regenerateOperator()`),
+// which mints a new key and needs a re-flash.
 
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
+import {
+  generateMnemonic as bip39GenerateMnemonic,
+  mnemonicToSeedSync,
+  validateMnemonic,
+} from '@scure/bip39'
+import { wordlist } from '@scure/bip39/wordlists/english.js'
+import { HDKey } from '@scure/bip32'
 
-const LS_KEY = 'heartwood.opMgmt.skHex'
+/** localStorage key for a phrase-backed operator (the recovery phrase). */
+const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
+/** localStorage key for a legacy raw-hex operator secret (pre-phrase). */
+const LS_SK = 'heartwood.opMgmt.skHex'
+
+/** BIP-32 derivation path for the operator key — NIP-06 default external chain.
+ *  Distinct from the device master path (`…/727'/0'/0'`) so they never collide. */
+const OP_MGMT_PATH = "m/44'/1237'/0'/0/0"
 
 export interface Operator {
   /** Operator secret (hex). Load into bray: NOSTR_SECRET_KEY=<skHex>. */
   skHex: string
   /** Operator x-only pubkey (hex). Baked into the device config (op_mgmt). */
   pubHex: string
+  /** The 12/24-word recovery phrase, when this key is phrase-backed.
+   *  Absent for a legacy raw-hex key (nothing to write down). */
+  mnemonic?: string
 }
 
-function deriveOperator(skHex: string): Operator {
-  return { skHex, pubHex: bytesToHex(schnorr.getPublicKey(hexToBytes(skHex))) }
+function pubFromSk(skHex: string): string {
+  return bytesToHex(schnorr.getPublicKey(hexToBytes(skHex)))
 }
 
-/** Return the persisted operator key, generating + persisting one if absent. */
-export function getOrCreateOperator(): Operator {
-  const stored = localStorage.getItem(LS_KEY) ?? ''
-  if (/^[0-9a-f]{64}$/.test(stored)) {
-    return deriveOperator(stored)
-  }
-  const sk = crypto.getRandomValues(new Uint8Array(32))
-  const skHex = bytesToHex(sk)
-  sk.fill(0)
-  localStorage.setItem(LS_KEY, skHex)
-  return deriveOperator(skHex)
+function operatorFromSk(skHex: string): Operator {
+  return { skHex, pubHex: pubFromSk(skHex) }
 }
 
-/** Replace the persisted operator key with a fresh one and return it. */
-export function regenerateOperator(): Operator {
-  localStorage.removeItem(LS_KEY)
-  return getOrCreateOperator()
+/** Derive the operator key from a recovery phrase (deterministic, synchronous). */
+function operatorFromMnemonic(mnemonic: string): Operator {
+  const seed = mnemonicToSeedSync(mnemonic) // no passphrase
+  const child = HDKey.fromMasterSeed(seed).derive(OP_MGMT_PATH)
+  if (!child.privateKey) throw new Error('operator key derivation failed')
+  const skHex = bytesToHex(child.privateKey)
+  return { skHex, pubHex: pubFromSk(skHex), mnemonic }
+}
+
+/** Generate a fresh operator recovery phrase. 128 bits → 12 words, 256 → 24. */
+export function generateOperatorMnemonic(strength: 128 | 256 = 128): string {
+  return bip39GenerateMnemonic(wordlist, strength)
 }
 
 /**
- * Persist a specific operator secret (import), e.g. to match the key baked into
- * a device that was flashed from a different browser. Validates 64-hex.
+ * Return the persisted operator key, creating + persisting a phrase-backed one
+ * if none exists. Synchronous so existing call sites need no change.
+ *
+ * Precedence: a stored recovery phrase wins; otherwise a legacy raw-hex secret
+ * is honoured unchanged; otherwise a new phrase-backed key is minted.
+ */
+export function getOrCreateOperator(): Operator {
+  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
+  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
+    return operatorFromMnemonic(mnemonic)
+  }
+  const legacy = localStorage.getItem(LS_SK) ?? ''
+  if (/^[0-9a-f]{64}$/.test(legacy)) {
+    return operatorFromSk(legacy)
+  }
+  const fresh = generateOperatorMnemonic()
+  localStorage.setItem(LS_MNEMONIC, fresh)
+  localStorage.removeItem(LS_SK)
+  return operatorFromMnemonic(fresh)
+}
+
+/** The recovery phrase backing the current operator, or `null` for a legacy
+ *  raw-hex key (which has no phrase to write down). */
+export function getOperatorMnemonic(): string | null {
+  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
+  return mnemonic && validateMnemonic(mnemonic, wordlist) ? mnemonic : null
+}
+
+/** Replace the operator with a fresh phrase-backed key and return it.
+ *  The old key is lost — devices flashed with it need re-flashing. */
+export function regenerateOperator(): Operator {
+  const fresh = generateOperatorMnemonic()
+  localStorage.setItem(LS_MNEMONIC, fresh)
+  localStorage.removeItem(LS_SK)
+  return operatorFromMnemonic(fresh)
+}
+
+/**
+ * Restore an operator from a recovery phrase (e.g. on a new browser, or to
+ * match a device flashed elsewhere). Validates the phrase, persists it, and
+ * derives the key. This is the phrase-backed counterpart to {@link importOperator}.
+ */
+export function importOperatorMnemonic(mnemonic: string): Operator {
+  const clean = mnemonic.trim().toLowerCase().replace(/\s+/g, ' ')
+  if (!validateMnemonic(clean, wordlist)) {
+    throw new Error('invalid recovery phrase — check the words and their order')
+  }
+  const op = operatorFromMnemonic(clean)
+  localStorage.setItem(LS_MNEMONIC, clean)
+  localStorage.removeItem(LS_SK)
+  return op
+}
+
+/**
+ * Persist a specific operator secret (raw-hex import), e.g. from the phone
+ * handoff link or to match a device flashed from another browser. The resulting
+ * key is NOT phrase-backed (a raw secret can't be expressed as a phrase), so the
+ * stored phrase is cleared. Prefer {@link importOperatorMnemonic} when you have
+ * the words. Validates 64-hex.
  */
 export function importOperator(skHex: string): Operator {
   const clean = skHex.trim().toLowerCase()
   if (!/^[0-9a-f]{64}$/.test(clean)) {
     throw new Error('operator secret must be 64 hex characters (32 bytes)')
   }
-  const op = deriveOperator(clean) // throws if the secret can't derive a pubkey
-  localStorage.setItem(LS_KEY, clean)
+  const op = operatorFromSk(clean) // throws if the secret can't derive a pubkey
+  localStorage.setItem(LS_SK, clean)
+  localStorage.removeItem(LS_MNEMONIC)
   return op
 }

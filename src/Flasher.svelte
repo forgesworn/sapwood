@@ -265,6 +265,10 @@
             This is how you manage the device remotely from now on. Keep it safe — it is the
             management authority, <strong>not</strong> the device's secret key.
           </p>
+          {#if operator.mnemonic}
+            <p class="op-phrase-label">✍ Write these 12 words down — they restore this operator key on any device:</p>
+            <pre class="op-phrase">{operator.mnemonic}</pre>
+          {/if}
           <pre class="op-secret">NOSTR_SECRET_KEY={operator.skHex}</pre>
           <button class="btn small" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy'}</button>
         </div>
@@ -380,6 +384,8 @@
   .op-desc { font-size: 0.8rem; color: #9a9; margin: 0 0 0.6rem; line-height: 1.5; }
   .op-desc strong { color: var(--text); }
   .op-secret { background: #030303; border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-size: 0.68rem; color: var(--green); white-space: pre-wrap; word-break: break-all; margin: 0 0 0.6rem; }
+  .op-phrase-label { font-size: 0.78rem; color: var(--amber, #d9a441); margin: 0 0 0.4rem; font-weight: 600; }
+  .op-phrase { background: #030303; border: 1px solid var(--amber, #d9a441); border-radius: 4px; padding: 0.7rem; font-size: 0.85rem; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-spacing: 0.3rem; margin: 0 0 0.8rem; }
 
   .next { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1.25rem; }
   .next-title { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }

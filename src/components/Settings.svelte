@@ -1,12 +1,21 @@
 <script lang="ts">
   import { device, serialTransport } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret } from '../lib/frame.js'
-  import { getOrCreateOperator, regenerateOperator, importOperator } from '../lib/op-mgmt.js'
+  import {
+    getOrCreateOperator,
+    regenerateOperator,
+    importOperator,
+    getOperatorMnemonic,
+    importOperatorMnemonic,
+  } from '../lib/op-mgmt.js'
 
   // --- Operator key (relay management authority) ---
   let operator = $state(getOrCreateOperator())
+  let opMnemonic = $state(getOperatorMnemonic())
   let opReveal = $state(false)
+  let opPhraseReveal = $state(false)
   let opImportValue = $state('')
+  let opPhraseImport = $state('')
   let opStatus = $state<string | null>(null)
 
   async function handleCopyOpSecret() {
@@ -21,6 +30,7 @@
   function handleImportOperator() {
     try {
       operator = importOperator(opImportValue)
+      opMnemonic = getOperatorMnemonic()
       opImportValue = ''
       opReveal = false
       opStatus = `Imported. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… — reconnect over WiFi.`
@@ -29,12 +39,36 @@
     }
   }
 
+  function handleImportPhrase() {
+    try {
+      operator = importOperatorMnemonic(opPhraseImport)
+      opMnemonic = getOperatorMnemonic()
+      opPhraseImport = ''
+      opPhraseReveal = false
+      opStatus = `Restored from phrase. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… — reconnect over WiFi.`
+    } catch (e) {
+      opStatus = e instanceof Error ? e.message : 'Restore failed'
+    }
+  }
+
+  async function handleCopyPhrase() {
+    if (!opMnemonic) return
+    try {
+      await navigator.clipboard.writeText(opMnemonic)
+      opStatus = 'Recovery phrase copied to clipboard.'
+    } catch {
+      opStatus = 'Copy failed — reveal and write the words down manually.'
+    }
+  }
+
   function handleRegenerateOperator() {
     if (!confirm('Generate a NEW operator key? The current one is lost. Devices already flashed with the old key will reject management from this browser until re-flashed.')) return
     operator = regenerateOperator()
+    opMnemonic = getOperatorMnemonic()
     opReveal = false
+    opPhraseReveal = false
     opImportValue = ''
-    opStatus = 'New operator key generated.'
+    opStatus = 'New operator key generated — write down its recovery phrase below.'
   }
 
   // --- PIN management ---
@@ -131,9 +165,31 @@
   </tbody></table>
 
   <h2>Operator Key</h2>
-  <p class="info">Your authority to manage WiFi devices over relays. A device's expected operator is baked in when you flash it — management only works if this key matches. (This is <em>not</em> the master seed; it's a separate, lower-stakes key.)</p>
+  <p class="info">Your authority to manage WiFi devices over relays. A device's expected operator is baked in when you flash it — management only works if this key matches. (This is <em>not</em> the master seed; it's a separate, lower-stakes key.) Back it up with the recovery phrase — write the words down and you can restore this exact key on any device.</p>
   <table><tbody>
     <tr><td class="label">Pubkey</td><td class="mono">{operator.pubHex}</td></tr>
+    <tr>
+      <td class="label">Recovery phrase</td>
+      <td>
+        {#if opMnemonic}
+          {#if opPhraseReveal}
+            <span class="mono phrase">{opMnemonic}</span>
+            <div class="op-buttons">
+              <button class="btn small" onclick={handleCopyPhrase}>Copy</button>
+              <button class="btn small" onclick={() => opPhraseReveal = false}>Hide</button>
+            </div>
+          {:else}
+            <span class="mono muted">•••• •••• •••• •••• (12 words)</span>
+            <div class="op-buttons">
+              <button class="btn small" onclick={() => opPhraseReveal = true}>Reveal</button>
+              <button class="btn small" onclick={handleCopyPhrase}>Copy</button>
+            </div>
+          {/if}
+        {:else}
+          <span class="muted">No phrase — this is a legacy key. <strong>Regenerate</strong> to create a phrase-backed key (needs a re-flash).</span>
+        {/if}
+      </td>
+    </tr>
     <tr>
       <td class="label">Secret</td>
       <td>
@@ -156,15 +212,29 @@
   <div class="inline-form">
     <input
       type="text"
-      bind:value={opImportValue}
-      placeholder="Import: paste 64-hex operator secret"
-      maxlength="64"
+      bind:value={opPhraseImport}
+      placeholder="Restore: type your 12/24-word recovery phrase"
       spellcheck="false"
       autocomplete="off"
     />
-    <button class="btn" disabled={opImportValue.trim().length !== 64} onclick={handleImportOperator}>Import</button>
+    <button class="btn" disabled={opPhraseImport.trim().split(/\s+/).length < 12} onclick={handleImportPhrase}>Restore</button>
     <button class="btn danger" onclick={handleRegenerateOperator}>Regenerate</button>
   </div>
+  <details class="advanced-op">
+    <summary>Advanced: import a raw 64-hex secret</summary>
+    <div class="inline-form">
+      <input
+        type="text"
+        bind:value={opImportValue}
+        placeholder="Paste 64-hex operator secret"
+        maxlength="64"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <button class="btn" disabled={opImportValue.trim().length !== 64} onclick={handleImportOperator}>Import</button>
+    </div>
+    <p class="hint">A raw secret has no recovery phrase. Use this only to match a device flashed elsewhere.</p>
+  </details>
   {#if opStatus}
     <p class="status">{opStatus}</p>
   {/if}
@@ -302,6 +372,11 @@
   }
   .mono.muted { color: #444; letter-spacing: 0.1em; }
   .mono.secret { color: var(--amber); }
+  .mono.phrase { color: var(--text); line-height: 1.7; word-spacing: 0.25rem; display: inline-block; }
+  .muted strong { color: var(--amber); }
+  .advanced-op { margin-top: 0.75rem; }
+  .advanced-op summary { font-size: 0.78rem; color: #666; cursor: pointer; }
+  .advanced-op .hint { margin-top: 0.4rem; }
   .op-buttons { display: flex; gap: 0.25rem; margin-top: 0.4rem; }
   .btn.small { padding: 0.15rem 0.5rem; font-size: 0.72rem; }
   .btn.danger { border-color: var(--red-dim); color: var(--red); }
