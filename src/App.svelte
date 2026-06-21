@@ -17,12 +17,6 @@
   let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
 </script>
 
-<svelte:head>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-</svelte:head>
-
 <main>
   <header>
     <div class="brand">
