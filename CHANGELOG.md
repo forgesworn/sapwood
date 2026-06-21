@@ -20,8 +20,19 @@ one browser.
   from one. The phone-handoff QR still carries the *derived* secret (compact,
   same authority) — the phrase is the human backup.
 
+- **Guided post-flash handoff.** A freshly-flashed device no longer dumps you at
+  the generic connect picker (whose biggest button — *Set up a new device* — sent
+  a just-flashed newcomer back to the flasher). The console now leads with a
+  single obvious card: *"✓ Flashed! Now let's finish your signer"* and one button,
+  *Connect to my new signer →*, with *Connect a different way* as the escape hatch.
+  The flasher's own success screen ends with *Continue setup →* and sets
+  expectations ("next we'll name it and make its keys").
+
 ### Changed
 
+- **Less jargon on the success screen.** The "your signer is live" screen now
+  leads with the recovery phrase to write down; the technical `NOSTR_SECRET_KEY=…`
+  (for connecting bray) moves behind an *Advanced* disclosure.
 - **Raw-hex operator import demoted to Advanced.** Restoring an operator is now
   phrase-first; pasting a 64-hex secret lives behind an *Advanced* disclosure
   (a raw secret has no phrase, so it's for matching a device flashed elsewhere).

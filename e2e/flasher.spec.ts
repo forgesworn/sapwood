@@ -22,7 +22,18 @@ test('walks the whole wizard and flashes end-to-end', async ({ page }) => {
   await page.getByRole('button', { name: 'Flash', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: 'Your signer is live' })).toBeVisible()
-  await expect(page.getByText(/NOSTR_SECRET_KEY=[0-9a-f]{64}/)).toBeVisible()
+  // The 12-word recovery phrase is the prominent thing to write down…
+  await expect(page.getByText('Write down these 12 words')).toBeVisible()
+  // …and the technical secret is tucked behind Advanced, not in a newcomer's face.
+  const secret = page.getByText(/NOSTR_SECRET_KEY=[0-9a-f]{64}/)
+  await expect(secret).toBeHidden()
+  await page.getByText('Advanced — connect bray to this signer').click()
+  await expect(secret).toBeVisible()
+
+  // Handoff: continuing leads straight into "finish your new signer", never the
+  // generic picker that tells a just-flashed user to "Set up a new device".
+  await page.getByRole('button', { name: 'Continue setup →' }).click()
+  await expect(page.getByRole('button', { name: /Connect to my new signer/ })).toBeVisible()
 })
 
 test('blocks Next until the wifi name is entered', async ({ page }) => {

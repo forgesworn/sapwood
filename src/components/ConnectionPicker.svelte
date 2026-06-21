@@ -16,6 +16,20 @@
   let relayUrlInput = $state('wss://relay.trotters.cc')
   let relayError = $state('')
 
+  // --- Just-flashed handoff ---
+  // Set by the flasher on success: this is a brand-new device, still plugged in.
+  // Lead with one obvious "connect and finish" action instead of the full picker.
+  let justFlashed = $state(readJustFlashed())
+  function readJustFlashed(): boolean {
+    try { return sessionStorage.getItem('heartwood.justFlashed') === '1' } catch { return false }
+  }
+  function clearJustFlashed() {
+    justFlashed = false
+    try { sessionStorage.removeItem('heartwood.justFlashed') } catch { /* ignore */ }
+  }
+  // Once connected, the handoff is done — drop the flag so it never reappears.
+  $effect(() => { if (device.connected && justFlashed) clearJustFlashed() })
+
   function openRelayForm() {
     knownDevices = listKnownDevices()
     if (knownDevices.length) {
@@ -131,10 +145,12 @@
       <button class="btn btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
     </div>
   {:else}
-    <div class="status-row">
-      <span class="indicator disconnected"></span>
-      <span class="conn-label">DISCONNECTED</span>
-    </div>
+    {#if !justFlashed}
+      <div class="status-row">
+        <span class="indicator disconnected"></span>
+        <span class="conn-label">DISCONNECTED</span>
+      </div>
+    {/if}
     {#if showRelayForm}
       <div class="relay-setup">
         <h3 class="relay-title">Connect over your network</h3>
@@ -198,6 +214,27 @@
             </button>
           </div>
         </form>
+      </div>
+    {:else if justFlashed}
+      <div class="finish-setup">
+        <h3 class="finish-title">✓ Flashed! Now let's finish your signer</h3>
+        <p class="finish-lead">
+          Your new signer is plugged in and ready. Tap the button to connect to it — then we'll
+          name it and make its keys. Nothing to type.
+        </p>
+        <button
+          class="btn btn-primary finish-btn"
+          onclick={handleConnectSerial}
+          disabled={connecting || !('serial' in navigator)}
+        >
+          {connecting ? 'Connecting…' : 'Connect to my new signer →'}
+        </button>
+        {#if !('serial' in navigator)}
+          <p class="notice">This needs Chrome or Edge on a computer — it talks over the USB cable.</p>
+        {/if}
+        <button class="btn btn-ghost finish-other" onclick={clearJustFlashed}>
+          Connect a different way
+        </button>
       </div>
     {:else if !showHttpForm}
       <button class="btn btn-setup" onclick={() => navigate('flash')}>
@@ -316,6 +353,37 @@
   }
 
   /* WiFi (relay) connect: a roomy, labelled form that explains itself. */
+  .finish-setup {
+    margin-top: 1.25rem;
+    border: 1px solid var(--green-dim);
+    border-radius: 8px;
+    padding: 1.5rem;
+    background: #06120e;
+    text-align: center;
+  }
+  .finish-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--green);
+    margin: 0 0 0.6rem;
+  }
+  .finish-lead {
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+    margin: 0 auto 1.4rem;
+    max-width: 30rem;
+  }
+  .finish-btn {
+    width: 100%;
+    padding: 0.95rem 1rem;
+    font-size: 1.05rem;
+  }
+  .finish-other {
+    margin-top: 0.9rem;
+    font-size: 0.85rem;
+  }
+
   .relay-setup { margin-top: 1.25rem; }
   .relay-title {
     font-size: 1.05rem;
