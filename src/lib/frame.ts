@@ -22,6 +22,7 @@ export const FrameType = {
   PROVISION_LIST:        0x05,
   ACK:                   0x06,
   PROVISION_LIST_RESPONSE: 0x07,
+  GENERATE_IDENTITY:     0x57,
   ENCRYPTED_REQUEST:     0x10,
   ENCRYPTED_RESPONSE:    0x11,
   NACK:                  0x15,
@@ -163,6 +164,19 @@ export function buildPolicyUpdate(masterSlot: number, policyJson: string): Uint8
 /** Build a PROVISION_LIST frame (empty payload). */
 export function buildProvisionList(): Uint8Array {
   return buildFrame(FrameType.PROVISION_LIST)
+}
+
+/**
+ * Build a GENERATE_IDENTITY frame (0x57). The device generates its own seed,
+ * shows the recovery phrase on its OWN screen, and stores it — no secret is
+ * sent either way. Payload: [label_len][label].
+ */
+export function buildGenerateIdentity(label: string): Uint8Array {
+  const labelBytes = new TextEncoder().encode(label.slice(0, 32))
+  const payload = new Uint8Array(1 + labelBytes.length)
+  payload[0] = labelBytes.length
+  payload.set(labelBytes, 1)
+  return buildFrame(FrameType.GENERATE_IDENTITY, payload)
 }
 
 /** Build a FACTORY_RESET frame (empty payload, requires button confirm on device). */
