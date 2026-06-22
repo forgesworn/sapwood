@@ -5,7 +5,7 @@
   // OWN screen — the phrase is never generated or displayed in the browser. We
   // only ask it to generate and then show the resulting public npub. Power users
   // with an existing key take the "I already have one" door to Advanced › Provision.
-  import { device, connectRelay, generateIdentity } from '../lib/device.svelte.js'
+  import { device, connectRelay, generateIdentity, restoreIdentity } from '../lib/device.svelte.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { navigate } from '../lib/route.svelte.js'
   import {
@@ -22,10 +22,13 @@
   let { onadvanced, ondone }: Props = $props()
 
   let step = $state<IdentityStep>('intro')
+  // 'create' = device makes a fresh seed; 'restore' = owner re-enters an
+  // existing 12-word phrase on the device itself (never typed in the browser).
+  let mode = $state<'create' | 'restore'>('create')
   let name = $state('')
   let saved = $state(false) // owner confirmed they wrote down the on-screen phrase
   let npub = $state('')
-  let status = $state<'idle' | 'generating' | 'error'>('idle')
+  let status = $state<'idle' | 'generating' | 'restoring' | 'error'>('idle')
   let error = $state('')
 
   // The just-provisioned wifi device's relays, if any — drives the handoff at the end.
@@ -34,6 +37,15 @@
   let handoffError = $state('')
 
   function startCreate() {
+    mode = 'create'
+    name = ''
+    saved = false
+    error = ''
+    step = 'naming'
+  }
+
+  function startRestore() {
+    mode = 'restore'
     name = ''
     saved = false
     error = ''
@@ -73,6 +85,25 @@
     }
   }
 
+  async function restoreOnDevice() {
+    if (!nameOk(name)) return
+    status = 'restoring'
+    error = ''
+    step = 'restoring'
+    try {
+      // The owner enters their 12 words on the device's screen; only the
+      // resulting public npub comes back over the cable.
+      npub = await restoreIdentity(provisionLabel(name))
+      rememberProvisioned()
+      status = 'idle'
+      finish()
+    } catch (e) {
+      status = 'error'
+      error = e instanceof Error ? e.message : 'The device could not restore that phrase.'
+      step = 'naming'
+    }
+  }
+
   function finish() {
     step = 'done'
     ondone?.()
@@ -105,14 +136,20 @@
     </p>
     <div class="fi-actions">
       <button class="btn primary" onclick={startCreate}>Create a fresh identity →</button>
-      <button class="btn ghost" onclick={() => onadvanced?.()}>I already have a recovery phrase or key</button>
+      <button class="btn ghost" onclick={startRestore}>Restore from my 12 words</button>
     </div>
+    <button class="fi-advanced" onclick={() => onadvanced?.()}>Advanced: use a raw key (nsec/bunker)</button>
 
   {:else if step === 'naming'}
     <h2 class="fi-title">Name your signer</h2>
     <p class="fi-lede">
-      Give it a friendly name (optional), then we'll ask the device to make its identity.
-      The recovery phrase appears <strong>on the device's screen</strong>, not here.
+      {#if mode === 'restore'}
+        Give it a friendly name (optional), then we'll ask the device to take your recovery phrase.
+        You'll type your <strong>12 words on the device's screen</strong> using its button — never here.
+      {:else}
+        Give it a friendly name (optional), then we'll ask the device to make its identity.
+        The recovery phrase appears <strong>on the device's screen</strong>, not here.
+      {/if}
     </p>
     <label class="field">
       <span>Name this signer (optional)</span>
@@ -126,9 +163,15 @@
     {/if}
     <div class="fi-actions">
       <button class="btn ghost" onclick={() => (step = 'intro')} disabled={status === 'generating'}>Back</button>
-      <button class="btn primary" disabled={!nameOk(name) || status === 'generating'} onclick={generateOnDevice}>
-        {status === 'generating' ? 'Creating on device…' : 'Create it on my device →'}
-      </button>
+      {#if mode === 'restore'}
+        <button class="btn primary" disabled={!nameOk(name)} onclick={restoreOnDevice}>
+          Restore on my device →
+        </button>
+      {:else}
+        <button class="btn primary" disabled={!nameOk(name) || status === 'generating'} onclick={generateOnDevice}>
+          {status === 'generating' ? 'Creating on device…' : 'Create it on my device →'}
+        </button>
+      {/if}
     </div>
 
   {:else if step === 'writedown'}
@@ -154,6 +197,23 @@
     <div class="fi-actions">
       <button class="btn primary" disabled={!saved} onclick={finish}>Continue</button>
     </div>
+
+  {:else if step === 'restoring'}
+    <h2 class="fi-title">Enter your 12 words on the device</h2>
+    <p class="fi-lede">
+      Your signer is now asking for your recovery phrase <strong>on its own screen</strong>. Enter each
+      word there with the button — nothing is typed on this computer.
+    </p>
+    <ul class="fi-gestures">
+      <li><strong>Tap</strong> the button to change the highlighted letter</li>
+      <li><strong>Double-tap</strong> to choose it (the word fills in once it's certain)</li>
+      <li><strong>Hold</strong> to delete the last letter or step back a word</li>
+    </ul>
+    <p class="fi-lede">
+      After the 12th word, the device shows the account it worked out — check it's the right one,
+      then <strong>hold the button to save</strong>. We'll confirm here when it's done.
+    </p>
+    <p class="fi-working">⏳ Waiting for you to finish on the device…</p>
 
   {:else if step === 'done'}
     <div class="done-head">
@@ -205,6 +265,21 @@
   .fi-working { font-size: 0.85rem; color: var(--green-dim); line-height: 1.55; margin: 0.6rem 0 0; }
   .fi-ok { font-size: 0.9rem; color: var(--green); margin: 0; }
   .fi-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.3rem 0 1rem; }
+
+  .fi-advanced {
+    display: block; margin: 1rem 0 0; padding: 0; width: 100%;
+    border: none; background: none; color: var(--text-muted);
+    cursor: pointer; font-family: inherit; font-size: 0.8rem; text-align: center;
+  }
+  .fi-advanced:hover { color: var(--text-dim); text-decoration: underline; }
+
+  .fi-gestures {
+    margin: 0 0 1.2rem; padding: 0.8rem 1rem 0.8rem 2.2rem;
+    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
+    font-size: 0.88rem; color: var(--text-dim); line-height: 1.7;
+  }
+  .fi-gestures li { margin: 0; }
+  .fi-gestures strong { color: var(--green); }
 
   .confirm-save {
     display: flex; align-items: flex-start; gap: 0.6rem; margin: 0.4rem 0 1.1rem;

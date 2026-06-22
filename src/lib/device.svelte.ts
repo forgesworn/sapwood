@@ -5,7 +5,7 @@ import { transport as serialTransport, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
-  buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity,
+  buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
@@ -352,6 +352,31 @@ export async function generateIdentity(label = 'default'): Promise<string> {
   const npub = new TextDecoder().decode(resp.payload).trim()
   // Best-effort: the device reboots into WiFi right after a first provision, so
   // a follow-up read may fail — the npub from the ACK is what we rely on.
+  try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
+  return npub
+}
+
+/**
+ * Ask a USB-connected device to RESTORE an existing identity: the owner re-keys
+ * their 12-word phrase on the device's own screen via the button, the device
+ * validates the BIP-39 checksum and stores it. The phrase is entered on the
+ * device and never travels over the cable — we only learn the resulting npub
+ * (from the ACK). The timeout is deliberately long: a careful one-button entry
+ * of twelve words can take several minutes, and the device never times out.
+ */
+export async function restoreIdentity(label = 'default'): Promise<string> {
+  if (device.mode !== 'serial') throw new Error('Restoring an identity needs a USB connection')
+  const resp = await serialTransport.sendAndReceive(
+    buildRestoreIdentity(label),
+    [FrameType.ACK, FrameType.NACK],
+    900_000, // up to 15 min — the owner is hand-entering 12 words on the device
+  )
+  if (resp.type !== FrameType.ACK) {
+    throw new Error('Restore was cancelled on the device, or the phrase did not check out. You can try again.')
+  }
+  const npub = new TextDecoder().decode(resp.payload).trim()
+  // Best-effort: a WiFi signer reboots straight after a first provision, so a
+  // follow-up read may fail — the npub from the ACK is what we rely on.
   try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
   return npub
 }

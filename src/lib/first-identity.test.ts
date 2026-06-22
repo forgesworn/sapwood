@@ -51,7 +51,7 @@ describe('friendlyLabel', () => {
 })
 
 describe('IDENTITY_STEPS', () => {
-  it('runs intro → naming → writedown → done', () => {
-    expect(IDENTITY_STEPS).toEqual(['intro', 'naming', 'writedown', 'done'])
+  it('runs intro → naming → (writedown | restoring) → done', () => {
+    expect(IDENTITY_STEPS).toEqual(['intro', 'naming', 'writedown', 'restoring', 'done'])
   })
 })

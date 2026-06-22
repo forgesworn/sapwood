@@ -3,6 +3,27 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.0 — 2026-06-22
+
+Restore an existing identity — entirely on the device.
+
+### Added
+
+- **Restore from your 12 words.** The setup flow now offers restoring an existing
+  recovery phrase alongside creating a fresh one. The phrase is entered **on the
+  device's own screen** with its button — single-tap to change the highlighted
+  letter, double-tap to choose it (the word fills in once it's certain), hold to
+  delete. Nothing is typed into or sent from the browser; the device validates
+  the BIP-39 checksum, shows the resulting account for you to confirm, and only
+  then stores it. The browser just triggers the flow and learns the public npub.
+  Requires firmware with `RESTORE_IDENTITY` (0x58).
+
+### Changed
+
+- The first-identity intro now leads with two clear doors — **Create a fresh
+  identity** and **Restore from my 12 words** — with the raw-key (nsec/bunker)
+  path moved to a quieter "Advanced" link.
+
 ## 0.7.2 — 2026-06-22
 
 Foundation hardening — fixes a crash and stops broken code shipping.
