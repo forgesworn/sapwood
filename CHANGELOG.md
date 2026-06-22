@@ -3,6 +3,22 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.5.2 — 2026-06-22
+
+### Added
+
+- **One-click Reconnect.** When a USB signer hits an error — e.g. after you press
+  RESET to recover a device that didn't reboot after flashing — the error banner
+  now offers a **Reconnect** button. One tap re-picks the port and carries on,
+  instead of having to Disconnect and reconnect by hand.
+
+### Fixed
+
+- **Gesture-safe reconnect.** Reconnecting now requests the serial port *before*
+  tearing down the previous session, so Chrome doesn't reject it for lacking a
+  user gesture (and the UI no longer flashes back to the picker mid-reconnect).
+  Initial connect is unchanged.
+
 ## 0.5.1 — 2026-06-22
 
 Setup reliability: a serial write could lock up the connection and strand you

@@ -54,18 +54,31 @@ export class SerialTransport {
 
   /** Request a serial port from the user and connect. */
   async connect(baudRate = 115200): Promise<void> {
-    // Clean up any stale connection first.
-    if (this.port) {
-      await this.disconnect()
-    }
-
     try {
+      // requestPort FIRST. Any teardown of a previous session must happen AFTER
+      // this — its awaits would otherwise consume the click's user gesture and
+      // Chrome would reject requestPort. This is also what lets the error
+      // banner's "Reconnect" work in a single click while still "connected".
       const port = await navigator.serial.requestPort({
         filters: [
           // ESP32-S3 USB-Serial-JTAG
           { usbVendorId: 0x303a, usbProductId: 0x1001 },
         ],
       })
+
+      // Tear down a previous session now (gesture already captured). Quiet — no
+      // 'disconnected' emit, so the UI transitions straight into the new session
+      // instead of flashing back to the picker.
+      if (this.port) {
+        this.running = false
+        try { await this.reader?.cancel() } catch { /* ignore */ }
+        try { this.reader?.releaseLock() } catch { /* ignore */ }
+        this.reader = null
+        if (this.port !== port) {
+          try { await this.port.close() } catch { /* ignore */ }
+        }
+        this.port = null
+      }
 
       // Close any port left open by a previous flash/connect (or an ESP32-S3 USB
       // re-enumeration) so open() below doesn't fail with "port in use". Done
@@ -100,6 +113,13 @@ export class SerialTransport {
       this.readLoop()
     } catch (e) {
       this.emit({ kind: 'error', message: e instanceof Error ? e.message : 'Connection failed' })
+      // A failed reconnect may have already torn down the old session, leaving us
+      // portless. Reflect that so the UI drops to a clean "connect" state rather
+      // than appearing connected with no working port.
+      if (!this.port) {
+        this.running = false
+        this.emit({ kind: 'disconnected' })
+      }
     }
   }
 
