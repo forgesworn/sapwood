@@ -3,6 +3,14 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.6 — 2026-06-22
+
+Bundled firmware v0.9.0 — on-device personas now derive under the canonical
+`nostr:persona:<name>` namespace (PROTOCOL v1.1 §3.1), so a persona derived on
+the signer matches the same persona in signet, the nsec-tree library, and the
+nsec-tree CLI. The previous `persona/<name>` derivation is gone; raw
+`heartwood_derive` (arbitrary purpose) is unchanged.
+
 ## 0.8.5 — 2026-06-22
 
 Bundled firmware v0.8.1 — a much friendlier on-device restore.
