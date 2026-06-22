@@ -23,6 +23,11 @@ export class SerialTransport {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   private running = false
   private listeners: SerialListener[] = []
+  // Writes are serialised through this chain. getWriter() throws if the writable
+  // is still locked by a previous (possibly stalled) write, so two overlapping
+  // writes — e.g. refreshMasters racing refreshSlots on connect — would otherwise
+  // fail with "Cannot create writer when WritableStream is locked".
+  private writeChain: Promise<void> = Promise.resolve()
 
   // Buffer for accumulating incoming bytes.
   private buffer = new Uint8Array(0)
@@ -83,6 +88,7 @@ export class SerialTransport {
       this.running = true
       this.buffer = new Uint8Array(0)
       this.logBuffer = ''
+      this.writeChain = Promise.resolve() // fresh write queue for this session
 
       const info = port.getInfo()
       this.emit({
@@ -97,36 +103,65 @@ export class SerialTransport {
     }
   }
 
-  /** Disconnect from the serial port. */
+  /** Disconnect from the serial port. Always resets state — even if close()
+   *  throws (e.g. a stream still locked) — so a fresh connect can recover. */
   async disconnect(): Promise<void> {
     this.running = false
     try {
       if (this.reader) {
-        await this.reader.cancel()
-        this.reader.releaseLock()
-        this.reader = null
+        try { await this.reader.cancel() } catch { /* ignore */ }
+        try { this.reader.releaseLock() } catch { /* ignore */ }
       }
       if (this.port) {
-        await this.port.close()
-        this.port = null
+        try { await this.port.close() } catch { /* ignore — port may be re-grabbed on reconnect */ }
       }
-    } catch {
-      // Ignore close errors.
+    } finally {
+      this.reader = null
+      this.port = null
+      this.writeChain = Promise.resolve()
+      this.emit({ kind: 'disconnected' })
     }
-    this.emit({ kind: 'disconnected' })
   }
 
-  /** Send raw bytes to the ESP32. */
-  async write(data: Uint8Array): Promise<void> {
+  /** Send raw bytes to the ESP32. Serialised so writes never overlap (a second
+   *  getWriter() while the first writer holds the lock throws "WritableStream is
+   *  locked"). A stalled write is bounded by a timeout and the writer aborted, so
+   *  a non-responding device (e.g. one still in the bootloader after a flash that
+   *  didn't reboot) can't lock the stream forever. */
+  async write(data: Uint8Array, timeoutMs = 5_000): Promise<void> {
+    const run = this.writeChain.then(() => this.writeOne(data, timeoutMs))
+    // Keep the chain alive even if this write rejects, so one failure doesn't
+    // wedge every subsequent write.
+    this.writeChain = run.then(() => {}, () => {})
+    return run
+  }
+
+  private async writeOne(data: Uint8Array, timeoutMs: number): Promise<void> {
     if (!this.port?.writable) {
       throw new Error('Not connected')
     }
     const writer = this.port.writable.getWriter()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      // Abort unsticks a write blocked on backpressure and releases the lock
+      // (a plain releaseLock() throws while a write is still pending). The
+      // pending write() then rejects, which we map to the friendly error below.
+      writer.abort().catch(() => { /* ignore */ })
+    }, timeoutMs)
+    let writeErr: unknown
     try {
       await writer.write(data)
+    } catch (e) {
+      writeErr = e
     } finally {
-      writer.releaseLock()
+      clearTimeout(timer)
+      try { writer.releaseLock() } catch { /* already released by abort */ }
     }
+    if (timedOut) {
+      throw new Error("The device isn't responding. If you just flashed it, press the RESET button on the board so it starts the new firmware, then reconnect.")
+    }
+    if (writeErr) throw writeErr
   }
 
   /** Send a frame and wait for a response with one of the expected types. */
@@ -138,7 +173,7 @@ export class SerialTransport {
     return new Promise<Frame>((resolve, reject) => {
       const timeout = setTimeout(() => {
         unsub()
-        reject(new Error('Timeout waiting for response'))
+        reject(new Error("No response from the device. If you just flashed it, press the RESET button on the board so it starts the new firmware, then reconnect."))
       }, timeoutMs)
 
       const unsub = this.on((event) => {

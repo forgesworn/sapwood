@@ -3,6 +3,32 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.5.1 — 2026-06-22
+
+Setup reliability: a serial write could lock up the connection and strand you
+mid-setup, and the three Advanced provisioning styles weren't explained.
+
+### Fixed
+
+- **"WritableStream is locked" / stuck setup.** Serial writes are now serialised,
+  so two overlapping writes (e.g. the masters + slots refresh that both fire on
+  connect) no longer collide with *Cannot create writer when WritableStream is
+  locked* — the error that stranded setup with no way back in. A stalled write now
+  times out and aborts the writer instead of wedging the connection forever, and
+  disconnect always resets cleanly so you can reconnect and return to setup.
+- **Clearer "device didn't respond" guidance.** When the device doesn't answer —
+  most often because it didn't reboot after flashing and is still in the bootloader
+  — you now get *"press the RESET button on the board… then reconnect"* instead of
+  a cryptic timeout.
+
+### Changed
+
+- **Advanced › Provision explains the three styles.** Each option now says what it
+  does and — crucially — whether your signer keeps your existing npub (*Existing
+  nsec — sign as-is*) or gets a brand-new derived address (*Recovery phrase* and
+  *Existing nsec — derive a new key*). The confirm step calls out which to expect,
+  so you can't silently end up on the wrong identity.
+
 ## 0.5.0 — 2026-06-21
 
 Back the operator key — your sole authority to manage a WiFi device over
