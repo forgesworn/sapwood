@@ -9,6 +9,11 @@
   let httpAddress = $state(HttpTransport.savedAddress() ?? '')
   let connecting = $state(false)
 
+  /** Focus an element when it mounts — the a11y-clean alternative to `autofocus`. */
+  function focusOnMount(node: HTMLElement) {
+    node.focus()
+  }
+
   // --- WiFi (relay) connect ---
   let showRelayForm = $state(false)
   let knownDevices = $state<KnownDevice[]>([])
@@ -274,7 +279,7 @@
           bind:value={httpAddress}
           placeholder="192.168.0.107:3100"
           disabled={connecting}
-          autofocus
+          use:focusOnMount
         />
         <button type="submit" class="btn btn-primary" disabled={connecting || !httpAddress.trim()}>
           {connecting ? 'Connecting...' : 'Connect'}

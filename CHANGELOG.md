@@ -3,6 +3,28 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.1 — 2026-06-22
+
+Firmware-update polish, clearer keys, and accessibility.
+
+### Changed
+
+- **Firmware update is now owner-grade.** Plain-language status and errors (no raw
+  state names or hex codes), design-system styling, and — crucially — clear
+  guidance for updating an already-deployed **WiFi signer**: it walks you through
+  putting the device in USB mode ("Hold PRG = USB" at boot) instead of offering an
+  upload button that can't work over the relay. The transfer logic moved to a
+  unit-tested `lib/ota.ts`.
+- **"Two phrases" confusion fixed.** The flash screen now spells out that your
+  **operator phrase** is different from your signer's own **recovery phrase** (which
+  appears on the device's screen), and suggests labelling them so they aren't mixed up.
+
+### Fixed
+
+- **Accessibility:** removed the `autofocus` attribute (now a focus action) and the
+  invalid nested `<button>` in the signing-permissions header. `svelte-check` is now
+  clean — **0 errors, 0 warnings**.
+
 ## 0.8.0 — 2026-06-22
 
 Restore an existing identity — entirely on the device.

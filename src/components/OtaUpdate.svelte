@@ -1,13 +1,20 @@
 <script lang="ts">
+  // Firmware update over USB. The device only accepts OTA over the cable (never
+  // the relay), and a WiFi signer boots straight into its relay loop — so the
+  // first job here is to get the owner onto USB, then stream + verify the image.
+  // The transfer logic lives in lib/ota.ts (unit-tested); this is the UI over it.
   import { device, serialTransport, httpTransport } from '../lib/device.svelte.js'
-  import { FrameType, buildFrame } from '../lib/frame.js'
+  import { streamOta } from '../lib/ota.js'
 
   let file = $state<File | null>(null)
   let progress = $state(0)
-  let status = $state<'idle' | 'hashing' | 'waiting' | 'uploading' | 'verifying' | 'done' | 'error'>('idle')
+  let status = $state<'idle' | 'waiting' | 'uploading' | 'verifying' | 'done' | 'error'>('idle')
   let message = $state('')
 
-  const CHUNK_SIZE = 4096
+  // OTA needs a direct cable (Web Serial) or the local bridge. A WiFi/relay
+  // connection can't carry it — the device rejects OTA frames in WiFi mode.
+  const canUpdate = $derived(device.connected && (device.mode === 'serial' || device.mode === 'http'))
+  const busy = $derived(status === 'waiting' || status === 'uploading' || status === 'verifying')
 
   function handleFileSelect(e: Event) {
     const input = e.target as HTMLInputElement
@@ -18,104 +25,43 @@
   }
 
   async function handleUpload() {
-    if (!file || !device.connected) return
-
+    if (!file || !canUpdate) return
+    progress = 0
     try {
-      // HTTP mode: send the whole binary to the bridge, it handles chunking.
+      // HTTP bridge: hand it the whole image; the bridge does the chunking.
       if (device.mode === 'http') {
-        status = 'uploading'
-        message = 'Uploading to bridge... Press button on device to approve.'
+        status = 'waiting'
+        message = 'On your signer, hold its button for 2 seconds to approve the update.'
         const buf = await file.arrayBuffer()
+        status = 'uploading'
+        message = 'Sending the firmware via the bridge…'
         await httpTransport.otaUpload(buf)
         status = 'done'
-        message = 'Firmware verified. Device rebooting.'
+        message = 'Done — your signer is restarting with the new firmware.'
         return
       }
 
-      // Web Serial mode: stream chunks directly.
-      status = 'hashing'
-      message = 'Computing hash...'
+      // Web Serial: stream + verify directly.
       const data = new Uint8Array(await file.arrayBuffer())
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      const hash = new Uint8Array(hashBuffer)
-
-      // OTA_BEGIN: [size_u32_be] [sha256_32]
-      status = 'waiting'
-      message = 'Press button on device to approve OTA update.'
-      const beginPayload = new Uint8Array(4 + 32)
-      const size = data.length
-      beginPayload[0] = (size >>> 24) & 0xff
-      beginPayload[1] = (size >>> 16) & 0xff
-      beginPayload[2] = (size >>> 8) & 0xff
-      beginPayload[3] = size & 0xff
-      beginPayload.set(hash, 4)
-
-      const beginFrame = buildFrame(FrameType.OTA_BEGIN, beginPayload)
-      const beginResp = await serialTransport.sendAndReceive(
-        beginFrame,
-        [FrameType.OTA_STATUS],
-        60_000,
-      )
-
-      if (beginResp.payload[0] !== 0x00) { // OTA_STATUS_READY
-        status = 'error'
-        message = `Device rejected OTA begin (status 0x${beginResp.payload[0]?.toString(16)}).`
-        return
-      }
-
-      // Stream chunks.
-      status = 'uploading'
-      let offset = 0
-      while (offset < data.length) {
-        const end = Math.min(offset + CHUNK_SIZE, data.length)
-        const chunk = data.slice(offset, end)
-
-        // OTA_CHUNK: [offset_u32_be] [data...]
-        const chunkPayload = new Uint8Array(4 + chunk.length)
-        chunkPayload[0] = (offset >>> 24) & 0xff
-        chunkPayload[1] = (offset >>> 16) & 0xff
-        chunkPayload[2] = (offset >>> 8) & 0xff
-        chunkPayload[3] = offset & 0xff
-        chunkPayload.set(chunk, 4)
-
-        const chunkFrame = buildFrame(FrameType.OTA_CHUNK, chunkPayload)
-        const chunkResp = await serialTransport.sendAndReceive(
-          chunkFrame,
-          [FrameType.OTA_STATUS],
-          10_000,
-        )
-
-        if (chunkResp.payload[0] !== 0x01) { // OTA_STATUS_CHUNK_OK
-          status = 'error'
-          message = `Chunk at offset ${offset} rejected (status 0x${chunkResp.payload[0]?.toString(16)}).`
-          return
-        }
-
-        offset = end
-        progress = Math.round((offset / data.length) * 100)
-        message = `Uploading... ${progress}% (${offset} / ${data.length} bytes)`
-      }
-
-      // OTA_FINISH
-      status = 'verifying'
-      message = 'Verifying hash...'
-      const finishFrame = buildFrame(FrameType.OTA_FINISH)
-      const finishResp = await serialTransport.sendAndReceive(
-        finishFrame,
-        [FrameType.OTA_STATUS],
-        30_000,
-      )
-
-      if (finishResp.payload[0] === 0x02) { // OTA_STATUS_VERIFIED
-        status = 'done'
-        message = 'Firmware verified. Device rebooting.'
-      } else {
-        status = 'error'
-        message = `Verification failed (status 0x${finishResp.payload[0]?.toString(16)}). Automatic rollback.`
-      }
+      await streamOta(serialTransport, data, {
+        onPhase: (phase) => {
+          status = phase
+          if (phase === 'waiting') {
+            message = 'Your signer is showing the update size. Hold its button for 2 seconds to approve.'
+          } else if (phase === 'verifying') {
+            message = 'Checking the firmware arrived safely…'
+          }
+        },
+        onProgress: (pct) => {
+          progress = pct
+          message = `Sending… ${pct}%`
+        },
+      })
+      status = 'done'
+      message = 'Done — your signer is restarting with the new firmware.'
     } catch (e) {
       status = 'error'
-      message = e instanceof Error ? e.message : 'OTA upload failed'
+      message = e instanceof Error ? e.message : 'The update could not be completed.'
     }
   }
 
@@ -126,84 +72,89 @@
   }
 </script>
 
-<div class="ota">
-  <h2>Firmware Update</h2>
+<section class="ota" aria-label="Update firmware">
+  <h2>Update firmware</h2>
 
-  <label class="file-picker">
-    <input type="file" accept=".bin" onchange={handleFileSelect} />
-    {file ? `${file.name} (${formatSize(file.size)})` : 'Select firmware .bin file'}
-  </label>
-
-  {#if file}
-    <button
-      class="upload-btn"
-      disabled={!device.connected || status === 'uploading' || status === 'waiting' || status === 'verifying'}
-      onclick={handleUpload}
-    >
-      {status === 'idle' ? 'Upload and Flash' : status}
-    </button>
-  {/if}
-
-  {#if status === 'uploading'}
-    <div class="progress-bar">
-      <div class="fill" style="width: {progress}%"></div>
-    </div>
-  {/if}
-
-  {#if message}
-    <p class="message" class:error={status === 'error'} class:done={status === 'done'}>
-      {message}
+  {#if !canUpdate}
+    <p class="lede">
+      Firmware updates run <strong>over USB</strong> — never over WiFi, for safety. Connect this
+      signer with a cable to update it.
     </p>
+    <div class="usb-steps">
+      <p class="steps-head">Already-set-up WiFi signer? Put it in USB mode first:</p>
+      <ol>
+        <li>Plug it into this computer with a USB cable.</li>
+        <li>Press <strong>RESET</strong> on the board (or unplug and replug it).</li>
+        <li>As it starts it shows <strong>"Hold PRG = USB"</strong> for 3 seconds — hold the
+          <strong>PRG</strong> button until the screen says <strong>"USB mode"</strong>.</li>
+        <li>Then connect over USB here and come back to this screen.</li>
+      </ol>
+    </div>
+  {:else}
+    <p class="lede">
+      Pick the firmware file to install. Your signer will ask you to approve it with its button,
+      check it, and restart into the new version. If anything's wrong it rolls back on its own.
+    </p>
+
+    <label class="file-picker" class:has-file={!!file}>
+      <input type="file" accept=".bin" onchange={handleFileSelect} disabled={busy} />
+      {file ? `${file.name} · ${formatSize(file.size)}` : 'Choose a firmware .bin file'}
+    </label>
+
+    {#if file}
+      <button class="btn primary" disabled={busy} onclick={handleUpload}>
+        {busy ? 'Updating…' : 'Update over USB →'}
+      </button>
+    {/if}
+
+    {#if status === 'uploading'}
+      <div class="progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
+        <div class="fill" style="width: {progress}%"></div>
+      </div>
+    {/if}
+
+    {#if message}
+      <p class="message" class:error={status === 'error'} class:done={status === 'done'}>{message}</p>
+    {/if}
   {/if}
-</div>
+</section>
 
 <style>
-  h2 { font-size: 1rem; font-weight: 600; margin: 0 0 1rem; color: #ccc; }
+  .ota { color: var(--text); }
+  h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 0.8rem; color: #fff; }
+  .lede { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0 0 1rem; }
+  .lede strong { color: var(--text); }
+
+  .usb-steps {
+    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
+    padding: 0.9rem 1rem; font-size: 0.88rem; color: var(--text-dim); line-height: 1.6;
+  }
+  .steps-head { margin: 0 0 0.5rem; color: var(--text); font-weight: 600; }
+  .usb-steps ol { margin: 0; padding-left: 1.3rem; }
+  .usb-steps li { margin: 0.2rem 0; }
+  .usb-steps strong { color: var(--green); }
 
   .file-picker {
-    display: block;
-    padding: 1rem;
-    border: 1px dashed #333;
-    border-radius: 4px;
-    text-align: center;
-    color: #666;
-    font-size: 0.85rem;
-    cursor: pointer;
-    margin-bottom: 1rem;
+    display: block; padding: 1rem; border: 1px dashed var(--border-bright); border-radius: 6px;
+    text-align: center; color: var(--text-muted); font-size: 0.85rem; cursor: pointer;
+    margin-bottom: 1rem; word-break: break-all;
   }
-
-  .file-picker:hover { border-color: #555; color: #888; }
+  .file-picker:hover { border-color: var(--green-dim); color: var(--text-dim); }
+  .file-picker.has-file { color: var(--green); border-color: var(--green-dim); }
   .file-picker input { display: none; }
 
-  .upload-btn {
-    background: #111a15;
-    border: 1px solid #354;
-    color: #4a9;
-    padding: 0.5rem 1.5rem;
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
+  .btn {
+    font-family: inherit; font-size: 0.92rem; font-weight: 600; padding: 0.6rem 1.4rem;
+    border-radius: 5px; cursor: pointer; border: 1px solid transparent;
   }
+  .btn.primary { background: var(--green); color: #050505; border-color: var(--green); }
+  .btn.primary:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .upload-btn:hover:not(:disabled) { background: #152a1a; }
-  .upload-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .progress { height: 6px; background: #11221a; border-radius: 3px; margin-top: 1rem; overflow: hidden; }
+  .fill { height: 100%; background: var(--green); transition: width 0.2s; }
 
-  .progress-bar {
-    height: 4px;
-    background: #222;
-    border-radius: 2px;
-    margin-top: 1rem;
-    overflow: hidden;
-  }
-
-  .fill {
-    height: 100%;
-    background: #4a9;
-    transition: width 0.2s;
-  }
-
-  .message { font-size: 0.85rem; color: #888; margin-top: 0.75rem; }
-  .message.error { color: #a44; }
-  .message.done { color: #4a9; }
+  .message { font-size: 0.85rem; color: var(--text-dim); margin-top: 0.8rem; line-height: 1.5; }
+  .message.error { color: var(--red); }
+  .message.done { color: var(--green); }
 </style>
