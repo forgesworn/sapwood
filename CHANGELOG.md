@@ -3,6 +3,31 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.6.3 — 2026-06-22
+
+Readable recovery phrase, smoother flash progress, and a way to set up the
+next device.
+
+### Changed
+
+- **The recovery phrase is now shown one big word at a time.** All 12 words
+  crammed onto the device's little screen were too small to read. The bundled
+  firmware now displays them **one large, numbered word at a time** ("WORD 3 OF
+  12") — tap the device button to step through, write each down, then hold the
+  button to save (a tap on the final screen re-shows them so you can re-check).
+  The guided "write it down" step now explains this. Requires the firmware
+  shipped with this release.
+- **Flash progress no longer leaps to 50% instantly.** Progress is now weighted
+  by bytes, so the tiny bootloader and partition table barely move the bar and
+  the ~1.8 MB firmware fills it smoothly, instead of jumping 0 → 50% before the
+  real work starts.
+
+### Added
+
+- **"Set up another device"** links on the post-flash "finish your signer" card
+  and the "your signer has an identity" screen, so you can flash the next one
+  without hunting for the way back.
+
 ## 0.6.2 — 2026-06-22
 
 Stops a provisioned WiFi signer, plugged into USB, from offering a dead-end

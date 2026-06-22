@@ -7,6 +7,7 @@
   // with an existing key take the "I already have one" door to Advanced › Provision.
   import { device, connectRelay, generateIdentity } from '../lib/device.svelte.js'
   import { rememberDevice } from '../lib/known-devices.js'
+  import { navigate } from '../lib/route.svelte.js'
   import {
     type IdentityStep, nameOk, nameError, provisionLabel, friendlyLabel,
   } from '../lib/first-identity.js'
@@ -129,14 +130,14 @@
   {:else if step === 'writedown'}
     <h2 class="fi-title">Write down the words on your device</h2>
     <p class="fi-lede">
-      Your signer is now showing a <strong>12-word recovery phrase on its own screen</strong>. Write
-      them on paper, in order, and keep them safe — they are the only way to recover this signer, and
+      Your signer is showing its <strong>12-word recovery phrase, one big word at a time</strong>.
+      <strong>Tap the button on the signer to step through them</strong>, writing each one down in
+      order. Keep them safe — they're the only way to recover this signer, and
       <strong>anyone who has them controls it</strong>. They appear only on the device, never here.
     </p>
     <p class="fi-lede">
-      When you've written them all down, <strong>press and hold the button on the signer</strong> until
-      its screen says “Saved”. A WiFi signer then reboots and joins your network — give it about 10
-      seconds.
+      After the last word, <strong>press and hold the button</strong> until the screen says it's
+      saved. A WiFi signer then reboots and joins your network — give it about 10 seconds.
     </p>
     {#if npub}
       <p class="npub">{npub}</p>
@@ -144,7 +145,7 @@
     {/if}
     <label class="confirm-save">
       <input type="checkbox" bind:checked={saved} />
-      <span>I've written the 12 words down and held the button on the device to save.</span>
+      <span>I've stepped through all 12 words, written them down, and held the button to save.</span>
     </label>
     <div class="fi-actions">
       <button class="btn primary" disabled={!saved} onclick={finish}>Continue</button>
@@ -174,6 +175,9 @@
         <button class="btn primary" onclick={() => ondone?.()}>Continue</button>
       </div>
     {/if}
+    <button class="fi-another" onclick={() => navigate('flash')}>
+      + Set up another device
+    </button>
   {/if}
 </section>
 
@@ -222,6 +226,13 @@
   .done-head .fi-title { margin: 0; }
 
   .fi-actions { display: flex; gap: 0.6rem; justify-content: flex-end; flex-wrap: wrap; margin-top: 1.3rem; }
+
+  .fi-another {
+    display: block; margin-top: 1.4rem; padding-top: 1.1rem; width: 100%;
+    border: none; border-top: 1px solid var(--border); background: none;
+    color: var(--text-dim); cursor: pointer; font-family: inherit; font-size: 0.85rem; text-align: left;
+  }
+  .fi-another:hover { color: var(--green); }
 
   .btn {
     font-family: inherit; font-size: 0.92rem; font-weight: 500; padding: 0.65rem 1.4rem;

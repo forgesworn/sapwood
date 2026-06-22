@@ -236,6 +236,9 @@
         <button class="btn btn-ghost finish-other" onclick={clearJustFlashed}>
           Connect a different way
         </button>
+        <button class="btn btn-ghost finish-other" onclick={() => navigate('flash')}>
+          Set up another device
+        </button>
       </div>
     {:else if !showHttpForm}
       <button class="btn btn-setup" onclick={() => navigate('flash')}>

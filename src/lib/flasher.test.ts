@@ -134,29 +134,48 @@ describe('flashDevice — full erase', () => {
   })
 })
 
-describe('flashDevice — progress mapping', () => {
-  it('maps (fileIndex, written, total) to an overall percentage across all regions', async () => {
+describe('flashDevice — progress mapping (byte-weighted)', () => {
+  // Give the regions realistic relative sizes so the test pins byte-weighting,
+  // not region-count weighting: app.bin must dwarf bootloader + partition table.
+  function sizedFetch(h: Harness) {
+    ;(h.backend.fetchBin as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      const n = url.endsWith('app.bin') ? 180_000
+        : url.endsWith('bootloader.bin') ? 2_000
+        : 300 // partition-table.bin
+      return new Uint8Array(n)
+    })
+  }
+
+  it('keeps the bar low after the tiny bootloader + partition table finish', async () => {
     const progress: Array<[number, string]> = []
     const h = makeHarness({
       onWrite: (report) => {
-        report(0, 100, 100) // bootloader done       -> (0+1)/4 = 25%
-        report(1, 0, 100)   // partition table start -> (1+0)/4 = 25%
-        report(2, 50, 100)  // firmware half         -> (2+0.5)/4 = 63%
-        report(3, 100, 100) // config done           -> (3+1)/4 = 100%
+        report(0, 2_000, 2_000) // bootloader done
+        report(1, 300, 300)     // partition table done
       },
     })
+    sizedFetch(h)
     await flashDevice(BOARD, CFG, { onProgress: (p, s) => progress.push([p, s]) }, h.backend)
-    expect(progress).toContainEqual([25, 'bootloader'])
-    expect(progress).toContainEqual([25, 'partition table'])
-    expect(progress).toContainEqual([63, 'firmware'])
-    expect(progress).toContainEqual([100, 'config'])
+    // ~2.3KB of ~182KB ≈ 1-2% — nowhere near the old 50% jump.
+    const afterTable = progress.find(([, s]) => s === 'partition table')![0]
+    expect(afterTable).toBeLessThan(5)
+  })
+
+  it('makes app.bin dominate: halfway through it is roughly halfway overall', async () => {
+    const progress: Array<[number, string]> = []
+    const h = makeHarness({ onWrite: (report) => report(2, 90_000, 180_000) }) // app half
+    sizedFetch(h)
+    await flashDevice(BOARD, CFG, { onProgress: (p, s) => progress.push([p, s]) }, h.backend)
+    const atAppHalf = progress.find(([, s]) => s === 'firmware')![0]
+    expect(atAppHalf).toBeGreaterThanOrEqual(48)
+    expect(atAppHalf).toBeLessThanOrEqual(52)
   })
 
   it('guards against a zero total (avoids NaN)', async () => {
     const progress: Array<[number, string]> = []
-    const h = makeHarness({ onWrite: (report) => report(2, 0, 0) }) // (2+0)/4 = 50%
+    const h = makeHarness({ onWrite: (report) => report(2, 0, 0) })
+    sizedFetch(h)
     await flashDevice(BOARD, CFG, { onProgress: (p, s) => progress.push([p, s]) }, h.backend)
-    expect(progress).toContainEqual([50, 'firmware'])
     expect(progress.every(([p]) => Number.isFinite(p))).toBe(true)
   })
 

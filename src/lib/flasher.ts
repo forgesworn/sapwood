@@ -211,10 +211,18 @@ export async function flashDevice(
       log('Flash erased — device will boot fresh.')
     }
 
-    // 4. Flash all regions; report smooth overall progress across them.
+    // 4. Flash all regions; report progress weighted by BYTES, not region count.
+    //    The bootloader (~21KB) and partition table (~3KB) flash in a blink but
+    //    are 2 of 4 regions, so per-region weighting jumped the bar to 50% before
+    //    the ~1.8MB app.bin had really started. Byte-weighting makes the big app
+    //    dominate the bar, as the user expects.
+    const sizes = regions.map((r) => r.data.length)
+    const totalBytes = sizes.reduce((a, b) => a + b, 0) || 1
+    const bytesBefore = sizes.map((_, i) => sizes.slice(0, i).reduce((a, b) => a + b, 0))
     await session.writeFlash(regions, (fileIndex, written, total) => {
-      const frac = (fileIndex + (total ? written / total : 0)) / regions.length
-      h.onProgress?.(Math.round(frac * 100), labels[fileIndex] ?? `region ${fileIndex + 1}`)
+      const regionFrac = total > 0 ? written / total : 0
+      const done = (bytesBefore[fileIndex] ?? 0) + regionFrac * (sizes[fileIndex] ?? 0)
+      h.onProgress?.(Math.round((done / totalBytes) * 100), labels[fileIndex] ?? `region ${fileIndex + 1}`)
     })
 
     // Reset into the new firmware. On the S3's native USB-Serial-JTAG the
