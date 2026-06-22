@@ -54,6 +54,30 @@
   let label = $state('default')
   let secret = $state('')
   let passphrase = $state('')
+
+  // Plain-English explanation of each style, including the one thing that trips
+  // people up: whether the device keeps your existing npub or gets a new one.
+  const MODE_INFO: Record<ProvisionMode, { title: string; body: string; address: string; addressKind: 'same' | 'new' }> = {
+    'tree-mnemonic': {
+      title: 'Recovery phrase (12 or 24 words)',
+      body: 'Build the signer from a BIP-39 recovery phrase. The device makes a tree of keys from it, so one phrase can run several named accounts. Generate a fresh phrase on the Home setup flow, or paste an existing one here. An optional passphrase adds a secret 25th word.',
+      address: 'A new address, derived from the phrase.',
+      addressKind: 'new',
+    },
+    'bunker': {
+      title: 'Existing nsec — sign as-is',
+      body: 'Use an nsec you already have directly. The device signs AS that exact identity — no derivation. Pick this if you want this signer to BE your existing key.',
+      address: 'The SAME npub as your nsec.',
+      addressKind: 'same',
+    },
+    'tree-nsec': {
+      title: 'Existing nsec — derive a new key',
+      body: 'Bring an nsec you already have, but the device derives a brand-new master key from it (a tree root). You get the multi-account tree from a secret you already hold.',
+      address: 'A NEW, different address — not your nsec’s npub.',
+      addressKind: 'new',
+    },
+  }
+  const modeInfo = $derived(MODE_INFO[mode])
   let status = $state<'idle' | 'deriving' | 'confirming' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
   let npubPreview = $state('')
@@ -189,7 +213,13 @@
     </div>
   {:else if status === 'confirming'}
     <div class="confirm">
-      <p class="info">Confirm this is the correct pubkey:</p>
+      <p class="info">
+        {#if mode === 'bunker'}
+          This should be the <strong>same npub</strong> as the nsec you entered — check it matches before sending:
+        {:else}
+          This is the <strong>new address</strong> your signer will have — check it before sending:
+        {/if}
+      </p>
       <p class="npub">{npubPreview}</p>
       <div class="actions">
         <button class="btn send" onclick={handleSend}>Send to Device</button>
@@ -199,13 +229,21 @@
   {:else}
     <div class="form">
       <label class="field">
-        <span>Mode</span>
+        <span>How do you want to set up this signer?</span>
         <select bind:value={mode} disabled={status !== 'idle'}>
-          <option value="tree-mnemonic">Tree (mnemonic)</option>
-          <option value="tree-nsec">Tree (nsec)</option>
-          <option value="bunker">Bunker (raw nsec)</option>
+          <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
+          <option value="bunker">Existing nsec — sign as-is (keeps your npub)</option>
+          <option value="tree-nsec">Existing nsec — derive a new key (new npub)</option>
         </select>
       </label>
+
+      <div class="mode-info" class:same={modeInfo.addressKind === 'same'}>
+        <p class="mode-info-body">{modeInfo.body}</p>
+        <p class="mode-info-addr">
+          <span class="addr-chip">{modeInfo.addressKind === 'same' ? 'Same npub' : 'New npub'}</span>
+          {modeInfo.address}
+        </p>
+      </div>
 
       <label class="field">
         <span>Label</span>
@@ -313,7 +351,20 @@
   .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
 
   .info { font-size: 0.8rem; color: #888; margin: 0; }
-  .warning { font-size: 0.8rem; color: #a93; }
+  .info strong { color: #ccc; }
+
+  .mode-info {
+    border: 1px solid #243; border-left: 3px solid #4a9; border-radius: 4px;
+    padding: 0.6rem 0.8rem; background: #08120e; margin: -0.25rem 0 0.25rem;
+  }
+  .mode-info.same { border-left-color: var(--green); }
+  .mode-info-body { font-size: 0.78rem; color: #9a9; line-height: 1.5; margin: 0 0 0.5rem; }
+  .mode-info-addr { font-size: 0.78rem; color: #cdd; margin: 0; display: flex; align-items: center; gap: 0.45rem; }
+  .addr-chip {
+    font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
+    color: #cba24a; border: 1px solid #5a4a20; border-radius: 3px; padding: 0.1rem 0.4rem; flex-shrink: 0;
+  }
+  .mode-info.same .addr-chip { color: var(--green); border-color: var(--green-dim); }
 
   .usb-gate { border: 1px solid #3a3320; border-radius: 4px; padding: 0.9rem 1.1rem; background: #120f06; }
   .usb-gate-lead { font-size: 0.9rem; color: #cba24a; font-weight: 600; margin: 0 0 0.7rem; }

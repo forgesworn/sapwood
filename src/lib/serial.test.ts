@@ -3,8 +3,52 @@
 // Tests the frame extraction logic without needing a real Web Serial port.
 // We test processBytes indirectly by checking what events a chunk produces.
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { buildFrame, FrameType, MAGIC } from './frame.js'
+import { SerialTransport } from './serial.js'
+
+// A fake WritableStream that enforces the real "one writer at a time" lock, so
+// overlapping getWriter() calls throw exactly like the browser's does.
+function makeFakePort(opts: { writeDelayMs?: number; hang?: boolean } = {}) {
+  let locked = false
+  const writes: Uint8Array[] = []
+  let aborted = false
+  let rejectPending: ((e: unknown) => void) | null = null
+  const writable = {
+    getWriter() {
+      if (locked) throw new TypeError('Cannot create writer when WritableStream is locked')
+      locked = true
+      return {
+        write(d: Uint8Array): Promise<void> {
+          if (opts.hang) return new Promise<void>((_, reject) => { rejectPending = reject })
+          if (opts.writeDelayMs) {
+            return new Promise<void>((r) => setTimeout(() => { writes.push(d); r() }, opts.writeDelayMs))
+          }
+          writes.push(d)
+          return Promise.resolve()
+        },
+        releaseLock() {
+          if (!locked) return
+          locked = false
+        },
+        // Mirrors the real WritableStream: abort rejects the pending write.
+        async abort() {
+          aborted = true
+          locked = false
+          if (rejectPending) { rejectPending(new DOMException('aborted', 'AbortError')); rejectPending = null }
+        },
+      }
+    },
+  }
+  return { port: { writable } as unknown as SerialPort, writes, get aborted() { return aborted } }
+}
+
+function transportWith(port: SerialPort): SerialTransport {
+  const t = new SerialTransport()
+  ;(t as unknown as { port: SerialPort; running: boolean }).port = port
+  ;(t as unknown as { running: boolean }).running = true
+  return t
+}
 
 // We can't instantiate SerialTransport in tests (no navigator.serial),
 // so we test the buffer processing logic by extracting it into a testable
@@ -135,5 +179,47 @@ describe('buffer accumulation', () => {
 
     // Should be identical to the original frame.
     expect(Array.from(buffer)).toEqual(Array.from(frame))
+  })
+})
+
+describe('write serialisation', () => {
+  it('does not throw "locked" when two writes overlap, and preserves order', async () => {
+    const fake = makeFakePort({ writeDelayMs: 15 })
+    const t = transportWith(fake.port)
+    const a = new Uint8Array([1])
+    const b = new Uint8Array([2])
+
+    // Fire both before the first resolves — the bug case. Must not throw.
+    await Promise.all([t.write(a), t.write(b)])
+
+    expect(fake.writes.map((w) => w[0])).toEqual([1, 2])
+  })
+
+  it('a third write still works after two overlapping ones', async () => {
+    const fake = makeFakePort({ writeDelayMs: 5 })
+    const t = transportWith(fake.port)
+    await Promise.all([t.write(new Uint8Array([1])), t.write(new Uint8Array([2]))])
+    await t.write(new Uint8Array([3]))
+    expect(fake.writes.map((w) => w[0])).toEqual([1, 2, 3])
+  })
+
+  it('times out a stalled write, aborts the writer, and reports a recovery hint', async () => {
+    const fake = makeFakePort({ hang: true })
+    const t = transportWith(fake.port)
+
+    await expect(t.write(new Uint8Array([1]), 20)).rejects.toThrow(/isn't responding|RESET/i)
+    expect(fake.aborted).toBe(true)
+  })
+
+  it('recovers: a write after a timed-out one is not wedged by the dead chain', async () => {
+    const hung = makeFakePort({ hang: true })
+    const t = transportWith(hung.port)
+    await expect(t.write(new Uint8Array([1]), 20)).rejects.toThrow()
+
+    // Swap in a healthy port (as a reconnect would) and write again.
+    const good = makeFakePort()
+    ;(t as unknown as { port: SerialPort }).port = good.port
+    await t.write(new Uint8Array([9]))
+    expect(good.writes.map((w) => w[0])).toEqual([9])
   })
 })
