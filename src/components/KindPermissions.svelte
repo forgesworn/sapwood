@@ -69,18 +69,20 @@
       <span class="perms-tofu-label">Awaiting first approval on device</span>
     </div>
   {:else}
-    <button class="perms-toggle" onclick={() => expanded = !expanded} disabled={updating}>
-      <span class="perms-chevron" class:open={expanded}>{'\u25B8'}</span>
-      <span class="perms-label">Signing</span>
-      {#if updating}
-        <span class="perms-waiting">Confirm on device\u2026</span>
-      {:else}
-        <span class="perms-summary" class:restricted={!unrestricted}>{summaryText}</span>
-        {#if !unrestricted}
-          <button class="perms-reset" onclick={(e) => { e.stopPropagation(); allowAll() }}>Allow all</button>
+    <div class="perms-header">
+      <button class="perms-toggle" onclick={() => expanded = !expanded} disabled={updating}>
+        <span class="perms-chevron" class:open={expanded}>{'\u25B8'}</span>
+        <span class="perms-label">Signing</span>
+        {#if updating}
+          <span class="perms-waiting">Confirm on device\u2026</span>
+        {:else}
+          <span class="perms-summary" class:restricted={!unrestricted}>{summaryText}</span>
         {/if}
+      </button>
+      {#if !updating && !unrestricted}
+        <button class="perms-reset" onclick={allowAll}>Allow all</button>
       {/if}
-    </button>
+    </div>
 
     {#if expanded && !updating}
       <div class="perms-grid">
@@ -139,6 +141,11 @@
   }
 
   /* Collapsible toggle */
+  .perms-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
   .perms-toggle {
     display: flex;
     align-items: center;
@@ -147,7 +154,8 @@
     border: none;
     padding: 0.3rem 0;
     cursor: pointer;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     text-align: left;
     font-family: inherit;
   }
