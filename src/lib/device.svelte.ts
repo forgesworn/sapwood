@@ -6,6 +6,7 @@ import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
   buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
+  buildFirmwareInfo,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
@@ -379,6 +380,33 @@ export async function restoreIdentity(label = 'default'): Promise<string> {
   // follow-up read may fail — the npub from the ACK is what we rely on.
   try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
   return npub
+}
+
+export interface FirmwareInfo {
+  version: string
+  board: string
+}
+
+/**
+ * Ask a USB-connected device which firmware version it is running. Read-only
+ * and quick. Returns null if the device doesn't answer (older firmware without
+ * the query, or we're not on USB) so callers can degrade gracefully.
+ */
+export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
+  if (device.mode !== 'serial') return null
+  try {
+    const resp = await serialTransport.sendAndReceive(
+      buildFirmwareInfo(),
+      [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
+      4_000,
+    )
+    if (resp.type !== FrameType.FIRMWARE_INFO_RESPONSE) return null
+    const info = JSON.parse(new TextDecoder().decode(resp.payload))
+    if (typeof info?.version !== 'string') return null
+    return { version: info.version, board: typeof info.board === 'string' ? info.board : '' }
+  } catch {
+    return null // older firmware, or no response — treat as unknown
+  }
 }
 
 /**

@@ -24,6 +24,8 @@ export const FrameType = {
   PROVISION_LIST_RESPONSE: 0x07,
   GENERATE_IDENTITY:     0x57,
   RESTORE_IDENTITY:      0x58,
+  FIRMWARE_INFO:         0x59,
+  FIRMWARE_INFO_RESPONSE: 0x5a,
   ENCRYPTED_REQUEST:     0x10,
   ENCRYPTED_RESPONSE:    0x11,
   NACK:                  0x15,
@@ -193,6 +195,11 @@ export function buildRestoreIdentity(label: string): Uint8Array {
   payload[0] = labelBytes.length
   payload.set(labelBytes, 1)
   return buildFrame(FrameType.RESTORE_IDENTITY, payload)
+}
+
+/** Build a FIRMWARE_INFO frame (0x59, empty payload). Read-only version query. */
+export function buildFirmwareInfo(): Uint8Array {
+  return buildFrame(FrameType.FIRMWARE_INFO)
 }
 
 /** Build a FACTORY_RESET frame (empty payload, requires button confirm on device). */
