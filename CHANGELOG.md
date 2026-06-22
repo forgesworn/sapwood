@@ -3,6 +3,18 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.5.3 — 2026-06-22
+
+### Changed
+
+- **"Press RESET" is now an unmissable step after flashing.** The ESP32-S3's USB
+  doesn't reliably auto-reboot after a flash, so the success screen now leads with
+  a prominent *"Now press the RESET button on the board"* callout (heading changed
+  to *"Your signer is flashed"* — it isn't live until it restarts), and the
+  console's finish-setup card says to press RESET if the signer isn't found.
+- **Visible version.** The footer now shows the running build (e.g. *Sapwood
+  v0.5.3*) so you can confirm a deploy landed and you're not on a cached older tab.
+
 ## 0.5.2 — 2026-06-22
 
 ### Added

@@ -219,8 +219,9 @@
       <div class="finish-setup">
         <h3 class="finish-title">✓ Flashed! Now let's finish your signer</h3>
         <p class="finish-lead">
-          Your new signer is plugged in and ready. Tap the button to connect to it — then we'll
-          name it and make its keys. Nothing to type.
+          Tap to connect to your new signer — then we'll name it and make its keys.
+          <br /><strong>If it isn't found, press the RESET button on the board first</strong> (it needs a
+          restart to start the new firmware), then tap again.
         </p>
         <button
           class="btn btn-primary finish-btn"
