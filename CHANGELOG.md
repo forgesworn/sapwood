@@ -3,6 +3,24 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.7.2 — 2026-06-22
+
+Foundation hardening — fixes a crash and stops broken code shipping.
+
+### Fixed
+
+- **Advanced › Clients no longer crashes** when fetching a connection's bunker
+  URI. A half-finished helper referenced undefined variables, throwing a
+  `ReferenceError` at runtime (the production build didn't catch it). Removed the
+  dead code; the inline per-client "URI" reveal was already the real path.
+
+### Changed
+
+- **`svelte-check` now runs in CI**, so TypeScript errors can no longer ship to
+  production (this class of bug previously slipped through because only the
+  bundler — which ignores undeclared globals — ran). Cleared the 13 pre-existing
+  type errors across the codebase.
+
 ## 0.7.1 — 2026-06-22
 
 ### Fixed

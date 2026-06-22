@@ -12,11 +12,13 @@ beforeEach(() => {
   // mockFetch is module-level and vi.restoreAllMocks() doesn't clear a vi.fn().
   mockFetch.mockReset()
   vi.stubGlobal('fetch', mockFetch)
+  // Closure over a local store rather than `this`, so the methods type-check
+  // (the object literal's `this` doesn't see its own `store` field).
+  const store: Record<string, string> = {}
   vi.stubGlobal('localStorage', {
-    store: {} as Record<string, string>,
-    getItem(key: string) { return this.store[key] ?? null },
-    setItem(key: string, value: string) { this.store[key] = value },
-    removeItem(key: string) { delete this.store[key] },
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = value },
+    removeItem: (key: string) => { delete store[key] },
   })
 })
 

@@ -250,7 +250,7 @@
       <tr>
         <td class="label">Relays</td>
         <td>
-          {#each device.bridgeInfo.relays as relay}
+          {#each (device.bridgeInfo.relays as string[]) as relay}
             <div class="relay">{relay}</div>
           {/each}
         </td>
