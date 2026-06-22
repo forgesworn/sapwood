@@ -133,13 +133,18 @@
       them on paper, in order, and keep them safe — they are the only way to recover this signer, and
       <strong>anyone who has them controls it</strong>. They appear only on the device, never here.
     </p>
+    <p class="fi-lede">
+      When you've written them all down, <strong>press and hold the button on the signer</strong> until
+      its screen says “Saved”. A WiFi signer then reboots and joins your network — give it about 10
+      seconds.
+    </p>
     {#if npub}
       <p class="npub">{npub}</p>
       <p class="fi-hint">↑ your signer's public address — safe to share</p>
     {/if}
     <label class="confirm-save">
       <input type="checkbox" bind:checked={saved} />
-      <span>I've written down the 12 words shown on the device.</span>
+      <span>I've written the 12 words down and held the button on the device to save.</span>
     </label>
     <div class="fi-actions">
       <button class="btn primary" disabled={!saved} onclick={finish}>Continue</button>
