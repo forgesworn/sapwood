@@ -3,6 +3,29 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.6.2 — 2026-06-22
+
+Stops a provisioned WiFi signer, plugged into USB, from offering a dead-end
+"create an identity" flow.
+
+### Fixed
+
+- **A signer that already has an identity is no longer asked to make another
+  over the cable.** A provisioned WiFi signer boots straight into its relay loop
+  and never listens on USB, so the browser's `PROVISION_LIST` got no reply — and
+  Sapwood mistook "no reply" for "no identity", offered to create one, and that
+  request then timed out ("no response from device"). On USB connect Sapwood now
+  **probes** the device: a fresh or USB-mode signer answers (list or NACK) and
+  proceeds as before; a silent one is recognised as a WiFi signer.
+
+### Added
+
+- **"This signer runs over WiFi" guidance.** When a silent (WiFi) signer is on
+  the cable, Home now explains it's already set up and offers a one-click
+  **Manage over WiFi** for devices you've used before — plus a tucked-away
+  "set it up over the cable again" note covering the hold-PRG / RESET escape
+  hatch, for re-provisioning or wiping.
+
 ## 0.6.1 — 2026-06-22
 
 Fixes the on-device recovery phrase never appearing on screen.

@@ -50,6 +50,12 @@ export const device = $state({
   operatorPub: '',
   /** USB-direct: true once the bridge session is authenticated (client mgmt allowed). */
   bridgeAuthed: false,
+  /** USB-direct: probing whether the freshly-connected device answers frames. */
+  usbProbing: false,
+  /** USB-direct: device is connected at the port level but answers no frames —
+   *  almost always a provisioned WiFi signer that booted into its relay loop and
+   *  never reads USB. Drives the "manage over WiFi instead" guidance. */
+  usbSilent: false,
 })
 
 const MAX_LOG_LINES = 500
@@ -63,7 +69,8 @@ serialTransport.on((event: SerialEvent) => {
       device.mode = 'serial'
       device.portInfo = event.port
       device.error = null
-      refreshMasters()
+      device.usbSilent = false
+      void probeSerial()
       break
     case 'disconnected':
       if (device.mode === 'serial') {
@@ -73,6 +80,8 @@ serialTransport.on((event: SerialEvent) => {
         device.masters = []
         device.slots = []
         device.bridgeAuthed = false
+        device.usbProbing = false
+        device.usbSilent = false
       }
       break
     case 'frame':
@@ -345,6 +354,40 @@ export async function generateIdentity(label = 'default'): Promise<string> {
   // a follow-up read may fail — the npub from the ACK is what we rely on.
   try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
   return npub
+}
+
+/**
+ * On a fresh USB connection, work out whether the device actually answers
+ * frames. A USB-reachable signer replies to PROVISION_LIST with either the
+ * master list (provisioned) or a NACK (brand-new, still in the first-provision
+ * loop). A provisioned WiFi signer, by contrast, boots straight into its relay
+ * loop and never reads USB — so it stays silent. Detecting that lets Home steer
+ * the operator to WiFi (or the force-USB escape hatch) instead of offering a
+ * "create an identity" flow that can only time out.
+ *
+ * Retries to ride out the ~6s boot animation a just-reset board plays before it
+ * services any frame. If a PROVISION_LIST_RESPONSE lands, handleFrame populates
+ * device.masters as a side effect.
+ */
+async function probeSerial() {
+  device.usbProbing = true
+  device.usbSilent = false
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await serialTransport.sendAndReceive(
+          buildProvisionList(),
+          [FrameType.PROVISION_LIST_RESPONSE, FrameType.NACK],
+          5_000,
+        )
+        return // answered → reachable
+      } catch { /* timed out this round — the board may still be booting */ }
+      if (device.masters.length > 0) return // a late list reply arrived via handleFrame
+    }
+    device.usbSilent = true
+  } finally {
+    device.usbProbing = false
+  }
 }
 
 export async function refreshMasters() {

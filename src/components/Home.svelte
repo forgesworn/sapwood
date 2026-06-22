@@ -4,10 +4,13 @@
   // next step, lists what is connected, and offers the phone handoff. The full
   // 9-tab cockpit is one tap away via `onadvanced` (the Advanced toggle).
   import {
-    device, refreshSlots, refreshMasters, disconnect, connectSerial,
+    device, refreshSlots, refreshMasters, disconnect, connectSerial, connectRelay,
     mgmtRevokeClient, mgmtApproveSigning, mgmtCanApproveSigning,
   } from '../lib/device.svelte.js'
-  import { npubShort, npubToHex, getDeviceLabel, setDeviceLabel } from '../lib/known-devices.js'
+  import {
+    npubShort, npubToHex, getDeviceLabel, setDeviceLabel,
+    listKnownDevices, type KnownDevice,
+  } from '../lib/known-devices.js'
   import ConnectApp from './ConnectApp.svelte'
   import FirstIdentity from './FirstIdentity.svelte'
   import PhoneHandoff from './PhoneHandoff.svelte'
@@ -85,6 +88,27 @@
     try { await connectSerial() }
     finally { reconnecting = false }
   }
+
+  // --- WiFi signer plugged into USB ---
+  // A provisioned WiFi signer boots into its relay loop and ignores the cable,
+  // so device.usbSilent goes true. We already remember such devices (npub +
+  // relays) from when they were provisioned, so we can offer a one-click hop to
+  // WiFi management. localStorage isn't reactive, so read it once here.
+  const knownWifi = $derived(listKnownDevices().filter((d) => d.relays.length))
+  let wifiBusy = $state(false)
+  let wifiErr = $state('')
+  async function manageOverWifi(d: KnownDevice) {
+    wifiBusy = true
+    wifiErr = ''
+    try {
+      await connectRelay(d.pubHex, d.relays, d.label)
+    } catch (e) {
+      wifiErr = e instanceof Error ? e.message
+        : 'Could not reach it over WiFi yet — give it ~10s to join the network, then retry.'
+    } finally {
+      wifiBusy = false
+    }
+  }
 </script>
 
 <div class="home">
@@ -99,7 +123,64 @@
     </div>
   {/if}
 
-  {#if !hasIdentity}
+  {#if device.mode === 'serial' && device.usbProbing && !hasIdentity}
+    <!-- Just connected over USB; find out if the device actually answers before
+         deciding what to show (a WiFi signer won't, and we must not offer it a
+         create flow that can only time out). -->
+    <section class="checking">
+      <span class="checking-spin"></span>
+      <div>
+        <h2 class="checking-title">Checking your signer…</h2>
+        <p class="checking-body">Talking to the device over the cable. If it was just reset,
+          it may take a few seconds to start up.</p>
+      </div>
+    </section>
+
+  {:else if device.mode === 'serial' && device.usbSilent && !hasIdentity}
+    <!-- Connected at the port level but no frames come back: it's a provisioned
+         WiFi signer running its relay loop, which never reads USB. Steer to WiFi
+         (the normal way to manage it) and offer the force-USB escape hatch. -->
+    <section class="wifi-usb">
+      <h2 class="wifi-usb-title">This signer is already set up — and runs over WiFi</h2>
+      <p class="wifi-usb-body">
+        It has an identity and won't answer over the cable: a WiFi signer is managed over the
+        network, not USB. Connect to it over WiFi to manage it.
+      </p>
+
+      {#if knownWifi.length}
+        <div class="wifi-usb-known">
+          {#each knownWifi as d (d.pubHex)}
+            <button class="btn-wifi" disabled={wifiBusy} onclick={() => manageOverWifi(d)}>
+              {wifiBusy ? 'Connecting…' : `Manage “${d.label}” over WiFi`}
+            </button>
+          {/each}
+        </div>
+        {#if wifiErr}<p class="wifi-usb-err">{wifiErr}</p>{/if}
+      {:else}
+        <p class="wifi-usb-body">
+          Disconnect, choose <strong>“Connect over your network”</strong>, and enter the signer's
+          <code>npub1…</code> address (shown on its screen) and relay.
+        </p>
+        <button class="btn-wifi" onclick={() => disconnect()}>Disconnect and connect over WiFi</button>
+      {/if}
+
+      <details class="wifi-usb-more">
+        <summary>Need to set it up over the cable again?</summary>
+        <p>
+          Only needed to re-provision or wipe it. Press <strong>RESET</strong> on the board and
+          watch the screen — the moment it shows <strong>“Hold PRG = USB”</strong>, press and hold
+          the other button (<strong>PRG</strong>) for ~3 seconds until it says
+          <strong>“USB mode”</strong>. Then reconnect.
+        </p>
+        <button class="btn-reconnect-inline" onclick={reconnect} disabled={reconnecting}>
+          {reconnecting ? 'Reconnecting…' : 'Reconnect over USB'}
+        </button>
+      </details>
+
+      <button class="wifi-usb-disconnect" onclick={() => disconnect()}>Disconnect</button>
+    </section>
+
+  {:else if !hasIdentity}
     <!-- No master yet — the just-flashed first-run state. Lead with setup. A slim
          connection line stands in for the signer card (there's no identity yet). -->
     <div class="conn-line">
@@ -256,6 +337,62 @@
   }
   .needs-usb-title { font-size: 1.2rem; font-weight: 700; color: #cba24a; margin: 0 0 0.6rem; }
   .needs-usb-body { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0; }
+
+  /* USB connect: still checking whether the device answers. */
+  .checking {
+    display: flex; align-items: center; gap: 1rem;
+    background: var(--surface-raised); border: 1px solid var(--border-bright);
+    border-radius: 8px; padding: 1.3rem 1.4rem;
+  }
+  .checking-spin {
+    width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%;
+    border: 3px solid var(--border-bright); border-top-color: var(--green);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .checking-title { font-size: 1.1rem; font-weight: 700; color: #fff; margin: 0 0 0.3rem; }
+  .checking-body { font-size: 0.88rem; color: var(--text-dim); line-height: 1.55; margin: 0; }
+
+  /* A provisioned WiFi signer plugged into USB — won't answer the cable. */
+  .wifi-usb {
+    background: #06120e; border: 1px solid var(--green-dim);
+    border-radius: 8px; padding: 1.4rem;
+  }
+  .wifi-usb-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin: 0 0 0.6rem; }
+  .wifi-usb-body { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0 0 1rem; }
+  .wifi-usb-body strong { color: var(--text); }
+  .wifi-usb-body code {
+    color: var(--green-dim); background: #0a0a0a; padding: 0.05rem 0.3rem; border-radius: 3px;
+  }
+  .wifi-usb-known { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.5rem; }
+  .btn-wifi {
+    background: var(--green); color: #050505; border: 1px solid var(--green); font-weight: 600;
+    font-family: inherit; font-size: 0.95rem; padding: 0.75rem 1.2rem; border-radius: 5px; cursor: pointer;
+  }
+  .btn-wifi:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
+  .btn-wifi:disabled { opacity: 0.5; cursor: not-allowed; }
+  .wifi-usb-err { font-size: 0.85rem; color: var(--amber); margin: 0.6rem 0 0; line-height: 1.5; }
+
+  .wifi-usb-more { margin-top: 1.1rem; }
+  .wifi-usb-more summary {
+    cursor: pointer; font-size: 0.85rem; color: var(--text-dim); padding: 0.2rem 0;
+  }
+  .wifi-usb-more summary:hover { color: var(--text); }
+  .wifi-usb-more p { font-size: 0.85rem; color: var(--text-dim); line-height: 1.6; margin: 0.6rem 0 0.8rem; }
+  .wifi-usb-more strong { color: var(--text); }
+  .btn-reconnect-inline {
+    background: #2a1a08; border: 1px solid var(--amber); color: var(--amber);
+    border-radius: 4px; padding: 0.45rem 1rem; font-family: inherit; font-size: 0.85rem;
+    font-weight: 600; cursor: pointer;
+  }
+  .btn-reconnect-inline:hover:not(:disabled) { background: #3a2410; }
+  .btn-reconnect-inline:disabled { opacity: 0.5; cursor: not-allowed; }
+  .wifi-usb-disconnect {
+    display: block; margin-top: 1.2rem; background: none; border: 1px solid #442222;
+    color: var(--red); cursor: pointer; font-family: inherit; font-size: 0.8rem;
+    padding: 0.4rem 0.9rem; border-radius: 4px;
+  }
+  .wifi-usb-disconnect:hover { background: #1a0808; }
 
   .signer {
     display: flex;
