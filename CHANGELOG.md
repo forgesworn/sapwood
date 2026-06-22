@@ -3,6 +3,16 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.5.4 — 2026-06-22
+
+### Changed
+
+- **Readable on desktop.** The admin was a narrow 860 px column of small, dim
+  text. Now: a wider **1100 px** layout, a larger **18 px** base so the whole UI
+  scales up, and **brighter** secondary/tertiary text (the muted grey actually
+  failed contrast on the near-black background). The mobile layout is unchanged —
+  full-width cards, no overflow.
+
 ## 0.5.3 — 2026-06-22
 
 ### Changed
