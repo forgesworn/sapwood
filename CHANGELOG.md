@@ -3,6 +3,26 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.6.1 — 2026-06-22
+
+Fixes the on-device recovery phrase never appearing on screen.
+
+### Fixed
+
+- **The 12-word phrase now stays on the device's screen until you confirm.**
+  In 0.6.0 the device drew the recovery phrase and then immediately redrew its
+  idle/boot screen (and a WiFi signer rebooted ~1s later), so the words flashed
+  and vanished — "no words actually got shown on the device". The firmware now
+  holds the phrase on the OLED and waits for a deliberate **2-second button
+  hold** before continuing, so you have as long as you need to write it down.
+  Requires the bundled firmware shipped with this release.
+
+### Changed
+
+- The "Write down the words" step now tells you to **press and hold the button
+  on the signer until its screen says "Saved"** (then a WiFi signer reboots and
+  joins your network), matching the new firmware behaviour.
+
 ## 0.6.0 — 2026-06-22
 
 The master recovery phrase is now generated and shown **only on the device** —
