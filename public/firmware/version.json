@@ -1,6 +1,6 @@
 {
   "version": "0.8.0",
-  "builtAt": "2026-06-22T15:27:11Z",
+  "builtAt": "2026-06-22T15:55:26Z",
   "boards": {
     "heltec-v4": {
       "app": "app.bin",
@@ -9,7 +9,7 @@
     },
     "heltec-v3": {
       "app": "app.bin",
-      "sha256": "47c4d9ec923902a91b64cfa7d9c713c9b24fb535f012ea9729c6043eae4d17a3",
+      "sha256": "4598439d863960b7ea9de760ecc3dcd2dee3c30def46a24520120c8c6c638e7d",
       "bytes": 1790688
     }
   }
