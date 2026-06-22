@@ -11,14 +11,14 @@ export type IdentitySource = 'create' | 'import'
 
 export type IdentityStep =
   | 'intro' // explain, then choose: create fresh vs "I already have one"
-  | 'backup' // show the generated recovery phrase, confirm it's written down + name it
-  | 'confirm' // review the derived public address, then write it to the device
+  | 'naming' // optionally name it, then ask the device to generate on-device
+  | 'writedown' // the device shows its recovery phrase on ITS screen; confirm written
   | 'done' // provisioned
 
 /** The device stores a master label of at most 32 bytes. */
 export const NAME_MAX = 32
 
-export const IDENTITY_STEPS: IdentityStep[] = ['intro', 'backup', 'confirm', 'done']
+export const IDENTITY_STEPS: IdentityStep[] = ['intro', 'naming', 'writedown', 'done']
 
 /** A name is optional but bounded. Returns an error message, or null if fine. */
 export function nameError(name: string): string | null {
@@ -39,9 +39,4 @@ export function provisionLabel(name: string): string {
 /** The friendly label to remember for Home — only when the owner actually named it. */
 export function friendlyLabel(name: string): string | undefined {
   return name.trim() || undefined
-}
-
-/** Split a recovery phrase into individual words for a numbered grid display. */
-export function phraseWords(mnemonic: string): string[] {
-  return mnemonic.trim().split(/\s+/).filter(Boolean)
 }

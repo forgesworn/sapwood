@@ -5,7 +5,7 @@ import { transport as serialTransport, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
-  buildSessionAuth, buildSetBridgeSecret,
+  buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
@@ -322,6 +322,29 @@ export async function disconnect() {
     device.slots = []
     device.relayStatus = null
   }
+}
+
+/**
+ * Ask a USB-connected device to generate its OWN identity: it creates the seed
+ * from its hardware RNG, shows the 12-word recovery phrase on its OWN screen,
+ * and stores it. No phrase or secret crosses the cable — the ACK carries only
+ * the public npub (returned here) so we can address it over the relay later.
+ */
+export async function generateIdentity(label = 'default'): Promise<string> {
+  if (device.mode !== 'serial') throw new Error('Generating an identity needs a USB connection')
+  const resp = await serialTransport.sendAndReceive(
+    buildGenerateIdentity(label),
+    [FrameType.ACK, FrameType.NACK],
+    30_000,
+  )
+  if (resp.type !== FrameType.ACK) {
+    throw new Error('The device could not generate an identity (storage write failed). Try again.')
+  }
+  const npub = new TextDecoder().decode(resp.payload).trim()
+  // Best-effort: the device reboots into WiFi right after a first provision, so
+  // a follow-up read may fail — the npub from the ACK is what we rely on.
+  try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
+  return npub
 }
 
 export async function refreshMasters() {

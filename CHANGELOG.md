@@ -3,6 +3,30 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.6.0 — 2026-06-22
+
+The master recovery phrase is now generated and shown **only on the device** —
+never in the browser.
+
+### Changed
+
+- **Your signer creates its own recovery phrase, on its own screen.** "Create a
+  fresh identity" no longer generates the 12 words in the browser. Sapwood asks
+  the device to generate (a new GENERATE_IDENTITY command carrying no secret);
+  the device draws its own entropy, derives the master, and shows the 12-word
+  phrase on its **OLED** for you to write down. The phrase never touches this
+  computer — only the public npub comes back. The guided flow is now: name it →
+  the device generates + displays the phrase → confirm you've written down the
+  words shown **on the device** → done.
+- **Firmware ships with the app.** The flasher's firmware binaries are no longer
+  gitignored/hand-pushed — they're committed and deployed with the site, so the
+  live flasher always serves the matching firmware.
+
+### Note
+
+- Importing an existing recovery phrase or nsec is unchanged (Advanced ›
+  Provision) — that key legitimately originates outside the device.
+
 ## 0.5.4 — 2026-06-22
 
 ### Changed

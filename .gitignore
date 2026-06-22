@@ -19,5 +19,6 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
-# Flasher firmware binaries (build artifacts from heartwood-esp32 — populate via save-image)
-public/firmware/
+# Flasher firmware binaries are now committed (built from heartwood-esp32 via
+# scripts/build-firmware.sh + espflash save-image) so they deploy with the site
+# and the live flasher always serves the matching firmware.

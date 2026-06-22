@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  NAME_MAX, IDENTITY_STEPS, nameError, nameOk, provisionLabel, friendlyLabel, phraseWords,
+  NAME_MAX, IDENTITY_STEPS, nameError, nameOk, provisionLabel, friendlyLabel,
 } from './first-identity.js'
 
 describe('first-identity name validation', () => {
@@ -50,22 +50,8 @@ describe('friendlyLabel', () => {
   })
 })
 
-describe('phraseWords', () => {
-  it('splits a phrase into individual words', () => {
-    expect(phraseWords('abandon abandon about')).toEqual(['abandon', 'abandon', 'about'])
-  })
-
-  it('tolerates extra whitespace and newlines', () => {
-    expect(phraseWords('  one\n two   three ')).toEqual(['one', 'two', 'three'])
-  })
-
-  it('returns an empty array for a blank phrase', () => {
-    expect(phraseWords('   ')).toEqual([])
-  })
-})
-
 describe('IDENTITY_STEPS', () => {
-  it('runs intro → backup → confirm → done', () => {
-    expect(IDENTITY_STEPS).toEqual(['intro', 'backup', 'confirm', 'done'])
+  it('runs intro → naming → writedown → done', () => {
+    expect(IDENTITY_STEPS).toEqual(['intro', 'naming', 'writedown', 'done'])
   })
 })

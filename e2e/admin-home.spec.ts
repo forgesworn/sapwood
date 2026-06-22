@@ -65,12 +65,12 @@ test('a device with no identity yet leads with guided setup', async ({ page }) =
   // The connect-an-app hero is hidden until there is an identity to connect to.
   await expect(heroButton(page)).toBeHidden()
 
-  // Create a fresh identity → a recovery phrase appears, gated on confirmation.
+  // Create a fresh identity → the naming step, from which the DEVICE (not the
+  // browser) generates the seed and shows the phrase on its own screen. We can't
+  // drive a real device in E2E, so we assert the surface up to the on-device step.
   await page.getByRole('button', { name: /Create a fresh identity/ }).click()
-  await expect(page.getByRole('listitem')).toHaveCount(12)
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
-  await page.getByRole('checkbox').check()
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  await expect(page.getByRole('heading', { name: 'Name your signer' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Create it on my device/ })).toBeVisible()
 })
 
 test('the disconnected console offers plain-language connect options', async ({ page }) => {
