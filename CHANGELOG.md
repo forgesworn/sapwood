@@ -3,6 +3,22 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.5 — 2026-06-22
+
+Bundled firmware v0.8.1 — a much friendlier on-device restore.
+
+### Changed
+
+- **Bundled firmware → v0.8.1.** On-device recovery-phrase restore is reworked:
+  two gestures (**tap** = next choice, **hold** = pick — DELETE is a choice in the
+  ring), and a **review-and-edit** pass over all 12 words so a wrong word can be
+  found and fixed in place instead of backspacing through everything. Update an
+  existing signer to it from the Update-firmware screen.
+- **`sync:firmware` pins bootloaders.** It now writes a board's bootloader /
+  partition table only when absent (a `--force` flag overwrites), so a routine
+  app refresh never swaps a flash-proven bootloader for a byte-different CI
+  rebuild. This release updates only the app images + `version.json`.
+
 ## 0.8.4 — 2026-06-22
 
 Fresh-flash a Heltec V3 from the browser.
