@@ -3,6 +3,29 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.7.0 — 2026-06-22
+
+Manage a WiFi signer over the USB cable — no more hold-PRG dance.
+
+### Added
+
+- **A WiFi signer now answers over USB as well as over its relay.** Previously a
+  provisioned WiFi signer booted into a relay-only loop that ignored the cable,
+  so plugging it in led to "this signer runs over WiFi" (or, before that, a
+  dead-end). The bundled firmware now also polls USB from inside the relay loop,
+  so when you plug it in you can see and manage it over the cable — list its
+  identity, and create / list / update / revoke / get-URI for client
+  connections — concurrently with WiFi/relay. Requires the firmware shipped with
+  this release.
+
+### Notes
+
+- Master-changing operations (add / remove / generate an identity), OTA and
+  network-config changes stay USB-only — the device replies asking you to hold
+  PRG at boot for those, because they'd disturb the live relay subscription.
+- USB management in WiFi mode is a touch less snappy (~1s per step) since the
+  device interleaves it with serving the relay.
+
 ## 0.6.5 — 2026-06-22
 
 Feedback while a new identity is being created, and a familiar save gesture.
