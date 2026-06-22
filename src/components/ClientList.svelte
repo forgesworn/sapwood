@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { device, refreshSlots, serialTransport, httpTransport, type PendingClient } from '../lib/device.svelte.js'
+  import { device, refreshSlots, serialTransport, httpTransport } from '../lib/device.svelte.js'
   import { FrameType, buildPolicyRevoke, buildPolicyUpdate } from '../lib/frame.js'
-  import { kindLabel } from '../lib/kinds.js'
   import KindPermissions from './KindPermissions.svelte'
   import ApprovalQueue from './ApprovalQueue.svelte'
   import type { ConnectSlot } from '../lib/types.js'
@@ -16,27 +15,12 @@
   let showAdvancedUri = $state(false)
   let advancedCopied = $state(false)
 
-  // Connect slots (secret-based, Pi mode)
-  let connectSlots = $state<{ label: string; secret: string; bunker_uri: string; clients: string[] }[]>([])
-
   // Per-client URI reveal
   let uriForPubkey = $state<string | null>(null)
   let uriValue = $state('')
   let uriCopied = $state(false)
 
-  $effect(() => { if (device.connected) { refreshSlots(); loadConnectSlots() } })
-
-  async function loadConnectSlots() {
-    connectSlots = await httpTransport.getConnectSlots(device.selectedSlot)
-  }
-
-  /** Find the bunker URI for a client by matching its pubkey against connect slot records. */
-  function slotUriForClient(pubkey: string): string | null {
-    for (const cs of connectSlots) {
-      if (cs.clients.includes(pubkey)) return cs.bunker_uri
-    }
-    return null
-  }
+  $effect(() => { if (device.connected) refreshSlots() })
 
   // --- Derived ---
 
@@ -80,7 +64,6 @@
     createdUri = null
     createdUriCopied = false
     refreshSlots()
-    loadConnectSlots()
   }
 
   async function handleRevoke(slot: ConnectSlot) {
@@ -148,23 +131,6 @@
     showAdvancedUri = false
     uriForPubkey = null
     refreshSlots(device.selectedSlot)
-    loadConnectSlots()
-  }
-
-  async function fetchBunkerUri(slot: ConnectSlot) {
-    if (device.mode !== 'http') return
-    uriFetching = true
-    uriSlotIndex = slot.slot_index
-    uriValue = ''
-    uriCopied = false
-    try {
-      uriValue = await httpTransport.getSlotUri(device.selectedSlot, slot.slot_index)
-    } catch (e) {
-      device.error = e instanceof Error ? e.message : 'Failed to fetch URI'
-      uriSlotIndex = null
-    } finally {
-      uriFetching = false
-    }
   }
 
   async function copyUri(uri: string, target: 'created' | 'advanced' | 'slot' = 'slot') {
@@ -328,7 +294,7 @@
   {:else if device.slots.length > 0}
     <section class="approved">
       <h3 class="section-label">Connected</h3>
-      {#each device.slots as slot, i}
+      {#each device.slots as slot}
         <div class="client-card">
           <div class="client-row">
             <div class="client-identity">
