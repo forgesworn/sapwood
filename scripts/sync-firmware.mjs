@@ -26,7 +26,12 @@ const REPO = 'forgesworn/heartwood-esp32'
 const BOARD_DIR = { 'heltec-v4': 'v4', 'heltec-v3': 'v3' }
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const tag = process.argv[2] // optional; omitted ⇒ latest release
+const flags = process.argv.slice(2)
+const tag = flags.find((a) => !a.startsWith('--')) // optional; omitted ⇒ latest release
+// The bootloader + partition table change ~never and a board's bootloader, once
+// flash-proven, should not be silently swapped for a byte-different CI rebuild.
+// So they are written only when absent; --force overwrites them deliberately.
+const force = flags.includes('--force')
 
 function fail(msg) {
   console.error(msg)
@@ -69,6 +74,7 @@ try {
 
   const served = { version: manifest.version, builtAt: manifest.builtAt, boards: {} }
   const synced = []
+  const skipped = []
 
   for (const [board, meta] of boards) {
     const dir = BOARD_DIR[board]
@@ -76,22 +82,24 @@ try {
     const destDir = join(root, 'public', 'firmware', dir)
     mkdirSync(destDir, { recursive: true })
 
-    // App image (asset name lives in meta.app).
-    const appBytes = verified(meta.app, meta.sha256, `${board} app`)
-    writeFileSync(join(destDir, 'app.bin'), appBytes)
-    const lines = ['app.bin']
-
-    // Bootloader (board-specific), if present.
-    if (meta.bootloader) {
-      const blBytes = verified(meta.bootloader, meta.bootloaderSha256, `${board} bootloader`)
-      writeFileSync(join(destDir, 'bootloader.bin'), blBytes)
-      lines.push('bootloader.bin')
+    // App image always updates (it carries the firmware version). Bootloader +
+    // partition table are pinned: written only when absent, unless --force.
+    const place = (name, bytes, pinned) => {
+      const dest = join(destDir, name)
+      if (pinned && existsSync(dest) && !force) {
+        skipped.push(`${board}/${name} (kept; --force to overwrite)`)
+        return name
+      }
+      writeFileSync(dest, bytes)
+      return name
     }
 
-    // Shared partition table.
+    const lines = [place('app.bin', verified(meta.app, meta.sha256, `${board} app`), false)]
+    if (meta.bootloader) {
+      lines.push(place('bootloader.bin', verified(meta.bootloader, meta.bootloaderSha256, `${board} bootloader`), true))
+    }
     if (ptBytes) {
-      writeFileSync(join(destDir, 'partition-table.bin'), ptBytes)
-      lines.push('partition-table.bin')
+      lines.push(place('partition-table.bin', ptBytes, true))
     }
 
     served.boards[board] = { app: 'app.bin', sha256: meta.sha256, bytes: meta.bytes }
@@ -102,6 +110,7 @@ try {
 
   console.log(`Synced firmware ${manifest.version}:`)
   for (const line of synced) console.log(`  ${line}`)
+  for (const line of skipped) console.log(`  · ${line}`)
   console.log('Commit the updated images + version.json to ship it.')
 } finally {
   rmSync(tmp, { recursive: true, force: true })
