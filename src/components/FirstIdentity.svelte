@@ -120,6 +120,10 @@
     </label>
     {#if nameError(name)}<p class="fi-error">{nameError(name)}</p>{/if}
     {#if error}<p class="fi-error">{error}</p>{/if}
+    {#if status === 'generating'}
+      <p class="fi-working">⏳ Your device is creating its keys — this takes a few seconds. Watch its
+        screen; the 12 words appear there when it's ready.</p>
+    {/if}
     <div class="fi-actions">
       <button class="btn ghost" onclick={() => (step = 'intro')} disabled={status === 'generating'}>Back</button>
       <button class="btn primary" disabled={!nameOk(name) || status === 'generating'} onclick={generateOnDevice}>
@@ -198,6 +202,7 @@
   .fi-lede strong { color: var(--text); }
   .fi-warn { font-size: 0.8rem; color: var(--amber); line-height: 1.5; margin: 0.8rem 0 0; }
   .fi-error { font-size: 0.85rem; color: var(--red); margin: 0.6rem 0 0; }
+  .fi-working { font-size: 0.85rem; color: var(--green-dim); line-height: 1.55; margin: 0.6rem 0 0; }
   .fi-ok { font-size: 0.9rem; color: var(--green); margin: 0; }
   .fi-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.3rem 0 1rem; }
 

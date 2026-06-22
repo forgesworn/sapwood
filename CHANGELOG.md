@@ -3,6 +3,22 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.6.5 — 2026-06-22
+
+Feedback while a new identity is being created, and a familiar save gesture.
+
+### Changed
+
+- **The device now shows "Working — creating your keys…" the moment you start
+  generating**, instead of sitting on the previous screen for the few seconds
+  the entropy draw, key stretch and derivation take. The browser's naming step
+  says the same and points you at the device's screen. Requires the bundled
+  firmware.
+- **Saving the recovery phrase uses the same 0–100% hold bar as signing.** After
+  you've stepped through the 12 words, holding the button fills a progress bar to
+  100% to save (a short tap re-shows the words to re-check) — matching the
+  approval gesture used elsewhere on the device.
+
 ## 0.6.4 — 2026-06-22
 
 Hardens the randomness behind on-device key generation.
