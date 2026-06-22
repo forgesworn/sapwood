@@ -3,6 +3,28 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.4 — 2026-06-22
+
+Fresh-flash a Heltec V3 from the browser.
+
+### Added
+
+- **V3 can now be flashed fresh, not just OTA'd.** The release publishes each
+  board's bootloader and the shared partition table alongside the app, and
+  `sync:firmware` lays all three out under `public/firmware/<board>`. The V3
+  bootloader, app and partition table are a coherent CI-built set (the partition
+  table is byte-identical to V4's proven one). Select "Heltec WiFi LoRa 32 V3"
+  in Flash and go. *(Best confirmed on V3 hardware — it has not been flash-tested
+  on a physical V3 here.)*
+
+### Changed
+
+- **`sync:firmware` now places `bootloader.bin` + `partition-table.bin`** per
+  board (verifying every SHA-256), not just `app.bin`.
+- **V4 is untouched.** Its proven bootloader is kept as-is — the CI toolchain
+  produces a byte-different (benign) bootloader, and there was no reason to make
+  you re-test a working signer.
+
 ## 0.8.3 — 2026-06-22
 
 Multi-board firmware — V3 alongside V4.
