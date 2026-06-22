@@ -66,9 +66,9 @@
     margin: 0;
     font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
     background: #050505;
-    color: #e8e8e8;
+    color: var(--text);
     line-height: 1.6;
-    font-size: 16px;
+    font-size: 18px;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -84,15 +84,15 @@
     --surface-hover: #1a1a1a;
     --border: #1e1e1e;
     --border-bright: #2a2a2a;
-    --text: #e8e8e8;
-    --text-dim: #888;
-    --text-muted: #555;
+    --text: #f0f0f0;
+    --text-dim: #b9b9b9;
+    --text-muted: #8f8f8f;
   }
 
   main {
-    max-width: 860px;
+    max-width: 1100px;
     margin: 0 auto;
-    padding: 2rem 2.5rem;
+    padding: 2.25rem 2.5rem;
   }
 
   .version {
