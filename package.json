@@ -1,6 +1,6 @@
 {
   "name": "sapwood",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Shape your signer -- web management UI for Heartwood ESP32",
   "type": "module",
   "license": "MIT",
@@ -27,7 +27,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json --threshold error",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sync:firmware": "node scripts/sync-firmware.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",

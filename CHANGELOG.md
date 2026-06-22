@@ -3,6 +3,25 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.2 — 2026-06-22
+
+Version-aware firmware updates, and firmware that no longer drifts.
+
+### Added
+
+- **One-click "update to vY".** The update screen now shows the version your
+  signer is running versus the version bundled here, and updates in one click —
+  no `.bin` hunting. (Hand-picking a file is still available under "Advanced".)
+- **`npm run sync:firmware`.** Pulls the published firmware (`app.bin` +
+  `version.json`) from a heartwood-esp32 release into `public/firmware`,
+  verifying the SHA-256. This replaces hand-copied binaries, so flashing and OTA
+  always ship the current build.
+
+### Changed
+
+- **Bundled firmware refreshed to v0.8.0** — so a freshly flashed signer now
+  includes on-device seed restore.
+
 ## 0.8.1 — 2026-06-22
 
 Firmware-update polish, clearer keys, and accessibility.
