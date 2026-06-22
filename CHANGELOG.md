@@ -3,6 +3,22 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.3 — 2026-06-22
+
+Multi-board firmware — V3 alongside V4.
+
+### Added
+
+- **Bundled V3 firmware (v0.8.0).** The release now builds every board, and
+  `sync:firmware` pulls each board's image, so a Heltec V3 signer can be updated
+  over USB just like a V4. (Fresh-flashing a V3 from the browser still needs its
+  bootloader/partition images — a separate follow-up; V3 OTA works today.)
+
+### Changed
+
+- **`sync:firmware` is board-agnostic** — it reads the per-board manifest and
+  places each image under `public/firmware/<board>`, verifying every SHA-256.
+
 ## 0.8.2 — 2026-06-22
 
 Version-aware firmware updates, and firmware that no longer drifts.
