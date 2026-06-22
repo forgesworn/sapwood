@@ -39,9 +39,8 @@ jobs:
           echo "$HETZNER_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H 95.217.39.110 >> ~/.ssh/known_hosts
-          # Exclude /firmware/: those binaries are gitignored (populated from
-          # heartwood-esp32, not built here), so a CI build has none — without
-          # this exclude, --delete would wipe the manually-pushed firmware.
-          rsync -avz --delete --exclude '/firmware/' \
+          # Firmware binaries are committed under public/firmware/ (so the build
+          # includes them in dist/), and deploy with everything else.
+          rsync -avz --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
             dist/ deploy@95.217.39.110:/opt/sapwood/

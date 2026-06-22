@@ -18,13 +18,24 @@ never in the browser.
   computer — only the public npub comes back. The guided flow is now: name it →
   the device generates + displays the phrase → confirm you've written down the
   words shown **on the device** → done.
+- **Firmware ships with the app.** The flasher's firmware binaries are no longer
+  gitignored/hand-pushed — they're committed and deployed with the site, so the
+  live flasher always serves the matching firmware.
 
 ### Note
 
-- Requires firmware with on-device generation (pairs with heartwood-esp32). A
-  device flashed with older firmware won't answer the generate request.
 - Importing an existing recovery phrase or nsec is unchanged (Advanced ›
   Provision) — that key legitimately originates outside the device.
+
+## 0.5.4 — 2026-06-22
+
+### Changed
+
+- **Readable on desktop.** The admin was a narrow 860 px column of small, dim
+  text. Now: a wider **1100 px** layout, a larger **18 px** base so the whole UI
+  scales up, and **brighter** secondary/tertiary text (the muted grey actually
+  failed contrast on the near-black background). The mobile layout is unchanged —
+  full-width cards, no overflow.
 
 ## 0.5.3 — 2026-06-22
 
