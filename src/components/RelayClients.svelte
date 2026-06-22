@@ -76,11 +76,29 @@
   }
 
   async function copy(text: string, which: 'uri' | 'secret') {
+    let ok = false
     try {
       await navigator.clipboard.writeText(text)
+      ok = true
+    } catch {
+      // clipboard API can be blocked (insecure context / permissions) — fall
+      // back to a hidden textarea so copy still works. The value is also shown
+      // as selectable text, so it can always be copied by hand.
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch { /* manual select fallback */ }
+    }
+    if (ok) {
       copied = which
       setTimeout(() => { if (copied === which) copied = null }, 1800)
-    } catch { /* ignore */ }
+    }
   }
 
   function shortPubkey(hex: string): string {
