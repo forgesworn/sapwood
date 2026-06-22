@@ -21,7 +21,7 @@ test('walks the whole wizard and flashes end-to-end', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Ready to flash' })).toBeVisible()
   await page.getByRole('button', { name: 'Flash', exact: true }).click()
 
-  await expect(page.getByRole('heading', { name: 'Your signer is live' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Your signer is flashed' })).toBeVisible()
   // The 12-word recovery phrase is the prominent thing to write down…
   await expect(page.getByText('Write down these 12 words')).toBeVisible()
   // …and the technical secret is tucked behind Advanced, not in a newcomer's face.

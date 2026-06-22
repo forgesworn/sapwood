@@ -62,7 +62,7 @@ describe('Flasher — happy path', () => {
     await fireEvent.click(screen.getByText('Flash'))
 
     // Lands on the done screen
-    expect(await screen.findByText('Your signer is live')).toBeTruthy()
+    expect(await screen.findByText('Your signer is flashed')).toBeTruthy()
 
     // Flashed once, with the board + a wifi config carrying an operator key
     expect(mockFlash).toHaveBeenCalledTimes(1)

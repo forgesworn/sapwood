@@ -53,6 +53,8 @@
       <Home onadvanced={() => (view = 'advanced')} />
     {/if}
   {/if}
+
+  <p class="version">Sapwood v{__APP_VERSION__}</p>
 </main>
 
 <style>
@@ -91,6 +93,14 @@
     max-width: 860px;
     margin: 0 auto;
     padding: 2rem 2.5rem;
+  }
+
+  .version {
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin: 2rem 0 0;
+    letter-spacing: 0.05em;
   }
 
   header {
