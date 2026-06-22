@@ -10,15 +10,16 @@
 export type IdentitySource = 'create' | 'import'
 
 export type IdentityStep =
-  | 'intro' // explain, then choose: create fresh vs "I already have one"
-  | 'naming' // optionally name it, then ask the device to generate on-device
-  | 'writedown' // the device shows its recovery phrase on ITS screen; confirm written
+  | 'intro' // explain, then choose: create fresh vs restore an existing phrase
+  | 'naming' // optionally name it, then ask the device to generate/restore on-device
+  | 'writedown' // (create) the device shows its recovery phrase on ITS screen; confirm written
+  | 'restoring' // (restore) the owner re-enters their 12 words on the device's screen
   | 'done' // provisioned
 
 /** The device stores a master label of at most 32 bytes. */
 export const NAME_MAX = 32
 
-export const IDENTITY_STEPS: IdentityStep[] = ['intro', 'naming', 'writedown', 'done']
+export const IDENTITY_STEPS: IdentityStep[] = ['intro', 'naming', 'writedown', 'restoring', 'done']
 
 /** A name is optional but bounded. Returns an error message, or null if fine. */
 export function nameError(name: string): string | null {
