@@ -96,11 +96,28 @@
 
   async function copyLink() {
     if (!created?.bunker_uri) return
+    let ok = false
     try {
       await navigator.clipboard.writeText(created.bunker_uri)
+      ok = true
+    } catch {
+      // clipboard API can be blocked (insecure context / permissions) — fall
+      // back to a hidden textarea + execCommand so copy still works.
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = created.bunker_uri
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch { /* the URI is shown as selectable text below — copy by hand */ }
+    }
+    if (ok) {
       copied = true
       setTimeout(() => (copied = false), 1600)
-    } catch { /* ignore */ }
+    }
   }
 
   function finish() {
@@ -188,9 +205,10 @@
         <h3 class="flow-title">Connection ready</h3>
       </div>
       {#if created.bunker_uri}
-        <p class="flow-hint">Scan this with the app — or copy the link and paste it in. It works once.</p>
+        <p class="flow-hint">Scan this with the app — or copy the link below and paste it in. It works once.</p>
         <div class="qr">{@html qr}</div>
-        <button class="btn-copy" class:copied onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link instead'}</button>
+        <div class="uri-box"><code>{created.bunker_uri}</code></div>
+        <button class="btn-copy" class:copied onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link'}</button>
         <p class="flow-warn">This link carries the connection secret. Anyone who has it can sign as this app.</p>
       {:else}
         <p class="flow-warn">
@@ -297,6 +315,17 @@
   .result-head .flow-title { margin: 0; }
   .qr { width: 196px; max-width: 100%; padding: 12px; background: #fff; border-radius: 6px; margin: 0.25rem 0 0.9rem; }
   .qr :global(svg) { display: block; width: 100%; height: auto; }
+
+  /* The bunker link as selectable text — always copyable by hand, even if the
+     clipboard button is blocked. Tap/click selects the whole URI. */
+  .uri-box {
+    background: #050505; border: 1px solid var(--border); border-radius: 5px;
+    padding: 0.6rem 0.7rem; margin: 0 0 0.7rem;
+  }
+  .uri-box code {
+    display: block; font-size: 0.76rem; color: var(--green); line-height: 1.5;
+    word-break: break-all; user-select: all;
+  }
 
   .flow-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.2rem; }
 

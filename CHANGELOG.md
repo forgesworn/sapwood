@@ -3,6 +3,18 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.7.1 — 2026-06-22
+
+### Fixed
+
+- **You can now copy the bunker connection link.** After "Connect an app", the
+  result showed only a QR code and a copy button — the link itself wasn't
+  on-screen, and if the browser blocked the one-click copy (insecure context /
+  permissions) there was no way to get it. The bunker link is now shown as
+  **selectable text** (tap to select the whole thing) and the copy button has a
+  fallback, so you can always paste it into another app. Same fix applied to the
+  relay Clients view's copy buttons.
+
 ## 0.7.0 — 2026-06-22
 
 Manage a WiFi signer over the USB cable — no more hold-PRG dance.
