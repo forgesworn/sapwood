@@ -3,7 +3,9 @@
 // Tests the frame extraction logic without needing a real Web Serial port.
 // We test processBytes indirectly by checking what events a chunk produces.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+afterEach(() => vi.unstubAllGlobals())
 import { buildFrame, FrameType, MAGIC } from './frame.js'
 import { SerialTransport } from './serial.js'
 
@@ -221,5 +223,31 @@ describe('write serialisation', () => {
     ;(t as unknown as { port: SerialPort }).port = good.port
     await t.write(new Uint8Array([9]))
     expect(good.writes.map((w) => w[0])).toEqual([9])
+  })
+})
+
+describe('reconnect is user-gesture safe', () => {
+  it('calls requestPort BEFORE closing the previous port', async () => {
+    const order: string[] = []
+    const oldClose = vi.fn(async () => { order.push('close-old') })
+    const oldPort = { readable: {}, writable: {}, close: oldClose } as unknown as SerialPort
+    const newPort = {
+      readable: { getReader: () => ({ read: () => new Promise(() => {}), releaseLock() {}, async cancel() {} }) },
+      writable: {},
+      getInfo: () => ({ usbVendorId: 0x303a, usbProductId: 0x1001 }),
+    } as unknown as SerialPort
+
+    const requestPort = vi.fn(async () => { order.push('requestPort'); return newPort })
+    vi.stubGlobal('navigator', { serial: { requestPort, getPorts: async () => [] } })
+
+    const t = new SerialTransport()
+    ;(t as unknown as { port: SerialPort; running: boolean }).port = oldPort
+    ;(t as unknown as { running: boolean }).running = true
+
+    await t.connect()
+
+    // The gesture-critical ordering: requestPort must run before any teardown
+    // await (closing the old port), or Chrome rejects it as gesture-less.
+    expect(order).toEqual(['requestPort', 'close-old'])
   })
 })

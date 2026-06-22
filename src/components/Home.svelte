@@ -4,7 +4,7 @@
   // next step, lists what is connected, and offers the phone handoff. The full
   // 9-tab cockpit is one tap away via `onadvanced` (the Advanced toggle).
   import {
-    device, refreshSlots, refreshMasters, disconnect,
+    device, refreshSlots, refreshMasters, disconnect, connectSerial,
     mgmtRevokeClient, mgmtApproveSigning, mgmtCanApproveSigning,
   } from '../lib/device.svelte.js'
   import { npubShort, npubToHex, getDeviceLabel, setDeviceLabel } from '../lib/known-devices.js'
@@ -75,11 +75,28 @@
     catch (e) { device.error = e instanceof Error ? e.message : 'Disconnect failed' }
     finally { busySlot = null }
   }
+
+  // One-click recovery from a USB hiccup (e.g. after pressing RESET): re-pick the
+  // port. connectSerial requests the port first, so this single click carries the
+  // user gesture Chrome needs.
+  let reconnecting = $state(false)
+  async function reconnect() {
+    reconnecting = true
+    try { await connectSerial() }
+    finally { reconnecting = false }
+  }
 </script>
 
 <div class="home">
   {#if device.error}
-    <p class="home-error" role="status">⚠ {device.error}</p>
+    <div class="home-error" role="status">
+      <span class="home-error-msg">⚠ {device.error}</span>
+      {#if device.mode === 'serial' && 'serial' in navigator}
+        <button class="home-error-reconnect" onclick={reconnect} disabled={reconnecting}>
+          {reconnecting ? 'Reconnecting…' : 'Reconnect'}
+        </button>
+      {/if}
+    </div>
   {/if}
 
   {#if !hasIdentity}
@@ -217,8 +234,19 @@
     background: #160c0a;
     border: 1px solid #3a2320;
     border-radius: 6px;
-    word-break: break-word;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
   }
+  .home-error-msg { flex: 1; word-break: break-word; }
+  .home-error-reconnect {
+    flex-shrink: 0;
+    background: #2a1a08; border: 1px solid var(--amber); color: var(--amber);
+    border-radius: 4px; padding: 0.35rem 0.9rem; font-family: inherit; font-size: 0.82rem;
+    font-weight: 600; cursor: pointer;
+  }
+  .home-error-reconnect:hover:not(:disabled) { background: #3a2410; }
+  .home-error-reconnect:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .needs-usb {
     background: #120f06;
