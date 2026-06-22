@@ -3,6 +3,21 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.6.4 — 2026-06-22
+
+Hardens the randomness behind on-device key generation.
+
+### Security
+
+- **The recovery seed now comes from a guaranteed hardware entropy source.**
+  The device generates the master seed before its Wi-Fi radio starts, and the
+  ESP32's RNG is only a *true* random source while a hardware entropy source is
+  live. The bundled firmware now switches on the chip's analogue-noise source
+  for the seed (and the USB connection-slot secret) draws, so the 12 words are
+  backed by real hardware entropy — all on-device, nothing supplied by or
+  visible to this computer. No user action and no "wiggle the mouse" step is
+  needed. Requires the firmware shipped with this release.
+
 ## 0.6.3 — 2026-06-22
 
 Readable recovery phrase, smoother flash progress, and a way to set up the
