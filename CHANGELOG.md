@@ -3,6 +3,12 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.9 — 2026-06-23
+
+Bundled firmware v0.9.3 — once a word during on-device restore resolves to a
+single match, a **single tap accepts it** (no double-tap needed; the legend
+shows "tap=pick"). Builds on v0.9.2's restored tap/double-tap/hold gestures.
+
 ## 0.8.8 — 2026-06-23
 
 Bundled firmware v0.9.2 — restores the original on-device restore gestures:
