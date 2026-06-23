@@ -3,6 +3,14 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.7 — 2026-06-23
+
+Bundled firmware v0.9.1 — on-device restore now selects with a **double-tap**
+instead of a hold. A single press of any length just advances to the next
+choice, so lingering on the button can no longer pick the wrong thing; the
+fiddly hold-to-delete is gone. The deliberate 2-second save-hold at the end is
+unchanged.
+
 ## 0.8.6 — 2026-06-22
 
 Bundled firmware v0.9.0 — on-device personas now derive under the canonical
