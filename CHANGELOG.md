@@ -3,6 +3,14 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.8 — 2026-06-23
+
+Bundled firmware v0.9.2 — restores the original on-device restore gestures:
+**single tap = next, double-tap = pick, hold = delete**. Delete is a direct
+hold again (no DELETE item to cycle to); on the review screen a hold pages back.
+This reverts the v0.8.1 hold-to-select / v0.9.1 double-tap-only experiments,
+which were worse on the physical button.
+
 ## 0.8.7 — 2026-06-23
 
 Bundled firmware v0.9.1 — on-device restore now selects with a **double-tap**
