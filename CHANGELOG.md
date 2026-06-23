@@ -3,6 +3,13 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.8.10 — 2026-06-23
+
+Bundled firmware v0.9.4 — during on-device restore, **hold now goes back** one
+choice (so overshooting a letter is a single hold to correct, not a full lap of
+the ring, and no longer jumps back a whole word). Hold on the first choice still
+deletes the last letter. Builds on v0.9.2/v0.9.3.
+
 ## 0.8.9 — 2026-06-23
 
 Bundled firmware v0.9.3 — once a word during on-device restore resolves to a
