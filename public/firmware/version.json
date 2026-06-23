@@ -1,16 +1,16 @@
 {
-  "version": "0.9.0",
-  "builtAt": "2026-06-22T21:46:58Z",
+  "version": "0.9.1",
+  "builtAt": "2026-06-23T05:40:13Z",
   "boards": {
     "heltec-v4": {
       "app": "app.bin",
-      "sha256": "b2f5bc71483c212ffe3ba97871c575d51983eb0c4b0e9e92162558f3ad3b642e",
-      "bytes": 1787616
+      "sha256": "3da2d342db227f6382e691d0f5b75da16cf93a08fa2af838d79015f59e644450",
+      "bytes": 1787648
     },
     "heltec-v3": {
       "app": "app.bin",
-      "sha256": "c94ae074f58cd8c306604291b5e18824ff99be0fa784fb66dcb5ce002011930b",
-      "bytes": 1790944
+      "sha256": "f8cea716be236e88b0ef30824879cb2624b48727122f866d6d60d9c8c4303702",
+      "bytes": 1790976
     }
   }
 }
