@@ -3,11 +3,13 @@
 // esptool-js, so the device boots already configured (no separate setup step).
 // See heartwood-esp32/docs/2026-06-19-web-flasher-flash-and-configure.md
 //
-// Flash layout (must match heartwood-esp32 partitions.csv):
-//   0x00000  bootloader.bin
-//   0x08000  partition-table.bin  (6-entry: nvs/otadata/phy_init/ota_0/ota_1/config)
-//   0x10000  app.bin              (ota_0)
-//   0x410000 config blob          (config partition; built by buildConfigBlob)
+// Flash layout (must match the board's heartwood-esp32 partition table). The
+// partition table (0x08000) and the first app slot (0x10000) are the same across
+// our layouts; the bootloader and config offsets vary BY BOARD (see BoardSpec):
+//   bootloader.bin   0x00000 on S3/C6, 0x01000 on the classic ESP32 (T-Display)
+//   partition-table  0x08000
+//   app.bin          0x10000  (ota_0 on heltec's 2 MB A/B layout; factory on 4 MB)
+//   config blob      board.configOffset  (0x410000 heltec / 0x310000 the 4 MB boards)
 //
 // Testability: every side effect (Web Serial port pick, esptool session, firmware
 // fetch) is reached through a `FlasherBackend`. The default backend wraps esptool-js
@@ -27,24 +29,42 @@ export interface BoardSpec {
   assets: string
   /** flash offset of the `config` partition for this board's table */
   configOffset: number
+  /**
+   * Flash offset of the bootloader. The classic ESP32 (and S2) load it from
+   * 0x1000; the S3/C6 and other newer chips from 0x0. Omitted ⇒ 0x0.
+   */
+  bootloaderOffset?: number
   /** hint to pre-select from the serial port name */
   portHint: RegExp
 }
 
-// Both Heltec boards are ESP32-S3 with the same partition layout; they differ in
-// the firmware binary (USB wiring / pin map). config @ 0x410000 (after 2×2MB OTA).
-// Reset: esptool-js default_reset works for both — and on the S3 native USB it
-// avoids re-enumerating the device mid-flash (which would drop the port handle).
+// The supported Wi-Fi signer boards. heltec-v3/v4 are ESP32-S3 (2 MB A/B OTA;
+// config @ 0x410000; bootloader @ 0x0). tdisplay is a CLASSIC ESP32 — its
+// bootloader loads from 0x1000, not 0x0 — and c6 is a RISC-V ESP32-C6; both use
+// the 4 MB single-factory layout (config @ 0x310000, no OTA). heltec-v4 MUST stay
+// first: it is the default selection in Flash.svelte and the Flasher test picks it.
+//
+// The esp8266 signer is deliberately NOT here: it has no Wi-Fi and no config
+// partition (it is a USB-tethered signer flashed as ONE image at 0x0 and
+// provisioned over serial), so it does not fit this flash-and-configure wizard.
+// Its image still ships in /firmware/esp8266; see esp8266-firmware/FLASHING.md.
 export const BOARDS: BoardSpec[] = [
   { id: 'heltec-v4', label: 'Heltec WiFi LoRa 32 V4', assets: '/firmware/v4', configOffset: 0x410000, portHint: /usbmodem/i },
   { id: 'heltec-v3', label: 'Heltec WiFi LoRa 32 V3', assets: '/firmware/v3', configOffset: 0x410000, portHint: /usbserial|SLAB/i },
+  { id: 'tdisplay', label: 'LilyGO T-Display (ESP32)', assets: '/firmware/tdisplay', configOffset: 0x310000, bootloaderOffset: 0x1000, portHint: /wchusb|usbserial|CH9102/i },
+  { id: 'c6', label: 'Waveshare ESP32-C6 (LCD 1.47)', assets: '/firmware/c6', configOffset: 0x310000, portHint: /usbmodem|wchusb|usbserial/i },
 ]
 
-const FIRMWARE_REGIONS = [
-  { file: 'bootloader.bin', address: 0x0, label: 'bootloader' },
-  { file: 'partition-table.bin', address: 0x8000, label: 'partition table' },
-  { file: 'app.bin', address: 0x10000, label: 'firmware' },
-]
+// The esp-idf image set for a board. The bootloader offset is chip-dependent
+// (0x1000 on the classic ESP32, 0x0 on S3/C6); the partition table (0x8000) and
+// first app slot (0x10000) are identical across our 2 MB and 4 MB layouts.
+function firmwareRegions(board: BoardSpec) {
+  return [
+    { file: 'bootloader.bin', address: board.bootloaderOffset ?? 0x0, label: 'bootloader' },
+    { file: 'partition-table.bin', address: 0x8000, label: 'partition table' },
+    { file: 'app.bin', address: 0x10000, label: 'firmware' },
+  ]
+}
 
 const BAUD_RATE = 921600
 
@@ -176,12 +196,14 @@ export async function flashDevice(
   // requestPort so its awaits don't consume the click's user-gesture activation.
   await releaseGrantedPorts()
 
-  // 2. Fetch firmware binaries for the selected board.
+  // 2. Fetch firmware binaries for the selected board (bootloader offset is
+  //    per-board: 0x1000 on the classic ESP32, 0x0 on S3/C6).
   log(`Fetching firmware for ${board.label}…`)
+  const fwRegions = firmwareRegions(board)
   const regions: FlashRegion[] = await Promise.all(
-    FIRMWARE_REGIONS.map(async (r) => ({ address: r.address, data: await backend.fetchBin(`${board.assets}/${r.file}`) })),
+    fwRegions.map(async (r) => ({ address: r.address, data: await backend.fetchBin(`${board.assets}/${r.file}`) })),
   )
-  const labels = FIRMWARE_REGIONS.map((r) => r.label)
+  const labels = fwRegions.map((r) => r.label)
 
   // 3. Build the config blob and append it at the config-partition offset.
   const configBlob = buildConfigBlob(cfg)
