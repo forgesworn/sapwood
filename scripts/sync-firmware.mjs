@@ -2,12 +2,13 @@
 // Pull the published firmware into public/firmware so flashing and OTA always
 // ship the current build — replacing the old hand-copied, drift-prone binaries.
 //
-// Downloads `version.json` + each board's app + bootloader image and the shared
-// partition table from a heartwood-esp32 GitHub release (latest by default, or a
-// tag passed as the first argument), verifies every SHA-256, and lays them out
-// under public/firmware/<dir>/ as the flasher expects (app.bin, bootloader.bin,
-// partition-table.bin). Writes a served version.json (per board: app + sha + bytes)
-// that the update UI reads for "running vX → update to vY".
+// Downloads `version.json` + each board's app + bootloader image and the board's
+// own partition table from a heartwood-esp32 GitHub release (latest by default, or
+// a tag passed as the first argument), verifies every SHA-256, and lays them out
+// under public/firmware/<dir>/ as the flasher expects (app.bin, and — for the
+// esp-idf boards — bootloader.bin + the board's own partition-table.bin). Writes a
+// served version.json (per board: app + sha + bytes + ota flag) that the update UI
+// reads for "running vX → update to vY".
 //
 //   npm run sync:firmware            # latest release
 //   npm run sync:firmware v0.8.0     # a specific tag
@@ -22,8 +23,16 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = 'forgesworn/heartwood-esp32'
-// Map a firmware board id to its public/firmware subdirectory.
-const BOARD_DIR = { 'heltec-v4': 'v4', 'heltec-v3': 'v3' }
+// Map a firmware board id to its public/firmware subdirectory. A released board
+// with no mapping here is skipped (with a warning), not a hard failure — so
+// heartwood-esp32 can introduce a board before the flasher UI here supports it.
+const BOARD_DIR = {
+  'heltec-v4': 'v4',
+  'heltec-v3': 'v3',
+  tdisplay: 'tdisplay',
+  c6: 'c6',
+  esp8266: 'esp8266',
+}
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const flags = process.argv.slice(2)
@@ -47,7 +56,7 @@ try {
     '--pattern', 'version.json',
     '--pattern', 'app*.bin',
     '--pattern', 'bootloader*.bin',
-    '--pattern', 'partition-table.bin',
+    '--pattern', 'partition-table*.bin',
     '--dir', tmp, '--clobber',
   )
   execFileSync('gh', dlArgs, { stdio: 'inherit' })
@@ -68,17 +77,16 @@ try {
     return bytes
   }
 
-  // Shared partition table (board-independent), if the release carries one.
-  const pt = manifest.partitionTable
-  const ptBytes = pt ? verified(pt.asset, pt.sha256, 'partition table') : null
-
   const served = { version: manifest.version, builtAt: manifest.builtAt, boards: {} }
   const synced = []
   const skipped = []
 
   for (const [board, meta] of boards) {
     const dir = BOARD_DIR[board]
-    if (!dir) fail(`Unknown board "${board}" — add it to BOARD_DIR in sync-firmware.mjs`)
+    if (!dir) {
+      skipped.push(`${board} (no public/firmware mapping — add it to BOARD_DIR to flash it here)`)
+      continue
+    }
     const destDir = join(root, 'public', 'firmware', dir)
     mkdirSync(destDir, { recursive: true })
 
@@ -94,6 +102,12 @@ try {
       return name
     }
 
+    // The partition table is per-board now: heltec is a 2 MB A/B OTA layout, the
+    // 4 MB boards a single factory slot, and the esp8266 carries none at all.
+    const ptBytes = meta.partitionTable
+      ? verified(meta.partitionTable, meta.partitionTableSha256, `${board} partition table`)
+      : null
+
     const lines = [place('app.bin', verified(meta.app, meta.sha256, `${board} app`), false)]
     if (meta.bootloader) {
       lines.push(place('bootloader.bin', verified(meta.bootloader, meta.bootloaderSha256, `${board} bootloader`), true))
@@ -102,7 +116,7 @@ try {
       lines.push(place('partition-table.bin', ptBytes, true))
     }
 
-    served.boards[board] = { app: 'app.bin', sha256: meta.sha256, bytes: meta.bytes }
+    served.boards[board] = { app: 'app.bin', sha256: meta.sha256, bytes: meta.bytes, ota: meta.ota ?? false }
     synced.push(`${board} → public/firmware/${dir}/{${lines.join(', ')}}`)
   }
 
