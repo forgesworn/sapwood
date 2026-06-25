@@ -108,6 +108,16 @@ describe('flashDevice — region layout', () => {
     expect([...regions[3].data]).toEqual([...buildConfigBlob(CFG)])
     expect(regions[3].address).toBe(BOARD.configOffset)
   })
+
+  it('puts the classic-ESP32 (T-Display) bootloader at 0x1000, not 0x0', async () => {
+    const tdisplay = BOARDS.find((b) => b.id === 'tdisplay')!
+    const h = makeHarness()
+    await flashDevice(tdisplay, CFG, {}, h.backend)
+    const regions = h.wrote()!
+    // classic ESP32 loads the bootloader from 0x1000; config sits in the 4 MB layout.
+    expect(regions.map((r) => r.address)).toEqual([0x1000, 0x8000, 0x10000, tdisplay.configOffset])
+    expect(tdisplay.configOffset).toBe(0x310000)
+  })
 })
 
 describe('flashDevice — full erase', () => {

@@ -11,9 +11,12 @@
   import { device, serialTransport, httpTransport, getFirmwareVersion } from '../lib/device.svelte.js'
   import { streamOta } from '../lib/ota.js'
 
-  interface BoardAsset { app: string; sha256: string; bytes: number }
+  interface BoardAsset { app: string; sha256: string; bytes: number; ota?: boolean }
   interface Manifest { version: string; builtAt?: string; boards: Record<string, BoardAsset> }
 
+  // Only OTA-capable boards need an app path here. The factory-only 4 MB boards
+  // (T-Display/C6) and the esp8266 carry ota:false in the manifest and update by
+  // re-flashing, so they are intentionally absent.
   const BOARD_DIR: Record<string, string> = { 'heltec-v4': 'v4', 'heltec-v3': 'v3' }
 
   let file = $state<File | null>(null)
@@ -42,12 +45,20 @@
     const info = await getFirmwareVersion()
     running = info?.version ?? null
 
-    // Pick which board's image to offer: the device's, else the sole/first entry.
+    // Pick which board's image to offer: the device's own, else the first
+    // OTA-capable board. The served list now also holds factory-only boards, which
+    // must not become the default for a legacy device that doesn't report its board.
     const boards = available ? Object.keys(available.boards ?? {}) : []
-    boardKey = (info?.board && boards.includes(info.board)) ? info.board : (boards[0] ?? null)
+    const otaBoards = boards.filter((b) => available?.boards[b]?.ota !== false)
+    boardKey = (info?.board && boards.includes(info.board)) ? info.board : (otaBoards[0] ?? boards[0] ?? null)
   })
 
-  const appUrl = $derived(boardKey && BOARD_DIR[boardKey] ? `/firmware/${BOARD_DIR[boardKey]}/app.bin` : null)
+  // The connected board's manifest entry, and whether it supports OTA at all.
+  // Factory-only boards carry ota:false (no OTA slot — they update by re-flashing);
+  // an omitted ota is treated as capable (legacy manifest).
+  const boardMeta = $derived(boardKey && available ? (available.boards[boardKey] ?? null) : null)
+  const otaCapable = $derived(!!boardMeta && boardMeta.ota !== false)
+  const appUrl = $derived(otaCapable && boardKey && BOARD_DIR[boardKey] ? `/firmware/${BOARD_DIR[boardKey]}/app.bin` : null)
 
   async function runUpdate(data: Uint8Array) {
     progress = 0
@@ -146,19 +157,24 @@
       </div>
     </div>
 
-    {#if latest && appUrl}
-      {#if upToDate}
-        <p class="fw-ok">✓ Your signer is up to date.</p>
+    {#if upToDate}
+      <p class="fw-ok">✓ Your signer is up to date.</p>
+      {#if appUrl}
         <button class="btn ghost" disabled={busy} onclick={updateToLatest}>Re-install v{latest}</button>
-      {:else}
-        <p class="lede">
-          A newer firmware is bundled here. Your signer will ask you to approve it with its button,
-          check it, and restart — rolling back on its own if anything is wrong.
-        </p>
-        <button class="btn primary" disabled={busy} onclick={updateToLatest}>
-          {busy ? 'Updating…' : `Update to v${latest} →`}
-        </button>
       {/if}
+    {:else if latest && appUrl}
+      <p class="lede">
+        A newer firmware is bundled here. Your signer will ask you to approve it with its button,
+        check it, and restart — rolling back on its own if anything is wrong.
+      </p>
+      <button class="btn primary" disabled={busy} onclick={updateToLatest}>
+        {busy ? 'Updating…' : `Update to v${latest} →`}
+      </button>
+    {:else if latest && boardMeta && !otaCapable}
+      <p class="lede">
+        This board has no over-the-air update slot, so it updates by <strong>re-flashing over USB</strong>.
+        Open the <a href="#/flash">Flasher</a> to install v{latest} (you'll re-enter your Wi-Fi).
+      </p>
     {:else}
       <p class="lede">No bundled firmware was found. Use your own <code>.bin</code> below.</p>
     {/if}
@@ -196,6 +212,7 @@
   .lede { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0 0 1rem; }
   .lede strong { color: var(--text); }
   .lede code { color: var(--green); }
+  .lede a { color: var(--green); text-decoration: underline; }
 
   .usb-steps {
     background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
