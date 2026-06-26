@@ -4,6 +4,7 @@
     mgmtRevokeClient, mgmtUpdateClient, mgmtCanApproveSigning,
   } from '../lib/device.svelte.js'
   import KindPermissions from './KindPermissions.svelte'
+  import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
 
   let creating = $state(false)
   let newLabel = $state('')
@@ -23,6 +24,14 @@
   // Load the slot list on connect. Relay mode also polls every 4s; serial relies
   // on this (CONNSLOT_LIST → device.slots via handleFrame).
   $effect(() => { if (device.connected) refreshSlots() })
+
+  // Resolve display names for the connected client pubkeys.
+  $effect(() => {
+    const pubkeys = device.slots
+      .map((s) => s.current_pubkey)
+      .filter((pk): pk is string => !!pk)
+    if (pubkeys.length) ensureProfiles(pubkeys)
+  })
 
   async function handleCreate() {
     const label = newLabel.trim()
@@ -179,7 +188,9 @@
             <div class="client-identity">
               <span class="client-name">{slot.label || `slot ${slot.slot_index}`}</span>
               {#if slot.current_pubkey}
+                {@const pname = profileName(slot.current_pubkey)}
                 <span class="client-pk">{shortPubkey(slot.current_pubkey)}</span>
+                {#if pname}<span class="profile-name">{pname}</span>{/if}
               {:else}
                 <span class="client-pk dim">unbound — waiting for client to connect</span>
               {/if}
@@ -297,6 +308,7 @@
   .client-name { color: #fff; font-size: 1rem; font-weight: 600; }
   .client-pk { font-size: 0.8rem; color: var(--text-muted); letter-spacing: 0.02em; }
   .client-pk.dim { color: #555; font-style: italic; }
+  .profile-name { font-size: 0.8rem; color: var(--green-dim); }
   .client-actions { display: flex; gap: 0.4rem; flex-shrink: 0; align-items: center; }
 
   .tag {

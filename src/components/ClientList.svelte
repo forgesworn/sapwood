@@ -4,6 +4,7 @@
   import KindPermissions from './KindPermissions.svelte'
   import ApprovalQueue from './ApprovalQueue.svelte'
   import type { ConnectSlot } from '../lib/types.js'
+  import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
 
   // --- State ---
 
@@ -21,6 +22,15 @@
   let uriCopied = $state(false)
 
   $effect(() => { if (device.connected) refreshSlots() })
+
+  // Resolve display names for the client pubkeys currently shown.
+  $effect(() => {
+    const pubkeys = [
+      ...device.pendingClients.map((p) => p.pubkey),
+      ...device.slots.map((s) => s.current_pubkey).filter((pk): pk is string => !!pk),
+    ]
+    if (pubkeys.length) ensureProfiles(pubkeys)
+  })
 
   // --- Derived ---
 
@@ -264,9 +274,11 @@
       <h3 class="section-label section-label--amber">Awaiting approval</h3>
       {#each device.pendingClients as pc}
         {@const ago = pc.lastSeen ? timeAgo(pc.lastSeen) : ''}
+        {@const pname = profileName(pc.pubkey)}
         <div class="pending-row">
           <div class="pending-left">
             <code class="pending-pk">{pc.pubkey}</code>
+            {#if pname}<span class="profile-name">{pname}</span>{/if}
             <span class="pending-meta">{pc.attempts} attempt{pc.attempts !== 1 ? 's' : ''}{ago ? ` \u00b7 ${ago}` : ''}</span>
           </div>
           <div class="pending-right">
@@ -306,7 +318,9 @@
                 onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
               />
               {#if slot.current_pubkey}
+                {@const pname = profileName(slot.current_pubkey)}
                 <span class="client-pk">{shortPubkey(slot.current_pubkey)}</span>
+                {#if pname}<span class="profile-name">{pname}</span>{/if}
               {/if}
             </div>
             <div class="client-actions">
@@ -686,6 +700,10 @@
   .client-name:hover { border-color: var(--border); }
   .client-name:focus { border-color: var(--green-dim); outline: none; background: #080808; }
 
+  .profile-name {
+    font-size: 0.8rem;
+    color: var(--green-dim);
+  }
   .client-pk {
     display: block;
     font-size: 0.8rem;
