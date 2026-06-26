@@ -55,6 +55,21 @@ export const BOARDS: BoardSpec[] = [
   { id: 'c6', label: 'Waveshare ESP32-C6 (LCD 1.47)', assets: '/firmware/c6', configOffset: 0x310000, portHint: /usbmodem|wchusb|usbserial/i },
 ]
 
+// The USB-tethered ESP8266 signer — kept apart from BOARDS because it is NOT a
+// flash-and-configure WiFi board. It flashes as ONE image at 0x0 (the esp8266
+// `elf2image` output — no bootloader/partition/config partition) and is set up
+// over serial + the bridge, not the wizard's network step. `configOffset` /
+// `bootloaderOffset` do not apply to it (see `flashTetheredImage`).
+export const TETHERED_BOARDS: BoardSpec[] = [
+  {
+    id: 'esp8266',
+    label: 'ESP8266 tethered signer',
+    assets: '/firmware/esp8266',
+    configOffset: 0,
+    portHint: /wchusb|usbserial|ttyusb|cu\.usb/i,
+  },
+]
+
 // The esp-idf image set for a board. The bootloader offset is chip-dependent
 // (0x1000 on the classic ESP32, 0x0 on S3/C6); the partition table (0x8000) and
 // first app slot (0x10000) are identical across our 2 MB and 4 MB layouts.
@@ -257,6 +272,73 @@ export async function flashDevice(
       log('Reset sent. If the device does not reboot, press its RESET button (or unplug/replug).')
     } catch (e) {
       log(`Auto-reset failed (${e instanceof Error ? e.message : e}). Press RESET on the device (or unplug/replug) to boot the new firmware.`)
+    }
+    h.onProgress?.(100, 'done')
+  } finally {
+    try {
+      await session.close()
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Flash a USB-tethered signer (the ESP8266): a SINGLE image at 0x0 — the esp8266
+ * `elf2image` output, which already bundles the bootloader stub. No partition
+ * table and no config blob (the device is provisioned over serial + bridged, not
+ * configured at flash time). Otherwise mirrors `flashDevice`'s esptool session.
+ */
+export async function flashTetheredImage(
+  board: BoardSpec,
+  h: FlashHandlers = {},
+  backend: FlasherBackend = defaultBackend,
+): Promise<void> {
+  if (!backend.hasWebSerial()) {
+    throw new Error('Web Serial unavailable — use Chrome or Edge.')
+  }
+  const log = (s: string) => h.onLog?.(s.replace(/\s+$/, ''))
+
+  // requestPort FIRST (preserve the click's user gesture), then release any
+  // stale port — exactly as flashDevice does.
+  log('Select the device serial port…')
+  const port = await backend.requestPort()
+  await releaseGrantedPorts()
+
+  log(`Fetching firmware for ${board.label}…`)
+  const data = await backend.fetchBin(`${board.assets}/app.bin`)
+  const regions: FlashRegion[] = [{ address: 0x0, data }]
+
+  const terminal: FlashTerminal = {
+    clean() {},
+    writeLine: (d: string) => log(d),
+    write: (d: string) => log(d),
+  }
+  const session = await backend.openSession(port, { baudrate: BAUD_RATE, terminal })
+
+  try {
+    const chip = await session.detectChip()
+    log(`Connected: ${chip}`)
+
+    if (h.fullErase) {
+      log('Full erase requested — wiping entire flash…')
+      h.onProgress?.(0, 'erasing flash')
+      await session.eraseFlash()
+      log('Flash erased.')
+    }
+
+    const total = data.length || 1
+    await session.writeFlash(regions, (_fileIndex, written, regionTotal) => {
+      const frac = regionTotal > 0 ? written / regionTotal : written / total
+      h.onProgress?.(Math.round(frac * 100), 'firmware')
+    })
+
+    log('Flash complete — resetting…')
+    try {
+      await session.hardReset()
+      log('Reset sent. If the device does not reboot, press its RESET button (or unplug/replug).')
+    } catch (e) {
+      log(`Auto-reset failed (${e instanceof Error ? e.message : e}). Press RESET on the device (or unplug/replug).`)
     }
     h.onProgress?.(100, 'done')
   } finally {

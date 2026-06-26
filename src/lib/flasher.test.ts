@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   flashDevice,
+  flashTetheredImage,
   BOARDS,
+  TETHERED_BOARDS,
   type FlasherBackend,
   type FlashSession,
   type FlashRegion,
@@ -257,5 +259,38 @@ describe('flashDevice — cleanup', () => {
   it('does not mask a successful flash if close() throws', async () => {
     const h = makeHarness({ close: async () => { throw new Error('port already gone') } })
     await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+  })
+})
+
+describe('flashTetheredImage — esp8266 single image', () => {
+  const ESP8266 = TETHERED_BOARDS[0]
+
+  it('fetches only app.bin from the board asset path', async () => {
+    const h = makeHarness()
+    await flashTetheredImage(ESP8266, {}, h.backend)
+    expect(h.fetched).toEqual([`${ESP8266.assets}/app.bin`])
+  })
+
+  it('writes a single region at 0x0 (no partition table, no config blob)', async () => {
+    const h = makeHarness()
+    await flashTetheredImage(ESP8266, {}, h.backend)
+    const regions = h.wrote()!
+    expect(regions).toHaveLength(1)
+    expect(regions[0].address).toBe(0x0)
+  })
+
+  it('closes the session on success', async () => {
+    const h = makeHarness()
+    await flashTetheredImage(ESP8266, {}, h.backend)
+    expect(h.session.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('completes and reports done even if hard reset fails (best-effort)', async () => {
+    const h = makeHarness({ hardReset: async () => { throw new Error('no reset') } })
+    const progress: Array<[number, string]> = []
+    await expect(
+      flashTetheredImage(ESP8266, { onProgress: (p, s) => progress.push([p, s]) }, h.backend),
+    ).resolves.toBeUndefined()
+    expect(progress.at(-1)).toEqual([100, 'done'])
   })
 })
