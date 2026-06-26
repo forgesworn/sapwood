@@ -13,11 +13,14 @@
     USER_STEPS, initialData, parseRelays, networkError, canAdvance,
     nextStep, prevStep, friendlyStage,
   } from './lib/wizard.js'
+  import TetheredSetup from './components/TetheredSetup.svelte'
 
   const webSerial = typeof navigator !== 'undefined' && 'serial' in navigator
 
   let step = $state<WizardStep>('welcome')
   let data = $state<WizardData>(initialData())
+  // The ESP8266 is a USB-tethered, no-WiFi signer — its own flow, not the WiFi wizard.
+  let tethered = $state(false)
   let showAdvanced = $state(false)
 
   // Flash progress
@@ -115,7 +118,7 @@
     <button class="link console-link" onclick={() => navigate('admin')}>Advanced console →</button>
   </header>
 
-  {#if step !== 'flashing' && step !== 'done'}
+  {#if !tethered && step !== 'flashing' && step !== 'done'}
     <ol class="stepper" aria-label="setup steps">
       {#each USER_STEPS.slice(1) as s, i (s)}
         <li class:done={userStepNo - 1 > i + 1} class:current={step === s}>
@@ -127,7 +130,10 @@
   {/if}
 
   <section class="panel">
-    {#if step === 'welcome'}
+    {#if tethered}
+      <button class="link back-link" onclick={() => (tethered = false)}>← Back to Wi-Fi setup</button>
+      <TetheredSetup />
+    {:else if step === 'welcome'}
       <h2>Set up your Heartwood</h2>
       <p class="lede">
         This installs the signing software on your device and joins it to your Wi-Fi, so you can
@@ -144,6 +150,11 @@
       <div class="actions">
         <button class="btn primary" onclick={goNext} disabled={!webSerial}>Start</button>
       </div>
+      {#if webSerial}
+        <button class="link tethered-link" onclick={() => (tethered = true)}>
+          Setting up a USB-tethered ESP8266 signer instead? →
+        </button>
+      {/if}
 
     {:else if step === 'board'}
       <h2>Which device do you have?</h2>

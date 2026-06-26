@@ -63,6 +63,12 @@ export class SerialTransport {
         filters: [
           // ESP32-S3 USB-Serial-JTAG
           { usbVendorId: 0x303a, usbProductId: 0x1001 },
+          // USB-UART bridges used by the tethered ESP8266 (and CH9102 boards like
+          // the T-Display): WCH CH34x, Silicon Labs CP210x, FTDI. Vendor-only so
+          // any product id from them appears in the picker.
+          { usbVendorId: 0x1a86 },
+          { usbVendorId: 0x10c4 },
+          { usbVendorId: 0x0403 },
         ],
       })
 
