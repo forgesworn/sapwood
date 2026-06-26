@@ -8,6 +8,8 @@
     getOperatorMnemonic,
     importOperatorMnemonic,
   } from '../lib/op-mgmt.js'
+  import { getProfileRelays, setProfileRelays, isValidRelayUrl } from '../lib/profile-relays.js'
+  import { clearProfileCache } from '../lib/profiles.svelte.js'
 
   // --- Operator key (relay management authority) ---
   let operator = $state(getOrCreateOperator())
@@ -69,6 +71,39 @@
     opPhraseReveal = false
     opImportValue = ''
     opStatus = 'New operator key generated — write down its recovery phrase below.'
+  }
+
+  // --- Profile relays (kind-0 name lookups) ---
+  let profileRelays = $state(getProfileRelays())
+  let newProfileRelay = $state('')
+  let profileRelayError = $state<string | null>(null)
+
+  function persistProfileRelays() {
+    setProfileRelays(profileRelays)
+    profileRelays = getProfileRelays() // reflect validation + de-dupe
+    clearProfileCache() // names re-resolve from the new relays
+  }
+
+  function addProfileRelay() {
+    const url = newProfileRelay.trim()
+    if (!isValidRelayUrl(url)) {
+      profileRelayError = 'Enter a wss:// relay URL.'
+      return
+    }
+    if (profileRelays.includes(url)) {
+      profileRelayError = 'That relay is already listed.'
+      return
+    }
+    profileRelays = [...profileRelays, url]
+    newProfileRelay = ''
+    profileRelayError = null
+    persistProfileRelays()
+  }
+
+  function removeProfileRelay(index: number) {
+    if (profileRelays.length <= 1) return
+    profileRelays = profileRelays.filter((_, i) => i !== index)
+    persistProfileRelays()
   }
 
   // --- PIN management ---
@@ -239,6 +274,31 @@
     <p class="status">{opStatus}</p>
   {/if}
 
+  <h2>Profile Relays</h2>
+  <p class="info">Where client names are looked up. Sapwood reads each client's kind-0 profile from these relays to show a name beside its pubkey. Read-only — nothing is published here.</p>
+  <div class="relay-list">
+    {#each profileRelays as relay, i (relay)}
+      <div class="relay-row">
+        <span class="mono relay-url">{relay}</span>
+        <button class="btn small" disabled={profileRelays.length <= 1} onclick={() => removeProfileRelay(i)}>Remove</button>
+      </div>
+    {/each}
+  </div>
+  <div class="inline-form">
+    <input
+      type="url"
+      bind:value={newProfileRelay}
+      placeholder="wss://relay.example.com"
+      spellcheck="false"
+      autocomplete="off"
+      onkeydown={(e) => { if (e.key === 'Enter') addProfileRelay() }}
+    />
+    <button class="btn" onclick={addProfileRelay}>Add</button>
+  </div>
+  {#if profileRelayError}
+    <p class="status">{profileRelayError}</p>
+  {/if}
+
   {#if device.mode === 'http' && device.bridgeInfo}
     <h2>Bunker URIs</h2>
     <p class="info">Bunker URIs are now per-connection. Manage them in the Connection Slots tab.</p>
@@ -323,6 +383,9 @@
   td.label { color: #666; width: 100px; white-space: nowrap; }
 
   .relay { color: var(--text); font-size: 0.9rem; }
+  .relay-list { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
+  .relay-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .relay-url { flex: 1; }
 
   .info { font-size: 0.8rem; color: #555; margin: 0 0 0.5rem; }
   .hint { font-size: 0.8rem; color: #555; margin-top: 1.5rem; }
