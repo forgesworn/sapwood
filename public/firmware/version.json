@@ -1,34 +1,34 @@
 {
-  "version": "0.9.5",
-  "builtAt": "2026-06-26T06:56:03Z",
+  "version": "0.9.6",
+  "builtAt": "2026-06-26T07:44:58Z",
   "boards": {
     "esp8266": {
       "app": "app.bin",
-      "sha256": "ac16a34d680ecfe893f135ad76e8a9baee24c0b8659c9649518b26c0676ede02",
+      "sha256": "7d481ef9e88c7d754c27d1514d72374b0c66e85e8d5c84b09b546799df1b3581",
       "bytes": 195780,
       "ota": false
     },
     "heltec-v4": {
       "app": "app.bin",
-      "sha256": "546231ac51eb3961e38c040ff857ec24797894027ebe98e6f36f2689458dbfa2",
+      "sha256": "9ff41f42406d29c7cfa29753e0e1df0190bd765613069e2c04b5044dfbc9e40f",
       "bytes": 1669792,
       "ota": true
     },
     "c6": {
       "app": "app.bin",
-      "sha256": "2e61860e98f727097b7c6b0c98c6d632f0c910419125dd63e201579f1597231a",
+      "sha256": "057af8c725c267356c77ace911b31e4f6e50f54c95da0fa9596007e1dbb62f5f",
       "bytes": 1747840,
       "ota": false
     },
     "heltec-v3": {
       "app": "app.bin",
-      "sha256": "35af35da9d1184823b708d1b65b380ce0be29e84efd1f0f2266be25b440da351",
+      "sha256": "7460b4c9f0970b1af22de7b2a9435f230dbfbfdde386aa6b5071ac951ea6c1c1",
       "bytes": 1672480,
       "ota": true
     },
     "tdisplay": {
       "app": "app.bin",
-      "sha256": "58e1f88ac8dcdd7d615eff1d182fce626f1c4df4846d45bcbadcc62e75808c04",
+      "sha256": "9487e2891d2dd6930d916decc01a4c342cbe88a7c03fe0f15bd5773b66ce0598",
       "bytes": 1701136,
       "ota": false
     }
