@@ -81,7 +81,10 @@ function firmwareRegions(board: BoardSpec) {
   ]
 }
 
-const BAUD_RATE = 921600
+// 460800 is the highest rate that works reliably across CH9102, CH340, and
+// CP210x adapters. 921600 stalls silently on CH9102 (VID 0x1a86) after the
+// stub switches speed, before any flash write begins.
+const BAUD_RATE = 460800
 
 /** A flash region: raw bytes destined for an absolute flash offset. */
 export interface FlashRegion {
