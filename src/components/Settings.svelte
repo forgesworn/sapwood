@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport } from '../lib/device.svelte.js'
+  import { device, serialTransport, syncIdentityMeta } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret } from '../lib/frame.js'
   import {
     getOrCreateOperator,
@@ -139,6 +139,29 @@
     }
   }
 
+  // --- Profile picture (name + avatar) push to the signer ---
+  let profileStatus = $state<string | null>(null)
+  let profilePending = $state(false)
+
+  async function handleSyncProfile() {
+    if (device.mode !== 'serial') {
+      profileStatus = 'Syncing the profile picture requires a USB connection.'
+      return
+    }
+    profilePending = true
+    profileStatus = 'Fetching profile and resizing the picture...'
+    try {
+      const name = await syncIdentityMeta()
+      profileStatus = name
+        ? `Sent "${name}" and avatar to the signer.`
+        : 'No profile picture found for this identity to send.'
+    } catch (e) {
+      profileStatus = e instanceof Error ? e.message : 'Failed to sync profile.'
+    } finally {
+      profilePending = false
+    }
+  }
+
   // --- Bridge secret ---
   let secretValue = $state('')
   let secretStatus = $state<string | null>(null)
@@ -198,6 +221,15 @@
     <tr><td class="label">Masters</td><td>{device.masters.length}</td></tr>
     <tr><td class="label">Slots</td><td>{device.slots.length} (master slot {device.selectedSlot})</td></tr>
   </tbody></table>
+
+  {#if device.mode === 'serial' && device.masters.length > 0}
+    <h2>Identity Card</h2>
+    <p class="info">Fetch this signer's kind-0 profile, shrink the picture in your browser, and store the name + avatar on the device so its screen shows a proper identity card. The signer never fetches or decodes images itself.</p>
+    <button class="btn" onclick={handleSyncProfile} disabled={profilePending}>
+      {profilePending ? 'Syncing...' : 'Sync profile picture to signer'}
+    </button>
+    {#if profileStatus}<p class="info">{profileStatus}</p>{/if}
+  {/if}
 
   <h2>Operator Key</h2>
   <p class="info">Your authority to manage WiFi devices over relays. A device's expected operator is baked in when you flash it — management only works if this key matches. (This is <em>not</em> the master seed; it's a separate, lower-stakes key.) Back it up with the recovery phrase — write the words down and you can restore this exact key on any device.</p>

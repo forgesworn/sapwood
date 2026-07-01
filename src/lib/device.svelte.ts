@@ -10,6 +10,8 @@ import {
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
+import { loadAvatar, buildSetIdentityMeta } from './avatar.js'
+import { resolveProfiles, profileDisplayName } from './profiles.js'
 import { RelayTransport } from './relay-transport.js'
 import { getOrCreateOperator } from './op-mgmt.js'
 import { rememberDevice, npubShort } from './known-devices.js'
@@ -166,6 +168,35 @@ function addLog(line: string) {
 
 export async function connectSerial(baudRate = 115200) {
   await serialTransport.connect(baudRate)
+}
+
+/**
+ * Fetch the master's kind-0 profile, resize its avatar in-browser to a small
+ * Rgb565 bitmap, and push the name + avatar to the signer over USB
+ * (SET_IDENTITY_META, 0x5b). The signer stores it and shows it on its identity
+ * card; it never fetches or decodes images itself. Best-effort: returns the
+ * synced name, or null when there is no master / profile / picture to sync.
+ */
+export async function syncIdentityMeta(): Promise<string | null> {
+  const master = device.masters[0]
+  if (!master?.npub) return null
+  let pubHex: string
+  try {
+    pubHex = nip19.decode(master.npub).data as string
+  } catch {
+    return null
+  }
+
+  const profile = (await resolveProfiles([pubHex])).get(pubHex)
+  if (!profile) return null
+  const name = profileDisplayName(profile)
+  if (!profile.picture) return null // nothing to draw on the disc yet
+
+  const avatar = await loadAvatar(profile.picture, 64)
+  const frame = buildSetIdentityMeta(pubHex, name, avatar)
+  const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 30_000)
+  if (reply.type === FrameType.NACK) throw new Error('device rejected identity metadata')
+  return name
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null

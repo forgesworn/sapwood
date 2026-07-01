@@ -26,6 +26,7 @@ export const FrameType = {
   RESTORE_IDENTITY:      0x58,
   FIRMWARE_INFO:         0x59,
   FIRMWARE_INFO_RESPONSE: 0x5a,
+  SET_IDENTITY_META:     0x5b,
   ENCRYPTED_REQUEST:     0x10,
   ENCRYPTED_RESPONSE:    0x11,
   NACK:                  0x15,
