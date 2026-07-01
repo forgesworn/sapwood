@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   flashDevice,
   flashTetheredImage,
+  defaultBackend,
   BOARDS,
   TETHERED_BOARDS,
   type FlasherBackend,
@@ -68,6 +69,10 @@ function makeHarness(opts: {
     hasWebSerial: () => opts.hasWebSerial ?? true,
     requestPort: vi.fn(async () => { calls.requestPort++; return { fake: 'port' } }),
     fetchBin: vi.fn(async (url: string) => { fetched.push(url); return new Uint8Array([0xde, 0xad, 0xbe, 0xef]) }),
+    // Default: manifest lists no boards, so the integrity check is skipped and
+    // the existing tests exercise the flash path unchanged. Tests that assert on
+    // the check override this to declare a per-board sha256.
+    fetchManifest: vi.fn(async () => ({ version: 'test', boards: {} })),
     openSession: vi.fn(async () => { calls.openSession++; return session }),
   }
 
@@ -259,6 +264,77 @@ describe('flashDevice — cleanup', () => {
   it('does not mask a successful flash if close() throws', async () => {
     const h = makeHarness({ close: async () => { throw new Error('port already gone') } })
     await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+  })
+})
+
+describe('flashDevice — firmware integrity (guards a stale/cached app.bin)', () => {
+  // The dummy payload makeHarness's fetchBin returns for every URL, incl. app.bin.
+  const DUMMY = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+  async function sha256hex(bytes: Uint8Array): Promise<string> {
+    const buf = new ArrayBuffer(bytes.byteLength)
+    new Uint8Array(buf).set(bytes)
+    const d = await crypto.subtle.digest('SHA-256', buf)
+    return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  it('rejects — before opening the device — when the app SHA does not match the manifest', async () => {
+    const h = makeHarness()
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockResolvedValue({
+      version: 'x',
+      boards: { [BOARD.id]: { app: 'app.bin', sha256: 'f'.repeat(64) } },
+    })
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).rejects.toThrow(/integrity check failed/i)
+    // A stale download must never reach the flash.
+    expect(h.backend.openSession).not.toHaveBeenCalled()
+    expect(h.session.writeFlash).not.toHaveBeenCalled()
+  })
+
+  it('flashes when the app SHA matches the manifest', async () => {
+    const h = makeHarness()
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockResolvedValue({
+      version: 'x',
+      boards: { [BOARD.id]: { app: 'app.bin', sha256: await sha256hex(DUMMY) } },
+    })
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+    expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the check and still flashes when the manifest omits the board', async () => {
+    const h = makeHarness() // default fetchManifest → empty boards
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+    expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the check (best-effort) when the manifest fetch fails', async () => {
+    const h = makeHarness()
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('offline'))
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+    expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('defaultBackend — fetches fresh (no browser cache)', () => {
+  it('fetchBin requests firmware with cache: no-store', async () => {
+    const fetchSpy = vi.fn(async () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }))
+    vi.stubGlobal('fetch', fetchSpy)
+    try {
+      await defaultBackend.fetchBin('/firmware/v4/app.bin')
+      expect(fetchSpy).toHaveBeenCalledWith('/firmware/v4/app.bin', { cache: 'no-store' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('fetchManifest requests version.json with cache: no-store', async () => {
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9', boards: {} }) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    try {
+      const m = await defaultBackend.fetchManifest()
+      expect(fetchSpy).toHaveBeenCalledWith('/firmware/version.json', { cache: 'no-store' })
+      expect(m.version).toBe('9.9.9')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 

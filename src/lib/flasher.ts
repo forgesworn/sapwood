@@ -130,14 +130,76 @@ export interface FlasherBackend {
   requestPort(): Promise<unknown>
   /** Fetch a firmware binary by URL. */
   fetchBin(url: string): Promise<Uint8Array>
+  /** Fetch the served firmware manifest (for the integrity check). */
+  fetchManifest(): Promise<FirmwareManifest>
   /** Open an esptool session on `port`. */
   openSession(port: unknown, opts: { baudrate: number; terminal: FlashTerminal }): Promise<FlashSession>
 }
 
+// The served firmware manifest (public/firmware/version.json, written by
+// heartwood-esp32's sync-firmware). Only the per-board app SHA-256 is used here.
+export interface FirmwareManifest {
+  version?: string
+  builtAt?: string
+  boards?: Record<string, { app?: string; sha256?: string; bytes?: number; ota?: boolean }>
+}
+
+/** Absolute path to the served firmware manifest. */
+const MANIFEST_URL = '/firmware/version.json'
+
+// Firmware images are fetched `no-store`: the browser otherwise heuristically
+// disk-caches the large app.bin, so a re-flash after an update silently writes
+// the OLD image (there is no service worker; version.json revalidates via etag,
+// app.bin does not). `no-store` guarantees fresh bytes on every flash.
 async function fetchBin(url: string): Promise<Uint8Array> {
-  const res = await fetch(url)
+  const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) throw new Error(`fetch ${url} failed: ${res.status}`)
   return new Uint8Array(await res.arrayBuffer())
+}
+
+async function fetchManifest(): Promise<FirmwareManifest> {
+  const res = await fetch(MANIFEST_URL, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`fetch ${MANIFEST_URL} failed: ${res.status}`)
+  return (await res.json()) as FirmwareManifest
+}
+
+/** SHA-256 of `data` as lowercase hex. */
+async function sha256Hex(data: Uint8Array): Promise<string> {
+  // Copy into a fresh ArrayBuffer so digest() gets a concrete BufferSource
+  // (a Uint8Array may be a view over a larger/offset buffer).
+  const buf = new ArrayBuffer(data.byteLength)
+  new Uint8Array(buf).set(data)
+  const digest = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Fail loudly if the fetched app image doesn't match the manifest's SHA-256 —
+ * the guardrail against a stale/corrupt download silently flashing the wrong
+ * firmware. version.json is fetched `no-store`, so its sha is authoritative.
+ * Best-effort: if the manifest is unavailable or doesn't list this board, log and
+ * proceed (the `no-store` fetch already refreshed the bytes; this is defence in
+ * depth, not a hard gate on a manifest hiccup).
+ */
+async function verifyAppIntegrity(
+  manifest: FirmwareManifest | null,
+  boardId: string,
+  appData: Uint8Array,
+  log: (s: string) => void,
+): Promise<void> {
+  const expected = manifest?.boards?.[boardId]?.sha256
+  if (!expected) {
+    log(`No manifest SHA for ${boardId} — skipping firmware integrity check.`)
+    return
+  }
+  const actual = await sha256Hex(appData)
+  if (actual !== expected) {
+    throw new Error(
+      `Firmware integrity check failed for ${boardId}: expected ${expected.slice(0, 16)}…, got ${actual.slice(0, 16)}…. ` +
+        'This usually means a stale cached download — hard-refresh (Cmd/Ctrl+Shift+R) and flash again.',
+    )
+  }
+  log(`Firmware verified (sha256 ${actual.slice(0, 16)}…).`)
 }
 
 /** The production backend: esptool-js over Web Serial. Coupling isolated here. */
@@ -145,6 +207,7 @@ export const defaultBackend: FlasherBackend = {
   hasWebSerial: () => typeof navigator !== 'undefined' && 'serial' in navigator,
   requestPort: () => navigator.serial.requestPort(),
   fetchBin,
+  fetchManifest,
   async openSession(port, { baudrate, terminal }) {
     const transport = new Transport(port as never, false)
     const esploader = new ESPLoader({ transport, baudrate, terminal })
@@ -222,6 +285,18 @@ export async function flashDevice(
     fwRegions.map(async (r) => ({ address: r.address, data: await backend.fetchBin(`${board.assets}/${r.file}`) })),
   )
   const labels = fwRegions.map((r) => r.label)
+
+  // 2a. Verify the app image against the manifest before touching the device — a
+  //     stale (browser-cached) app.bin would otherwise flash silently. The
+  //     manifest fetch is best-effort; a SHA mismatch aborts before we open the
+  //     serial session, so a bad download never reaches the flash.
+  let manifest: FirmwareManifest | null = null
+  try {
+    manifest = await backend.fetchManifest()
+  } catch (e) {
+    log(`Firmware manifest unavailable (${e instanceof Error ? e.message : e}) — skipping integrity check.`)
+  }
+  await verifyAppIntegrity(manifest, board.id, regions[fwRegions.findIndex((r) => r.file === 'app.bin')].data, log)
 
   // 3. Build the config blob and append it at the config-partition offset.
   const configBlob = buildConfigBlob(cfg)
@@ -310,6 +385,13 @@ export async function flashTetheredImage(
 
   log(`Fetching firmware for ${board.label}…`)
   const data = await backend.fetchBin(`${board.assets}/app.bin`)
+  let manifest: FirmwareManifest | null = null
+  try {
+    manifest = await backend.fetchManifest()
+  } catch (e) {
+    log(`Firmware manifest unavailable (${e instanceof Error ? e.message : e}) — skipping integrity check.`)
+  }
+  await verifyAppIntegrity(manifest, board.id, data, log)
   const regions: FlashRegion[] = [{ address: 0x0, data }]
 
   const terminal: FlashTerminal = {
