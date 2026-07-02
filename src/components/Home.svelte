@@ -89,11 +89,13 @@
     finally { reconnecting = false }
   }
 
-  // --- WiFi signer plugged into USB ---
-  // A provisioned WiFi signer boots into its relay loop and ignores the cable,
-  // so device.usbSilent goes true. We already remember such devices (npub +
-  // relays) from when they were provisioned, so we can offer a one-click hop to
-  // WiFi management. localStorage isn't reactive, so read it once here.
+  // --- Signer silent on USB ---
+  // Since firmware v0.9.10 a WiFi signer answers the cable in every mode, so
+  // device.usbSilent now means older WiFi firmware (whose relay loop ignored
+  // USB), a device still mid-boot, or a port that isn't a signer at all. We
+  // remember WiFi devices (npub + relays) from when they were provisioned, so
+  // we can offer a one-click hop to WiFi management. localStorage isn't
+  // reactive, so read it once here.
   const knownWifi = $derived(listKnownDevices().filter((d) => d.relays.length))
   let wifiBusy = $state(false)
   let wifiErr = $state('')
@@ -125,8 +127,8 @@
 
   {#if device.mode === 'serial' && device.usbProbing && !hasIdentity}
     <!-- Just connected over USB; find out if the device actually answers before
-         deciding what to show (a WiFi signer won't, and we must not offer it a
-         create flow that can only time out). -->
+         deciding what to show (older WiFi firmware won't, and we must not offer
+         it a create flow that can only time out). -->
     <section class="checking">
       <span class="checking-spin"></span>
       <div>
@@ -137,15 +139,21 @@
     </section>
 
   {:else if device.mode === 'serial' && device.usbSilent && !hasIdentity}
-    <!-- Connected at the port level but no frames come back: it's a provisioned
-         WiFi signer running its relay loop, which never reads USB. Steer to WiFi
-         (the normal way to manage it) and offer the force-USB escape hatch. -->
+    <!-- Connected at the port level but no frames come back. Current firmware
+         (v0.9.10+) answers USB in every mode, so this is older WiFi firmware
+         ignoring the cable, a device still booting, or not a signer. Offer every
+         way out: retry, hop to WiFi, and the old-firmware PRG hatch. -->
     <section class="wifi-usb">
-      <h2 class="wifi-usb-title">This signer is already set up — and runs over WiFi</h2>
+      <h2 class="wifi-usb-title">This signer isn't answering over the cable</h2>
       <p class="wifi-usb-body">
-        It has an identity and won't answer over the cable: a WiFi signer is managed over the
-        network, not USB. Connect to it over WiFi to manage it.
+        It connected, but nothing came back. If it was just plugged in or reset, give it a few
+        seconds and retry. If it's a WiFi signer on older firmware, it ignores the cable while
+        serving WiFi — manage it over the network instead.
       </p>
+
+      <button class="btn-reconnect-inline" onclick={reconnect} disabled={reconnecting}>
+        {reconnecting ? 'Retrying…' : 'Retry over USB'}
+      </button>
 
       {#if knownWifi.length}
         <div class="wifi-usb-known">
@@ -158,23 +166,21 @@
         {#if wifiErr}<p class="wifi-usb-err">{wifiErr}</p>{/if}
       {:else}
         <p class="wifi-usb-body">
-          Disconnect, choose <strong>“Connect over your network”</strong>, and enter the signer's
-          <code>npub1…</code> address (shown on its screen) and relay.
+          To reach a WiFi signer: disconnect, choose <strong>“Connect over your network”</strong>,
+          and enter the signer's <code>npub1…</code> address (shown on its screen) and relay.
         </p>
         <button class="btn-wifi" onclick={() => disconnect()}>Disconnect and connect over WiFi</button>
       {/if}
 
       <details class="wifi-usb-more">
-        <summary>Need to set it up over the cable again?</summary>
+        <summary>On older firmware and need the cable?</summary>
         <p>
-          Only needed to re-provision or wipe it. Press <strong>RESET</strong> on the board and
-          watch the screen — the moment it shows <strong>“Hold PRG = USB”</strong>, press and hold
-          the other button (<strong>PRG</strong>) for ~3 seconds until it says
-          <strong>“USB mode”</strong>. Then reconnect.
+          Firmware v0.9.10 and newer always answers the cable, so a signer that's up to date just
+          needs the retry above. On older WiFi firmware, press <strong>RESET</strong> on the board
+          and watch the screen — if it offers <strong>“Hold PRG = USB”</strong>, press and hold the
+          other button (<strong>PRG</strong>) for ~3 seconds until it says <strong>“USB mode”</strong>,
+          reconnect here, then update its firmware so this step isn't needed again.
         </p>
-        <button class="btn-reconnect-inline" onclick={reconnect} disabled={reconnecting}>
-          {reconnecting ? 'Reconnecting…' : 'Reconnect over USB'}
-        </button>
       </details>
 
       <button class="wifi-usb-disconnect" onclick={() => disconnect()}>Disconnect</button>

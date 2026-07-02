@@ -55,9 +55,11 @@ export const device = $state({
   bridgeAuthed: false,
   /** USB-direct: probing whether the freshly-connected device answers frames. */
   usbProbing: false,
-  /** USB-direct: device is connected at the port level but answers no frames —
-   *  almost always a provisioned WiFi signer that booted into its relay loop and
-   *  never reads USB. Drives the "manage over WiFi instead" guidance. */
+  /** USB-direct: device is connected at the port level but answers no frames.
+   *  Firmware v0.9.10+ serves USB in every mode, so silence now means older
+   *  WiFi firmware (whose relay loop ignored the cable), a device still
+   *  booting, or a port that isn't a signer. Drives the retry / "manage over
+   *  WiFi" guidance. */
   usbSilent: false,
 })
 
@@ -483,10 +485,10 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
  * On a fresh USB connection, work out whether the device actually answers
  * frames. A USB-reachable signer replies to PROVISION_LIST with either the
  * master list (provisioned) or a NACK (brand-new, still in the first-provision
- * loop). A provisioned WiFi signer, by contrast, boots straight into its relay
- * loop and never reads USB — so it stays silent. Detecting that lets Home steer
- * the operator to WiFi (or the force-USB escape hatch) instead of offering a
- * "create an identity" flow that can only time out.
+ * loop). Firmware v0.9.10+ answers the cable in every mode (including WiFi);
+ * older WiFi firmware booted straight into its relay loop and stayed silent.
+ * Detecting silence lets Home offer retry / WiFi management / the old-firmware
+ * PRG hatch instead of a "create an identity" flow that can only time out.
  *
  * Retries to ride out the ~6s boot animation a just-reset board plays before it
  * services any frame. If a PROVISION_LIST_RESPONSE lands, handleFrame populates
