@@ -17,6 +17,19 @@ export type SerialEvent =
 
 export type SerialListener = (event: SerialEvent) => void
 
+// Write pacing for frames that could overrun a UART board's 4KB driver ring
+// (identity-card avatars ~8KB, OTA chunks 4KB). Two phases, measured against a
+// live T-Display (v0.9.10) in wifi mode: its relay loop polls USB as rarely as
+// once a second, so the HEAD of a frame must drip in slower than 4KB/s or the
+// ring overflows before the firmware latches on. Once latched, the firmware
+// blocks draining the rest of the frame continuously, so the tail can cruise
+// at heartwood-bridge's proven 64B/6ms.
+const PACE_THRESHOLD = 512
+const PACE_CHUNK = 64
+const PACE_HEAD_BYTES = 3072
+const PACE_HEAD_GAP_MS = 24
+const PACE_GAP_MS = 6
+
 /** Web Serial connection to the ESP32. */
 export class SerialTransport {
   private port: SerialPort | null = null
@@ -177,7 +190,21 @@ export class SerialTransport {
     }, timeoutMs)
     let writeErr: unknown
     try {
-      await writer.write(data)
+      if (data.length <= PACE_THRESHOLD) {
+        await writer.write(data)
+      } else {
+        // Pace large frames: the UART-bridge boards (T-Display, Heltec V3,
+        // ESP8266) have a 4KB driver ring the firmware may be slow to drain,
+        // so a burst bigger than the ring silently loses bytes and the frame
+        // dies on CRC. Head slices drip (see PACE_HEAD_* above), the rest
+        // cruise once the firmware is committed to reading the frame.
+        for (let o = 0; o < data.length; o += PACE_CHUNK) {
+          await writer.write(data.subarray(o, Math.min(o + PACE_CHUNK, data.length)))
+          if (o + PACE_CHUNK < data.length) {
+            await new Promise((r) => setTimeout(r, o < PACE_HEAD_BYTES ? PACE_HEAD_GAP_MS : PACE_GAP_MS))
+          }
+        }
+      }
     } catch (e) {
       writeErr = e
     } finally {

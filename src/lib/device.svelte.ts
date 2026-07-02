@@ -490,15 +490,20 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
  * Detecting silence lets Home offer retry / WiFi management / the old-firmware
  * PRG hatch instead of a "create an identity" flow that can only time out.
  *
- * Retries to ride out the ~6s boot animation a just-reset board plays before it
- * services any frame. If a PROVISION_LIST_RESPONSE lands, handleFrame populates
- * device.masters as a side effect.
+ * Patience matters here: a WiFi signer on current firmware only starts polling
+ * the cable once its relay session is up — measured at ~20-35s after reset on a
+ * T-Display (v0.9.10), on top of the ~6s boot animation. The old 3x5s probe
+ * gave up inside that window and wrongly declared provisioned WiFi signers
+ * silent, which is why we now keep trying for a full minute. Queued probes are
+ * all answered in a burst the moment the device starts draining USB; if a
+ * PROVISION_LIST_RESPONSE lands, handleFrame populates device.masters as a
+ * side effect.
  */
 async function probeSerial() {
   device.usbProbing = true
   device.usbSilent = false
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 12; attempt++) {
       try {
         await serialTransport.sendAndReceive(
           buildProvisionList(),
@@ -506,7 +511,7 @@ async function probeSerial() {
           5_000,
         )
         return // answered → reachable
-      } catch { /* timed out this round — the board may still be booting */ }
+      } catch { /* timed out this round — the board may still be booting or joining WiFi */ }
       if (device.masters.length > 0) return // a late list reply arrived via handleFrame
     }
     device.usbSilent = true

@@ -8,7 +8,13 @@
 
 const LS_KEY = 'heartwood.profileRelays'
 
-export const DEFAULT_PROFILE_RELAYS = ['wss://relay.trotters.cc']
+// The project relay first, then two widely-mirrored public indexes so a
+// profile published from any mainstream client still resolves.
+export const DEFAULT_PROFILE_RELAYS = [
+  'wss://relay.trotters.cc',
+  'wss://purplepag.es',
+  'wss://relay.damus.io',
+]
 
 /** A relay URL is valid if it is wss://, or ws:// against localhost (dev only). */
 export function isValidRelayUrl(url: string): boolean {
