@@ -12,6 +12,7 @@
   } from '../lib/provision.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { nip19 } from 'nostr-tools'
+  import PasswordReveal from './PasswordReveal.svelte'
 
   // The just-provisioned wifi device, if any — drives the "Manage over WiFi"
   // handoff. Only set when this device was flashed in wifi mode (lastRelays present).
@@ -54,6 +55,8 @@
   let label = $state('default')
   let secret = $state('')
   let passphrase = $state('')
+  let showPassphrase = $state(false)
+  let showSecret = $state(false)
 
   // Plain-English explanation of each style, including the one thing that trips
   // people up: whether the device keeps your existing npub or gets a new one.
@@ -264,18 +267,24 @@
         </label>
         <label class="field">
           <span>Passphrase</span>
-          <input type="password" bind:value={passphrase} placeholder="Optional" disabled={status !== 'idle'} />
+          <div class="pw">
+            <input type={showPassphrase ? 'text' : 'password'} bind:value={passphrase} placeholder="Optional" disabled={status !== 'idle'} />
+            <PasswordReveal bind:shown={showPassphrase} disabled={status !== 'idle'} />
+          </div>
         </label>
       {:else}
         <label class="field">
           <span>{mode === 'tree-nsec' ? 'nsec (tree derivation)' : 'nsec (raw, no derivation)'}</span>
-          <input
-            type="password"
-            bind:value={secret}
-            placeholder="nsec1..."
-            disabled={status !== 'idle'}
-            autocomplete="off"
-          />
+          <div class="pw">
+            <input
+              type={showSecret ? 'text' : 'password'}
+              bind:value={secret}
+              placeholder="nsec1..."
+              disabled={status !== 'idle'}
+              autocomplete="off"
+            />
+            <PasswordReveal bind:shown={showSecret} disabled={status !== 'idle'} />
+          </div>
         </label>
       {/if}
 
@@ -326,6 +335,8 @@
   }
 
   .field select { cursor: pointer; }
+  .pw { position: relative; display: flex; }
+  .pw input { flex: 1; padding-right: 2.2rem; }
   .field input:disabled, .field textarea:disabled, .field select:disabled { opacity: 0.4; }
   .field input::placeholder, .field textarea::placeholder { color: #444; }
 

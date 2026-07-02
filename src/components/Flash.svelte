@@ -3,11 +3,13 @@
   import { device } from '../lib/device.svelte.js'
   import { getOrCreateOperator, type Operator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
+  import PasswordReveal from './PasswordReveal.svelte'
 
   let board = $state<BoardSpec>(BOARDS[0])
   let mode = $state<'wifi' | 'usb'>('wifi')
   let ssid = $state('')
   let password = $state('')
+  let showPw = $state(false)
   let relaysText = $state('wss://relay.trotters.cc')
   let fullErase = $state(false)
 
@@ -111,7 +113,10 @@
     </label>
     <label class="field">
       <span>WiFi password</span>
-      <input type="password" bind:value={password} disabled={status === 'flashing'} />
+      <div class="pw">
+        <input type={showPw ? 'text' : 'password'} bind:value={password} disabled={status === 'flashing'} />
+        <PasswordReveal bind:shown={showPw} disabled={status === 'flashing'} />
+      </div>
     </label>
     <label class="field">
       <span>Relays (one per line)</span>
@@ -186,6 +191,8 @@
     padding: 0.35rem 0.5rem; border-radius: 3px; font-family: inherit; font-size: 0.8rem; resize: vertical;
   }
   .field select { cursor: pointer; }
+  .pw { position: relative; display: flex; }
+  .pw input { flex: 1; padding-right: 2.2rem; }
   .field input:disabled, .field textarea:disabled, .field select:disabled { opacity: 0.4; }
   .btn {
     background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 0.4rem 1rem;

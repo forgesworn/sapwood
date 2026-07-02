@@ -14,11 +14,13 @@
     nextStep, prevStep, friendlyStage,
   } from './lib/wizard.js'
   import TetheredSetup from './components/TetheredSetup.svelte'
+  import PasswordReveal from './components/PasswordReveal.svelte'
 
   const webSerial = typeof navigator !== 'undefined' && 'serial' in navigator
 
   let step = $state<WizardStep>('welcome')
   let data = $state<WizardData>(initialData())
+  let showWifiPw = $state(false)
   // The ESP8266 is a USB-tethered, no-WiFi signer — its own flow, not the WiFi wizard.
   let tethered = $state(false)
   let showAdvanced = $state(false)
@@ -187,7 +189,10 @@
       </label>
       <label class="field">
         <span>Wi-Fi password</span>
-        <input type="password" bind:value={data.password} autocomplete="off" />
+        <div class="pw">
+          <input type={showWifiPw ? 'text' : 'password'} bind:value={data.password} autocomplete="off" />
+          <PasswordReveal bind:shown={showWifiPw} />
+        </div>
       </label>
 
       <details class="advanced" bind:open={showAdvanced}>
@@ -286,6 +291,9 @@
             <p class="op-desc">
               They're the master key to manage this signer from anywhere later. Keep them safe and
               private — like the keys to your house. You don't need them for the next steps.
+              Heads up: in a moment your signer shows <strong>a different 12 words on its own
+              screen</strong> — that's its recovery phrase, a separate thing. Label this one
+              <strong>“operator”</strong> so you don't mix them up.
             </p>
             <pre class="op-phrase">{operator.mnemonic}</pre>
           {:else}
@@ -359,6 +367,8 @@
     padding: 0.7rem 0.85rem; border-radius: 5px; font-family: inherit; font-size: 1rem; resize: vertical;
   }
   .field input:focus, .field textarea:focus { outline: none; border-color: var(--green-dim); }
+  .pw { position: relative; }
+  .pw input { width: 100%; box-sizing: border-box; padding-right: 2.5rem; }
 
   .boards { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1rem; }
   .board-card {
@@ -416,6 +426,7 @@
   .operator { margin: 1.25rem 0; border: 1px solid var(--green-dim); border-radius: 6px; padding: 1rem; background: #06120e; }
   .op-title { font-size: 0.9rem; color: var(--green); margin: 0 0 0.4rem; font-weight: 600; }
   .op-desc { font-size: 0.8rem; color: #9a9; margin: 0 0 0.6rem; line-height: 1.5; }
+  .op-desc strong { color: var(--text); }
   .op-secret { background: #030303; border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-size: 0.68rem; color: var(--green); white-space: pre-wrap; word-break: break-all; margin: 0 0 0.6rem; }
   .op-phrase { background: #030303; border: 1px solid var(--amber, #d9a441); border-radius: 4px; padding: 0.7rem; font-size: 0.85rem; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-spacing: 0.3rem; margin: 0 0 0.8rem; }
   .op-advanced { margin-top: 0.5rem; }

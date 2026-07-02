@@ -74,6 +74,25 @@ describe('Flasher — happy path', () => {
     expect(cfg.op_mgmt).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('reveals and re-hides the wifi password via the eye toggle', async () => {
+    const { container } = render(Flasher)
+    await fireEvent.click(screen.getByText('Start'))
+    await fireEvent.click(screen.getByText('Heltec WiFi LoRa 32 V4'))
+    await fireEvent.click(screen.getByText('Next'))
+
+    const password = container.querySelectorAll('input')[1]
+    await fireEvent.input(password, { target: { value: 'hunter2hunter2' } })
+    expect(password.type).toBe('password')
+
+    const eye = screen.getByLabelText('Show password')
+    await fireEvent.click(eye)
+    expect(password.type).toBe('text')
+    expect(password.value).toBe('hunter2hunter2')
+
+    await fireEvent.click(screen.getByLabelText('Hide password'))
+    expect(password.type).toBe('password')
+  })
+
   it('blocks Next on the network step until the wifi name is valid', async () => {
     const { container } = render(Flasher)
     await fireEvent.click(screen.getByText('Start'))

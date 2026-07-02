@@ -1,10 +1,12 @@
 <script lang="ts">
   import { device, configureNetwork } from '../lib/device.svelte.js'
   import type { NetConfig } from '../lib/frame'
+  import PasswordReveal from './PasswordReveal.svelte'
 
   let mode = $state<'usb' | 'wifi'>('usb')
   let ssid = $state('')
   let password = $state('')
+  let showPw = $state(false)
   let relaysText = $state('wss://relay.trotters.cc')
   let status = $state<'idle' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
@@ -62,7 +64,10 @@
       </label>
       <label class="field">
         <span>WiFi password</span>
-        <input type="password" bind:value={password} disabled={!canConfigure} />
+        <div class="pw">
+          <input type={showPw ? 'text' : 'password'} bind:value={password} disabled={!canConfigure} />
+          <PasswordReveal bind:shown={showPw} disabled={!canConfigure} />
+        </div>
       </label>
       <label class="field">
         <span>Relays (one per line)</span>
@@ -114,6 +119,8 @@
   }
 
   .field select { cursor: pointer; }
+  .pw { position: relative; display: flex; }
+  .pw input { flex: 1; padding-right: 2.2rem; }
   .field input:disabled, .field textarea:disabled, .field select:disabled { opacity: 0.4; }
   .field input::placeholder, .field textarea::placeholder { color: #444; }
 

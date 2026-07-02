@@ -10,6 +10,7 @@
   } from '../lib/op-mgmt.js'
   import { getProfileRelays, setProfileRelays, isValidRelayUrl } from '../lib/profile-relays.js'
   import { clearProfileCache } from '../lib/profiles.svelte.js'
+  import PasswordReveal from './PasswordReveal.svelte'
 
   // --- Operator key (relay management authority) ---
   let operator = $state(getOrCreateOperator())
@@ -110,6 +111,7 @@
   let pinValue = $state('')
   let pinStatus = $state<string | null>(null)
   let pinPending = $state(false)
+  let showPin = $state(false)
 
   async function handleSetPin() {
     if (device.mode !== 'serial') {
@@ -166,6 +168,7 @@
   let secretValue = $state('')
   let secretStatus = $state<string | null>(null)
   let secretPending = $state(false)
+  let showSecret = $state(false)
 
   async function handleSetBridgeSecret() {
     if (device.mode !== 'serial') {
@@ -353,13 +356,16 @@
   <h2>Boot PIN</h2>
   <p class="info">Locks the device at boot. Must be unlocked before signing. Requires button confirmation.</p>
   <div class="inline-form">
-    <input
-      type="password"
-      bind:value={pinValue}
-      placeholder="4-8 digits (empty to clear)"
-      maxlength="8"
-      disabled={!device.connected || device.mode !== 'serial' || pinPending}
-    />
+    <div class="pw">
+      <input
+        type={showPin ? 'text' : 'password'}
+        bind:value={pinValue}
+        placeholder="4-8 digits (empty to clear)"
+        maxlength="8"
+        disabled={!device.connected || device.mode !== 'serial' || pinPending}
+      />
+      <PasswordReveal bind:shown={showPin} disabled={!device.connected || device.mode !== 'serial' || pinPending} />
+    </div>
     <button
       class="btn"
       disabled={!device.connected || device.mode !== 'serial' || pinPending}
@@ -375,13 +381,16 @@
   <h2>Bridge Secret</h2>
   <p class="info">Shared secret for bridge authentication (device-decrypts mode). Requires button confirmation. Cannot be set while a bridge session is active.</p>
   <div class="inline-form">
-    <input
-      type="password"
-      bind:value={secretValue}
-      placeholder="64 hex chars (32 bytes)"
-      maxlength="64"
-      disabled={!device.connected || device.mode !== 'serial' || secretPending}
-    />
+    <div class="pw">
+      <input
+        type={showSecret ? 'text' : 'password'}
+        bind:value={secretValue}
+        placeholder="64 hex chars (32 bytes)"
+        maxlength="64"
+        disabled={!device.connected || device.mode !== 'serial' || secretPending}
+      />
+      <PasswordReveal bind:shown={showSecret} disabled={!device.connected || device.mode !== 'serial' || secretPending} />
+    </div>
     <button
       class="btn"
       disabled={!device.connected || device.mode !== 'serial' || secretPending || secretValue.length !== 64}
@@ -442,6 +451,8 @@
 
   .inline-form input::placeholder { color: #444; }
   .inline-form input:disabled { opacity: 0.4; }
+  .inline-form .pw { position: relative; display: flex; flex: 1; }
+  .inline-form .pw input { padding-right: 2.2rem; }
 
   .btn {
     background: #1a1a1a;
