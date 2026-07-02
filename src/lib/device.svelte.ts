@@ -10,7 +10,7 @@ import {
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
-import { loadAvatar, buildSetIdentityMeta } from './avatar.js'
+import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
 import { RelayTransport } from './relay-transport.js'
 import { getOrCreateOperator } from './op-mgmt.js'
@@ -143,6 +143,8 @@ function handleFrame(frame: { type: number; payload: Uint8Array }) {
     case FrameType.PROVISION_LIST_RESPONSE:
       try {
         device.masters = JSON.parse(decoder.decode(frame.payload)) as MasterInfo[]
+        // Knowing the master npub is all we need to dress the signer's screen.
+        void autoSyncIdentityMeta()
       } catch {
         device.error = 'Failed to parse master list'
       }
@@ -174,10 +176,13 @@ export async function connectSerial(baudRate = 115200) {
  * Fetch the master's kind-0 profile, resize its avatar in-browser to a small
  * Rgb565 bitmap, and push the name + avatar to the signer over USB
  * (SET_IDENTITY_META, 0x5b). The signer stores it and shows it on its identity
- * card; it never fetches or decodes images itself. Best-effort: returns the
- * synced name, or null when there is no master / profile / picture to sync.
+ * card; it never fetches or decodes images itself. If the picture is missing or
+ * its host refuses the fetch (CORS), an initial-on-disc placeholder is pushed so
+ * the card still carries the name. Returns the synced name, or null when there
+ * is no master / no resolvable profile.
  */
 export async function syncIdentityMeta(): Promise<string | null> {
+  if (device.mode !== 'serial') return null
   const master = device.masters[0]
   if (!master?.npub) return null
   let pubHex: string
@@ -190,13 +195,47 @@ export async function syncIdentityMeta(): Promise<string | null> {
   const profile = (await resolveProfiles([pubHex])).get(pubHex)
   if (!profile) return null
   const name = profileDisplayName(profile)
-  if (!profile.picture) return null // nothing to draw on the disc yet
+  if (!name) return null
 
-  const avatar = await loadAvatar(profile.picture, 64)
+  let avatar: Avatar
+  try {
+    avatar = profile.picture ? await loadAvatar(profile.picture, 64) : placeholderAvatar(name)
+  } catch {
+    avatar = placeholderAvatar(name) // image host refused — name + disc beats nothing
+  }
   const frame = buildSetIdentityMeta(pubHex, name, avatar)
   const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 30_000)
   if (reply.type === FrameType.NACK) throw new Error('device rejected identity metadata')
   return name
+}
+
+// One auto-push per npub per page load: reconnects within a session don't
+// rewrite device NVS, while a fresh page load re-syncs (self-healing after a
+// factory reset or a profile change).
+const idMetaSynced = new Set<string>()
+
+/**
+ * Push the identity card to the signer as soon as we know who it is — fired
+ * whenever a serial master list lands, so plugging a device in is enough and
+ * no manual sync step is needed. Quiet best-effort: failures (and "no profile
+ * yet") release the guard so a later master-list refresh retries.
+ */
+async function autoSyncIdentityMeta() {
+  if (device.mode !== 'serial') return
+  const npub = device.masters[0]?.npub
+  if (!npub || idMetaSynced.has(npub)) return
+  idMetaSynced.add(npub) // claim before the await so overlapping triggers no-op
+  try {
+    const name = await syncIdentityMeta()
+    if (name) {
+      addLog(`identity card synced to signer: ${name}`)
+    } else {
+      idMetaSynced.delete(npub) // no profile on the relays yet — retry later
+    }
+  } catch (e) {
+    idMetaSynced.delete(npub)
+    addLog(`identity card sync failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
