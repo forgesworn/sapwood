@@ -174,17 +174,28 @@ export async function connectSerial(baudRate = 115200) {
   await serialTransport.connect(baudRate)
 }
 
+/** Uint8Array → base64, chunked so String.fromCharCode never overflows argv. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
 /**
  * Fetch the master's kind-0 profile, resize its avatar in-browser to a small
- * Rgb565 bitmap, and push the name + avatar to the signer over USB
- * (SET_IDENTITY_META, 0x5b). The signer stores it and shows it on its identity
- * card; it never fetches or decodes images itself. If the picture is missing or
- * its host refuses the fetch (CORS), an initial-on-disc placeholder is pushed so
- * the card still carries the name. Returns the synced name, or null when there
- * is no master / no resolvable profile.
+ * Rgb565 bitmap, and push the name + avatar to the signer — over USB
+ * (SET_IDENTITY_META, 0x5b) or over the relay management channel
+ * (`set_identity_meta`, firmware ≥0.9.12). The signer stores it and shows it
+ * on its identity card; it never fetches or decodes images itself. If the
+ * picture is missing or its host refuses the fetch (CORS), an initial-on-disc
+ * placeholder is pushed so the card still carries the name. Returns the synced
+ * name, or null when there is no master / no resolvable profile.
  */
 export async function syncIdentityMeta(): Promise<string | null> {
-  if (device.mode !== 'serial') return null
+  if (device.mode !== 'serial' && device.mode !== 'relay') return null
   const master = device.masters[0]
   if (!master?.npub) return null
   let pubHex: string
@@ -205,6 +216,17 @@ export async function syncIdentityMeta(): Promise<string | null> {
   } catch {
     avatar = placeholderAvatar(name) // image host refused — name + disc beats nothing
   }
+
+  if (device.mode === 'relay') {
+    if (!relayTransport) return null
+    await relayTransport.request(
+      'set_identity_meta',
+      { name, w: avatar.w, h: avatar.h, avatar_b64: bytesToBase64(avatar.bytes) },
+      30_000,
+    )
+    return name
+  }
+
   const frame = buildSetIdentityMeta(pubHex, name, avatar)
 
   // A wifi-mode signer only drains USB in windows (fast polls while wifi
@@ -233,31 +255,38 @@ export async function syncIdentityMeta(): Promise<string | null> {
   throw lastErr instanceof Error ? lastErr : new Error('signer did not accept the identity card')
 }
 
-// One auto-push per npub per page load: reconnects within a session don't
-// rewrite device NVS, while a fresh page load re-syncs (self-healing after a
-// factory reset or a profile change).
+// Auto-push bookkeeping per npub per page load: dedupe successes, and cap
+// fruitless rounds so the relay path's 4-second status poll doesn't hammer
+// the profile relays (or an old-firmware device) forever.
 const idMetaSynced = new Set<string>()
+const idMetaAttempts = new Map<string, number>()
+const ID_META_MAX_ATTEMPTS = 3
 
 /**
  * Push the identity card to the signer as soon as we know who it is — fired
- * whenever a serial master list lands, so plugging a device in is enough and
- * no manual sync step is needed. Quiet best-effort: failures (and "no profile
- * yet") release the guard so a later master-list refresh retries.
+ * whenever a serial master list lands or a relay status refresh resolves the
+ * master, so connecting is enough and no manual sync step is needed. Quiet
+ * best-effort: failures (and "no profile yet") release the guard so a later
+ * refresh retries, up to ID_META_MAX_ATTEMPTS per page load.
  */
 async function autoSyncIdentityMeta() {
-  if (device.mode !== 'serial') return
+  if (device.mode !== 'serial' && device.mode !== 'relay') return
   const npub = device.masters[0]?.npub
   if (!npub || idMetaSynced.has(npub)) return
+  if ((idMetaAttempts.get(npub) ?? 0) >= ID_META_MAX_ATTEMPTS) return
   idMetaSynced.add(npub) // claim before the await so overlapping triggers no-op
   try {
     const name = await syncIdentityMeta()
     if (name) {
       addLog(`identity card synced to signer: ${name}`)
     } else {
-      idMetaSynced.delete(npub) // no profile on the relays yet — retry later
+      // No profile on the relays yet — release for a later refresh to retry.
+      idMetaSynced.delete(npub)
+      idMetaAttempts.set(npub, (idMetaAttempts.get(npub) ?? 0) + 1)
     }
   } catch (e) {
     idMetaSynced.delete(npub)
+    idMetaAttempts.set(npub, (idMetaAttempts.get(npub) ?? 0) + 1)
     addLog(`identity card sync failed: ${e instanceof Error ? e.message : String(e)}`)
   }
 }
@@ -347,6 +376,9 @@ async function relayRefresh() {
         npub,
       }]
     }
+    // Knowing the master npub is all we need to dress the signer's screen —
+    // over the relay too (firmware ≥0.9.12 accepts set_identity_meta).
+    if (device.masters.length > 0) void autoSyncIdentityMeta()
     const res = await relayTransport.request('list_clients')
     const clients = (res.clients as Array<Record<string, unknown>>) ?? []
     device.slots = clients.map((c) => ({

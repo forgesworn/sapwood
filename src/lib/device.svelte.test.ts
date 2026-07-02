@@ -5,7 +5,8 @@ import { nip19 } from 'nostr-tools'
 // avatar/profile modules so no canvas or relay is needed. The serial mock
 // captures the listener device.svelte.ts registers at import, which is the
 // only way to feed frames into its (unexported) handleFrame.
-const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildMetaMock } = vi.hoisted(() => ({
+const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildMetaMock, relayRequestMock } = vi.hoisted(() => ({
+  relayRequestMock: vi.fn(),
   serialMock: {
     listeners: [] as Array<(e: unknown) => void>,
     on(fn: (e: unknown) => void) { serialMock.listeners.push(fn); return () => {} },
@@ -34,8 +35,16 @@ vi.mock('./avatar.js', () => ({
   placeholderAvatar: placeholderMock,
   buildSetIdentityMeta: buildMetaMock,
 }))
+vi.mock('./relay-transport.js', () => ({
+  RelayTransport: class {
+    operatorPub = 'op'
+    async connect() { /* no relay in tests */ }
+    request(...args: unknown[]) { return relayRequestMock(...args) }
+    close() { /* nothing to tear down */ }
+  },
+}))
 
-import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning } from './device.svelte.js'
+import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, connectRelay, disconnect } from './device.svelte.js'
 import { FrameType } from './frame.js'
 import type { MasterInfo } from './types.js'
 
@@ -90,6 +99,7 @@ beforeEach(() => {
   placeholderMock.mockReset()
   buildMetaMock.mockReset()
   serialMock.sendAndReceive.mockReset()
+  relayRequestMock.mockReset()
 })
 
 describe('transport guards', () => {
@@ -103,8 +113,8 @@ describe('transport guards', () => {
     expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
   })
 
-  it('syncIdentityMeta is a quiet no-op off-serial', async () => {
-    device.mode = 'relay'
+  it('syncIdentityMeta is a quiet no-op on unsupported transports', async () => {
+    device.mode = 'http'
     device.connected = true
     device.masters = [freshMaster().master]
     expect(await syncIdentityMeta()).toBeNull()
@@ -195,6 +205,32 @@ describe('identity card auto-sync on serial master list', () => {
     mockResponsiveDevice()
     emitMasterList([master])
     await vi.waitFor(() => expect(metaPushes()).toBe(1))
+  })
+
+  it('auto-syncs over the relay once get_status resolves the master', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'erin', picture: 'https://x/e.jpg' }]]))
+    loadAvatarMock.mockResolvedValue(FAKE_AVATAR)
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await vi.waitFor(() => {
+        expect(relayRequestMock).toHaveBeenCalledWith(
+          'set_identity_meta',
+          expect.objectContaining({ name: 'erin', w: 2, h: 2, avatar_b64: expect.any(String) }),
+          30_000,
+        )
+      })
+    } finally {
+      await disconnect() // clears the 4s status poll
+    }
   })
 
   it('never auto-syncs from an http master list', async () => {
