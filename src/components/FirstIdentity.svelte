@@ -5,7 +5,7 @@
   // OWN screen — the phrase is never generated or displayed in the browser. We
   // only ask it to generate and then show the resulting public npub. Power users
   // with an existing key take the "I already have one" door to Advanced › Provision.
-  import { device, connectRelay, generateIdentity, restoreIdentity } from '../lib/device.svelte.js'
+  import { device, connectRelay, generateIdentity, restoreIdentity, getFirmwareVersion } from '../lib/device.svelte.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { navigate } from '../lib/route.svelte.js'
   import {
@@ -30,6 +30,12 @@
   let npub = $state('')
   let status = $state<'idle' | 'generating' | 'restoring' | 'error'>('idle')
   let error = $state('')
+
+  // The connected board (from FIRMWARE_INFO), so the on-device entry
+  // instructions match its buttons. The T-Display has two buttons and a
+  // different restore vocabulary; every other board is single-button.
+  let deviceBoard = $state('')
+  const twoButton = $derived(deviceBoard === 'tdisplay')
 
   // The just-provisioned wifi device's relays, if any — drives the handoff at the end.
   let handoff = $state<{ hex: string; relays: string[] } | null>(null)
@@ -89,6 +95,9 @@
     if (!nameOk(name)) return
     status = 'restoring'
     error = ''
+    // Learn the board before the (blocking) restore so the on-device entry
+    // instructions match its buttons.
+    try { deviceBoard = (await getFirmwareVersion())?.board ?? '' } catch { deviceBoard = '' }
     step = 'restoring'
     try {
       // The owner enters their 12 words on the device's screen; only the
@@ -204,15 +213,27 @@
       Your signer is now asking for your recovery phrase <strong>on its own screen</strong>. Enter each
       word there with the button — nothing is typed on this computer.
     </p>
-    <ul class="fi-gestures">
-      <li><strong>Tap</strong> the button to change the highlighted letter</li>
-      <li><strong>Double-tap</strong> to choose it (the word fills in once it's certain)</li>
-      <li><strong>Hold</strong> to delete the last letter or step back a word</li>
-    </ul>
-    <p class="fi-lede">
-      After the 12th word, the device shows the account it worked out — check it's the right one,
-      then <strong>hold the button to save</strong>. We'll confirm here when it's done.
-    </p>
+    {#if twoButton}
+      <ul class="fi-gestures">
+        <li><strong>A</strong> and <strong>B</strong> move through the letters</li>
+        <li><strong>Hold B</strong> to pick the highlighted letter (the word fills in once it's certain)</li>
+        <li><strong>Hold A</strong> to delete the last letter, or step back a word</li>
+      </ul>
+      <p class="fi-lede">
+        After the 12th word, the device shows the account it worked out — check it's the right one,
+        then <strong>hold B to save</strong>. We'll confirm here when it's done.
+      </p>
+    {:else}
+      <ul class="fi-gestures">
+        <li><strong>Tap</strong> the button to change the highlighted letter</li>
+        <li><strong>Double-tap</strong> to choose it (the word fills in once it's certain)</li>
+        <li><strong>Hold</strong> to delete the last letter or step back a word</li>
+      </ul>
+      <p class="fi-lede">
+        After the 12th word, the device shows the account it worked out — check it's the right one,
+        then <strong>hold the button to save</strong>. We'll confirm here when it's done.
+      </p>
+    {/if}
     <p class="fi-working">⏳ Waiting for you to finish on the device…</p>
 
   {:else if step === 'done'}
