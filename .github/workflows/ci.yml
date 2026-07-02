@@ -45,6 +45,21 @@ jobs:
           [ "$fail" -eq 0 ] && echo "OK: banned identity absent from content and commits ($range)"
           exit "$fail"
 
+  # Supply-chain gate: fail on a high/critical advisory in anything that ships
+  # to the browser (production deps). Dev-only tooling is excluded so a vite or
+  # playwright advisory that never reaches users can't red the build — the
+  # dependabot auto-merge flow keeps those current instead.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+
   test:
     runs-on: ubuntu-latest
     steps:
