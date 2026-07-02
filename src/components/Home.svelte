@@ -133,8 +133,8 @@
       <span class="checking-spin"></span>
       <div>
         <h2 class="checking-title">Checking your signer…</h2>
-        <p class="checking-body">Talking to the device over the cable. If it was just reset,
-          it may take a few seconds to start up.</p>
+        <p class="checking-body">Talking to the device over the cable. A WiFi signer can take
+          up to a minute after power-on before it answers — hang tight, this finishes on its own.</p>
       </div>
     </section>
 
@@ -146,9 +146,9 @@
     <section class="wifi-usb">
       <h2 class="wifi-usb-title">This signer isn't answering over the cable</h2>
       <p class="wifi-usb-body">
-        It connected, but nothing came back. If it was just plugged in or reset, give it a few
-        seconds and retry. If it's a WiFi signer on older firmware, it ignores the cable while
-        serving WiFi — manage it over the network instead.
+        It connected, but nothing came back after a minute of trying. If it's a WiFi signer on
+        older firmware, it ignores the cable while serving WiFi — manage it over the network
+        instead. Otherwise, check the cable carries data (not just power) and retry.
       </p>
 
       <button class="btn-reconnect-inline" onclick={reconnect} disabled={reconnecting}>

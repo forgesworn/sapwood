@@ -251,3 +251,41 @@ describe('reconnect is user-gesture safe', () => {
     expect(order).toEqual(['requestPort', 'close-old'])
   })
 })
+
+describe('write pacing for large frames', () => {
+  // UART boards have a 4KB driver ring the firmware may drain slowly (e.g.
+  // between relay reads in wifi mode). Large frames (avatar ~8KB, OTA 4KB)
+  // must go out in 64-byte slices, mirroring heartwood-bridge's paced writes.
+
+  it('sends a small frame in a single write', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    const data = new Uint8Array(512).fill(7)
+    await t.write(data)
+    expect(fake.writes.length).toBe(1)
+    expect(fake.writes[0]!.length).toBe(512)
+  })
+
+  it('slices a large frame into 64-byte chunks that reassemble byte-for-byte', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    const data = new Uint8Array(700)
+    for (let i = 0; i < data.length; i++) data[i] = i % 251
+    await t.write(data)
+
+    expect(fake.writes.length).toBe(Math.ceil(700 / 64))
+    for (const w of fake.writes) expect(w.length).toBeLessThanOrEqual(64)
+    const rejoined = new Uint8Array(700)
+    let o = 0
+    for (const w of fake.writes) { rejoined.set(w, o); o += w.length }
+    expect(o).toBe(700)
+    expect(rejoined).toEqual(data)
+  })
+
+  it('a stalled paced write still times out and aborts', async () => {
+    const fake = makeFakePort({ hang: true })
+    const t = transportWith(fake.port)
+    await expect(t.write(new Uint8Array(4096), 30)).rejects.toThrow(/isn't responding|RESET/i)
+    expect(fake.aborted).toBe(true)
+  })
+})

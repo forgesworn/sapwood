@@ -17,6 +17,13 @@ export type SerialEvent =
 
 export type SerialListener = (event: SerialEvent) => void
 
+// Write pacing for frames that could overrun a UART board's 4KB driver ring
+// (identity-card avatars ~8KB, OTA chunks 4KB). Values mirror
+// heartwood-bridge's paced serial writes, proven on the same boards.
+const PACE_THRESHOLD = 512
+const PACE_CHUNK = 64
+const PACE_GAP_MS = 6
+
 /** Web Serial connection to the ESP32. */
 export class SerialTransport {
   private port: SerialPort | null = null
@@ -177,7 +184,22 @@ export class SerialTransport {
     }, timeoutMs)
     let writeErr: unknown
     try {
-      await writer.write(data)
+      if (data.length <= PACE_THRESHOLD) {
+        await writer.write(data)
+      } else {
+        // Pace large frames: the UART-bridge boards (T-Display, Heltec V3,
+        // ESP8266) have a 4KB driver ring the firmware may be slow to drain
+        // (e.g. between relay reads in wifi mode), so a burst bigger than the
+        // ring silently loses bytes and the frame dies on CRC. 64-byte slices
+        // with a breather between them — the same discipline as
+        // heartwood-bridge's paced serial writes.
+        for (let o = 0; o < data.length; o += PACE_CHUNK) {
+          await writer.write(data.subarray(o, Math.min(o + PACE_CHUNK, data.length)))
+          if (o + PACE_CHUNK < data.length) {
+            await new Promise((r) => setTimeout(r, PACE_GAP_MS))
+          }
+        }
+      }
     } catch (e) {
       writeErr = e
     } finally {
