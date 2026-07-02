@@ -512,11 +512,14 @@ export class HttpTransport {
     return res.json()
   }
 
-  async otaUpload(firmware: ArrayBuffer): Promise<void> {
+  async otaUpload(firmware: ArrayBuffer, signatureHex?: string): Promise<void> {
     const res = await fetch(`${this.baseUrl}/api/device/ota`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/octet-stream',
+        // The release signature rides a header; the daemon forwards it to the
+        // device in OTA_BEGIN (signature-enforcing firmware refuses without it).
+        ...(signatureHex ? { 'X-Firmware-Signature': signatureHex } : {}),
         ...this.authHeaders(),
       },
       body: firmware,

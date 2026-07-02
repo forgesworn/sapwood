@@ -102,4 +102,63 @@ describe('streamOta', () => {
     await expect(streamOta(transport, bytes(4096), { onPhase })).rejects.toThrow()
     expect(onPhase).toHaveBeenCalledWith('verifying')
   })
+
+  it('appends the 64-byte release signature to OTA_BEGIN', async () => {
+    const data = bytes(4096)
+    const signature = new Uint8Array(64).fill(0xab)
+    const { transport, calls } = scripted([OtaStatus.READY, OtaStatus.CHUNK_OK, OtaStatus.VERIFIED])
+
+    await streamOta(transport, data, {}, signature)
+
+    const begin = payloadOf(calls[0]!)
+    expect(begin.length).toBe(4 + 32 + 64)
+    expect(Array.from(begin.subarray(36))).toEqual(Array.from(signature))
+  })
+
+  it('falls back to the legacy unsigned BEGIN when old firmware rejects the signed form', async () => {
+    const data = bytes(4096)
+    const signature = new Uint8Array(64).fill(0xab)
+    // Old firmware: signed BEGIN → ERR_SIZE (bad payload length); legacy BEGIN → READY.
+    const { transport, calls } = scripted([
+      OtaStatus.ERR_SIZE,
+      OtaStatus.READY,
+      OtaStatus.CHUNK_OK,
+      OtaStatus.VERIFIED,
+    ])
+
+    await streamOta(transport, data, {}, signature)
+
+    expect(frameType(calls[0]!)).toBe(FrameType.OTA_BEGIN)
+    expect(payloadOf(calls[0]!).length).toBe(100)
+    expect(frameType(calls[1]!)).toBe(FrameType.OTA_BEGIN)
+    expect(payloadOf(calls[1]!).length).toBe(36)
+    expect(frameType(calls.at(-1)!)).toBe(FrameType.OTA_FINISH)
+  })
+
+  it('does not retry unsigned when no signature was provided', async () => {
+    const { transport, calls } = scripted([OtaStatus.ERR_SIZE])
+    await expect(streamOta(transport, bytes(4096))).rejects.toThrow(/too big/i)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('explains a signature rejection in plain language', async () => {
+    const signature = new Uint8Array(64).fill(0xab)
+    const { transport } = scripted([OtaStatus.ERR_SIG])
+    await expect(streamOta(transport, bytes(4096), {}, signature))
+      .rejects.toThrow(/genuine release/i)
+  })
+
+  it('surfaces a signature failure at verification as kept-current-firmware', async () => {
+    const signature = new Uint8Array(64).fill(0xab)
+    const { transport } = scripted([OtaStatus.READY, OtaStatus.CHUNK_OK, OtaStatus.ERR_SIG])
+    await expect(streamOta(transport, bytes(4096), {}, signature))
+      .rejects.toThrow(/kept its current firmware/i)
+  })
+
+  it('rejects a malformed signature before touching the device', async () => {
+    const { transport, calls } = scripted([OtaStatus.READY])
+    await expect(streamOta(transport, bytes(4096), {}, new Uint8Array(32)))
+      .rejects.toThrow(/malformed/i)
+    expect(calls).toHaveLength(0)
+  })
 })

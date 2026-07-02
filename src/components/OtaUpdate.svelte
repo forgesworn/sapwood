@@ -11,8 +11,16 @@
   import { device, serialTransport, httpTransport, getFirmwareVersion } from '../lib/device.svelte.js'
   import { streamOta } from '../lib/ota.js'
 
-  interface BoardAsset { app: string; sha256: string; bytes: number; ota?: boolean }
+  interface BoardAsset { app: string; sha256: string; bytes: number; ota?: boolean; signature?: string }
   interface Manifest { version: string; builtAt?: string; boards: Record<string, BoardAsset> }
+
+  /** 128-hex release signature → 64 bytes; undefined for pre-signature manifests. */
+  function parseSignature(hex: string | undefined): Uint8Array | undefined {
+    if (!hex || !/^[0-9a-fA-F]{128}$/.test(hex)) return undefined
+    const sig = new Uint8Array(64)
+    for (let i = 0; i < 64; i++) sig[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+    return sig
+  }
 
   // Only OTA-capable boards need an app path here. The factory-only 4 MB boards
   // (T-Display/C6) and the esp8266 carry ota:false in the manifest and update by
@@ -20,6 +28,7 @@
   const BOARD_DIR: Record<string, string> = { 'heltec-v4': 'v4', 'heltec-v3': 'v3' }
 
   let file = $state<File | null>(null)
+  let sigFile = $state<File | null>(null)
   let progress = $state(0)
   let status = $state<'idle' | 'waiting' | 'uploading' | 'verifying' | 'done' | 'error'>('idle')
   let message = $state('')
@@ -60,7 +69,7 @@
   const otaCapable = $derived(!!boardMeta && boardMeta.ota !== false)
   const appUrl = $derived(otaCapable && boardKey && BOARD_DIR[boardKey] ? `/firmware/${BOARD_DIR[boardKey]}/app.bin` : null)
 
-  async function runUpdate(data: Uint8Array) {
+  async function runUpdate(data: Uint8Array, signature?: Uint8Array) {
     progress = 0
     try {
       if (device.mode === 'http') {
@@ -68,7 +77,10 @@
         message = 'On your signer, hold its button for 2 seconds to approve the update.'
         status = 'uploading'
         message = 'Sending the firmware via the bridge…'
-        await httpTransport.otaUpload(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer)
+        const sigHex = signature
+          ? Array.from(signature, (b) => b.toString(16).padStart(2, '0')).join('')
+          : undefined
+        await httpTransport.otaUpload(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer, sigHex)
         status = 'done'
         message = 'Done — your signer is restarting with the new firmware.'
         return
@@ -83,7 +95,7 @@
           }
         },
         onProgress: (pct) => { progress = pct; message = `Sending… ${pct}%` },
-      })
+      }, signature)
       status = 'done'
       message = 'Done — your signer is restarting with the new firmware.'
       running = latest // optimistic: it rebooted into the version we just sent
@@ -100,7 +112,7 @@
       message = 'Fetching the firmware…'
       const res = await fetch(appUrl, { cache: 'no-store' })
       if (!res.ok) throw new Error('Could not load the bundled firmware.')
-      await runUpdate(new Uint8Array(await res.arrayBuffer()))
+      await runUpdate(new Uint8Array(await res.arrayBuffer()), parseSignature(boardMeta?.signature))
     } catch (e) {
       status = 'error'
       message = e instanceof Error ? e.message : 'The update could not be completed.'
@@ -115,9 +127,26 @@
     progress = 0
   }
 
+  function handleSigFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement
+    sigFile = input.files?.[0] ?? null
+  }
+
   async function updateFromFile() {
     if (!file || busy) return
-    await runUpdate(new Uint8Array(await file.arrayBuffer()))
+    // A .sig file holds the 128-hex signature (comment lines allowed).
+    let signature: Uint8Array | undefined
+    if (sigFile) {
+      const text = await sigFile.text()
+      const hex = text.split('\n').map((l) => l.trim()).filter((l) => !l.startsWith('#')).join('')
+      signature = parseSignature(hex)
+      if (!signature) {
+        status = 'error'
+        message = "That signature file doesn't look right — expected 128 hex characters."
+        return
+      }
+    }
+    await runUpdate(new Uint8Array(await file.arrayBuffer()), signature)
   }
 
   function formatSize(bytes: number): string {
@@ -188,6 +217,10 @@
         {file ? `${file.name} · ${formatSize(file.size)}` : 'Choose a firmware .bin file'}
       </label>
       {#if file}
+        <label class="file-picker" class:has-file={!!sigFile}>
+          <input type="file" accept=".sig" onchange={handleSigFileSelect} disabled={busy} />
+          {sigFile ? sigFile.name : 'Signature (.sig) — newer firmware requires it'}
+        </label>
         <button class="btn primary" disabled={busy} onclick={updateFromFile}>
           {busy ? 'Updating…' : 'Update over USB →'}
         </button>

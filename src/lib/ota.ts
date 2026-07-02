@@ -1,12 +1,16 @@
 // Over-the-air firmware streaming over the frame protocol, factored out of the
 // UI so the (untested) transfer loop can be exercised against a fake transport.
 //
-// Flow (Web Serial): OTA_BEGIN [size_be32][sha256_32] → device clears the spare
-// OTA slot and replies OTA_STATUS=READY (after a physical button-hold approval);
-// then OTA_CHUNK [offset_be32][bytes] per 4 KB, each acked CHUNK_OK; then
-// OTA_FINISH, which re-hashes the written image and replies VERIFIED (or an
-// error and an automatic rollback). The device never accepts OTA over the
-// relay — this is USB-only by design.
+// Flow (Web Serial): OTA_BEGIN [size_be32][sha256_32][signature_64] → device
+// checks the ed25519 release signature, clears the spare OTA slot and replies
+// OTA_STATUS=READY (after a physical button-hold approval); then OTA_CHUNK
+// [offset_be32][bytes] per 4 KB, each acked CHUNK_OK; then OTA_FINISH, which
+// re-hashes the written image, re-checks the signature over the computed
+// digest, and replies VERIFIED (or an error and an automatic rollback).
+// Pre-signature firmware only understands the 36-byte unsigned OTA_BEGIN and
+// answers the signed form with ERR_SIZE — streamOta falls back to the legacy
+// form on that reply, which is how a device gets updated INTO enforcement.
+// The device never accepts OTA over the relay — this is USB-only by design.
 
 import { FrameType, buildFrame, type FrameTypeValue } from './frame.js'
 
@@ -19,6 +23,7 @@ export const OtaStatus = {
   ERR_SIZE: 0x11,
   ERR_WRITE: 0x12,
   ERR_NOT_STARTED: 0x13,
+  ERR_SIG: 0x14,
 } as const
 
 /** Bytes per OTA_CHUNK. Matches the device's receive buffer expectations. */
@@ -62,6 +67,8 @@ function beginError(status: number | undefined): string {
       return "That firmware is too big for the device's update slot."
     case OtaStatus.ERR_WRITE:
       return "The device couldn't prepare its update slot. Try again."
+    case OtaStatus.ERR_SIG:
+      return "The device couldn't confirm this firmware is a genuine release, so it refused it. Update using the official firmware bundled with this app."
     default:
       return 'The device declined the update. Did you hold its button to approve?'
   }
@@ -74,6 +81,8 @@ function verifyError(status: number | undefined): string {
       return "The uploaded firmware didn't match its checksum, so the device kept its current firmware. Try the update again."
     case OtaStatus.ERR_NOT_STARTED:
       return 'The device lost track of the update. Reconnect and try again.'
+    case OtaStatus.ERR_SIG:
+      return "The device couldn't confirm the firmware is a genuine release, so it kept its current firmware."
     default:
       return 'The device could not verify the firmware and rolled back to its current version.'
   }
@@ -83,12 +92,22 @@ function verifyError(status: number | undefined): string {
  * Stream `data` to a USB-connected device and verify it. Resolves on a verified
  * image (the device then reboots into it); throws [`OtaError`] otherwise. The
  * begin step waits up to a minute for the owner's physical button approval.
+ *
+ * `signature` is the image's 64-byte ed25519 release signature (from the
+ * release manifest). Signature-enforcing firmware refuses the update without
+ * it; pre-signature firmware answers the signed OTA_BEGIN with ERR_SIZE, on
+ * which this falls back to the legacy unsigned form automatically.
  */
 export async function streamOta(
   transport: OtaTransport,
   data: Uint8Array,
   cb: OtaCallbacks = {},
+  signature?: Uint8Array,
 ): Promise<void> {
+  if (signature && signature.length !== 64) {
+    throw new OtaError('The firmware signature is malformed (expected 64 bytes).')
+  }
+
   // Hash a freshly allocated copy so the digest input is definitely an
   // ArrayBuffer-backed view (a subarray may be backed by a SharedArrayBuffer).
   const owned = new Uint8Array(data.length)
@@ -99,14 +118,29 @@ export async function streamOta(
   // OTA_BEGIN — gated on the device by a 2-second button hold, so allow a
   // generous window for the owner to approve.
   cb.onPhase?.('waiting')
-  const begin = new Uint8Array(4 + 32)
-  begin.set(be32(data.length), 0)
-  begin.set(hash, 4)
-  const beginResp = await transport.sendAndReceive(
-    buildFrame(FrameType.OTA_BEGIN, begin),
+  const beginPayload = (sig?: Uint8Array): Uint8Array => {
+    const p = new Uint8Array(4 + 32 + (sig ? 64 : 0))
+    p.set(be32(data.length), 0)
+    p.set(hash, 4)
+    if (sig) p.set(sig, 36)
+    return p
+  }
+  let beginResp = await transport.sendAndReceive(
+    buildFrame(FrameType.OTA_BEGIN, beginPayload(signature)),
     [FrameType.OTA_STATUS],
     60_000,
   )
+  if (signature && beginResp.payload[0] === OtaStatus.ERR_SIZE) {
+    // Pre-signature firmware rejects the 100-byte signed BEGIN as a bad
+    // payload length (before asking for approval). Retry the legacy unsigned
+    // form — that firmware can't verify signatures anyway, and this path is
+    // exactly how a device gets updated INTO signature enforcement.
+    beginResp = await transport.sendAndReceive(
+      buildFrame(FrameType.OTA_BEGIN, beginPayload()),
+      [FrameType.OTA_STATUS],
+      60_000,
+    )
+  }
   if (beginResp.payload[0] !== OtaStatus.READY) {
     throw new OtaError(beginError(beginResp.payload[0]), beginResp.payload[0])
   }

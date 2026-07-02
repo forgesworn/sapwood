@@ -117,6 +117,10 @@ try {
     }
 
     served.boards[board] = { app: 'app.bin', sha256: meta.sha256, bytes: meta.bytes, ota: meta.ota ?? false }
+    // ed25519 release signature (128 hex) — the update UI forwards it in
+    // OTA_BEGIN so signature-enforcing firmware will accept the image.
+    // Absent on pre-signature releases.
+    if (meta.signature) served.boards[board].signature = meta.signature
     synced.push(`${board} → public/firmware/${dir}/{${lines.join(', ')}}`)
   }
 
