@@ -206,9 +206,31 @@ export async function syncIdentityMeta(): Promise<string | null> {
     avatar = placeholderAvatar(name) // image host refused — name + disc beats nothing
   }
   const frame = buildSetIdentityMeta(pubHex, name, avatar)
-  const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 30_000)
-  if (reply.type === FrameType.NACK) throw new Error('device rejected identity metadata')
-  return name
+
+  // A wifi-mode signer only drains USB in windows (fast polls while wifi
+  // retries, ~1s polls while its relay session is idle, nothing in between).
+  // An 8KB frame launched into a dead window overflows the 4KB UART ring and
+  // dies, so gate each attempt on a fresh FIRMWARE_INFO round-trip — a reply
+  // means the signer polled the cable within the last instant, and the paced
+  // frame sent right behind it lands inside the same window.
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const ping = await serialTransport.sendAndReceive(
+        buildFirmwareInfo(),
+        [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
+        6_000,
+      )
+      if (ping.type === FrameType.NACK) throw new Error('device rejected the version query')
+      const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
+      if (reply.type === FrameType.NACK) throw new Error('device rejected identity metadata')
+      return name
+    } catch (e) {
+      lastErr = e // dead window or lost frame — wait out the blackout and retry
+      await new Promise((r) => setTimeout(r, 2_000))
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('signer did not accept the identity card')
 }
 
 // One auto-push per npub per page load: reconnects within a session don't

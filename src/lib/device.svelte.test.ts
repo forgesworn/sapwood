@@ -42,6 +42,23 @@ import type { MasterInfo } from './types.js'
 const FAKE_AVATAR = { w: 2, h: 2, bytes: new Uint8Array(8) }
 const FAKE_FRAME = new Uint8Array([0xaa])
 const ACK = { type: FrameType.ACK, payload: new Uint8Array() }
+const FW_RESP = {
+  type: FrameType.FIRMWARE_INFO_RESPONSE,
+  payload: new TextEncoder().encode('{"version":"0.9.10","board":"tdisplay"}'),
+}
+
+/** Answer the pre-push FIRMWARE_INFO ping and ACK everything else. */
+function mockResponsiveDevice() {
+  serialMock.sendAndReceive.mockImplementation(async (_frame: Uint8Array, expect: number[]) => {
+    if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return FW_RESP
+    return ACK
+  })
+}
+
+/** How many times the identity-meta frame itself was pushed (ignores pings). */
+function metaPushes(): number {
+  return serialMock.sendAndReceive.mock.calls.filter((c) => c[0] === FAKE_FRAME).length
+}
 
 // Distinct pubkey per test: the auto-sync dedupe set is per npub and survives
 // across tests in this module (it is module state, deliberately unexported).
@@ -115,17 +132,17 @@ describe('identity card auto-sync on serial master list', () => {
     resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'alice', picture: 'https://x/a.jpg' }]]))
     loadAvatarMock.mockResolvedValue(FAKE_AVATAR)
     buildMetaMock.mockReturnValue(FAKE_FRAME)
-    serialMock.sendAndReceive.mockResolvedValue(ACK)
+    mockResponsiveDevice()
 
     emitMasterList([master])
-    await vi.waitFor(() => expect(serialMock.sendAndReceive).toHaveBeenCalledWith(FAKE_FRAME, [FrameType.ACK, FrameType.NACK], 30_000))
+    await vi.waitFor(() => expect(serialMock.sendAndReceive).toHaveBeenCalledWith(FAKE_FRAME, [FrameType.ACK, FrameType.NACK], 20_000))
     expect(device.masters).toEqual([master])
     expect(device.logs.join('\n')).toContain('identity card synced to signer: alice')
 
     // A second list refresh must not rewrite the signer's NVS.
     emitMasterList([master])
     await new Promise((r) => setTimeout(r, 0))
-    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
+    expect(metaPushes()).toBe(1)
   })
 
   it('falls back to the placeholder disc when the profile has no picture', async () => {
@@ -135,10 +152,10 @@ describe('identity card auto-sync on serial master list', () => {
     resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'bob' }]]))
     placeholderMock.mockReturnValue(FAKE_AVATAR)
     buildMetaMock.mockReturnValue(FAKE_FRAME)
-    serialMock.sendAndReceive.mockResolvedValue(ACK)
+    mockResponsiveDevice()
 
     emitMasterList([master])
-    await vi.waitFor(() => expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(metaPushes()).toBe(1))
     expect(placeholderMock).toHaveBeenCalledWith('bob')
     expect(loadAvatarMock).not.toHaveBeenCalled()
   })
@@ -151,10 +168,10 @@ describe('identity card auto-sync on serial master list', () => {
     loadAvatarMock.mockRejectedValue(new Error('tainted canvas'))
     placeholderMock.mockReturnValue(FAKE_AVATAR)
     buildMetaMock.mockReturnValue(FAKE_FRAME)
-    serialMock.sendAndReceive.mockResolvedValue(ACK)
+    mockResponsiveDevice()
 
     emitMasterList([master])
-    await vi.waitFor(() => expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(metaPushes()).toBe(1))
     expect(placeholderMock).toHaveBeenCalledWith('carol')
   })
 
@@ -175,9 +192,9 @@ describe('identity card auto-sync on serial master list', () => {
     resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'dave', picture: 'https://x/d.jpg' }]]))
     loadAvatarMock.mockResolvedValue(FAKE_AVATAR)
     buildMetaMock.mockReturnValue(FAKE_FRAME)
-    serialMock.sendAndReceive.mockResolvedValue(ACK)
+    mockResponsiveDevice()
     emitMasterList([master])
-    await vi.waitFor(() => expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(metaPushes()).toBe(1))
   })
 
   it('never auto-syncs from an http master list', async () => {
