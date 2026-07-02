@@ -91,13 +91,19 @@
       profileRelayError = 'Enter a wss:// relay URL.'
       return
     }
-    if (profileRelays.includes(url)) {
+    if (profileRelays.some((r) => r.url === url)) {
       profileRelayError = 'That relay is already listed.'
       return
     }
-    profileRelays = [...profileRelays, url]
+    // New relays default to read-only; writing is an explicit opt-in per relay.
+    profileRelays = [...profileRelays, { url, write: false }]
     newProfileRelay = ''
     profileRelayError = null
+    persistProfileRelays()
+  }
+
+  function toggleProfileRelayWrite(index: number) {
+    profileRelays = profileRelays.map((r, i) => (i === index ? { ...r, write: !r.write } : r))
     persistProfileRelays()
   }
 
@@ -310,11 +316,17 @@
   {/if}
 
   <h2>Profile Relays</h2>
-  <p class="info">Where client names are looked up. Sapwood reads each client's kind-0 profile from these relays to show a name beside its pubkey. Read-only — nothing is published here.</p>
+  <p class="info">Where client names are looked up. Sapwood reads each client's kind-0 profile from all of these relays; any profile it finds is re-published to the relays marked <strong>read + write</strong> (normally just the project relay), so it resolves from there next time. Read-only relays are never written to.</p>
   <div class="relay-list">
-    {#each profileRelays as relay, i (relay)}
+    {#each profileRelays as relay, i (relay.url)}
       <div class="relay-row">
-        <span class="mono relay-url">{relay}</span>
+        <span class="mono relay-url">{relay.url}</span>
+        <button
+          class="btn small mode-toggle"
+          class:rw={relay.write}
+          title={relay.write ? 'Profiles found elsewhere are re-published here. Click to make read-only.' : 'Read-only. Click to also write found profiles here.'}
+          onclick={() => toggleProfileRelayWrite(i)}
+        >{relay.write ? 'read + write' : 'read-only'}</button>
         <button class="btn small" disabled={profileRelays.length <= 1} onclick={() => removeProfileRelay(i)}>Remove</button>
       </div>
     {/each}
@@ -427,6 +439,8 @@
   .relay-list { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
   .relay-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
   .relay-url { flex: 1; }
+  .mode-toggle { color: #777; min-width: 6.5rem; }
+  .mode-toggle.rw { color: #4a9; border-color: #4a9; }
 
   .info { font-size: 0.8rem; color: #555; margin: 0 0 0.5rem; }
   .hint { font-size: 0.8rem; color: #555; margin-top: 1.5rem; }

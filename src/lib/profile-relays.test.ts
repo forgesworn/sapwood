@@ -33,20 +33,52 @@ describe('getProfileRelays / setProfileRelays', () => {
     expect(getProfileRelays()).toEqual(DEFAULT_PROFILE_RELAYS)
   })
 
-  it('round-trips a stored list', () => {
-    setProfileRelays(['wss://a.example', 'wss://b.example'])
-    expect(getProfileRelays()).toEqual(['wss://a.example', 'wss://b.example'])
+  it('defaults to the project relay as the only write target', () => {
+    const writes = DEFAULT_PROFILE_RELAYS.filter((r) => r.write)
+    expect(writes).toEqual([{ url: 'wss://relay.trotters.cc', write: true }])
+  })
+
+  it('round-trips a stored list with read/write flags', () => {
+    setProfileRelays([
+      { url: 'wss://a.example', write: true },
+      { url: 'wss://b.example', write: false },
+    ])
+    expect(getProfileRelays()).toEqual([
+      { url: 'wss://a.example', write: true },
+      { url: 'wss://b.example', write: false },
+    ])
   })
 
   it('trims, drops invalid entries, and de-duplicates on save', () => {
-    setProfileRelays(['  wss://a.example  ', 'http://nope', 'wss://a.example', 'wss://b.example'])
-    expect(getProfileRelays()).toEqual(['wss://a.example', 'wss://b.example'])
+    setProfileRelays([
+      { url: '  wss://a.example  ', write: false },
+      { url: 'http://nope', write: true },
+      { url: 'wss://a.example', write: true },
+      { url: 'wss://b.example', write: false },
+    ])
+    expect(getProfileRelays()).toEqual([
+      { url: 'wss://a.example', write: false },
+      { url: 'wss://b.example', write: false },
+    ])
+  })
+
+  it('migrates the legacy string[] shape: project relay writes, the rest read', () => {
+    localStorage.setItem(
+      'heartwood.profileRelays',
+      JSON.stringify(['wss://relay.trotters.cc', 'wss://purplepag.es']),
+    )
+    expect(getProfileRelays()).toEqual([
+      { url: 'wss://relay.trotters.cc', write: true },
+      { url: 'wss://purplepag.es', write: false },
+    ])
   })
 
   it('falls back to the default if the stored value is unusable', () => {
     localStorage.setItem('heartwood.profileRelays', '["http://nope","garbage"]')
     expect(getProfileRelays()).toEqual(DEFAULT_PROFILE_RELAYS)
     localStorage.setItem('heartwood.profileRelays', 'not json')
+    expect(getProfileRelays()).toEqual(DEFAULT_PROFILE_RELAYS)
+    localStorage.setItem('heartwood.profileRelays', '{"url":"wss://a.example"}')
     expect(getProfileRelays()).toEqual(DEFAULT_PROFILE_RELAYS)
   })
 })
