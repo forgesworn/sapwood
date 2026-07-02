@@ -27,10 +27,11 @@ test('lands on the guided Home and reveals the Advanced cockpit', async ({ page 
   await expect(page.getByText('Your signer is live')).toBeVisible()
   await expect(heroButton(page)).toBeVisible()
 
-  // Advanced reveals the full cockpit; Home is hidden.
+  // Advanced reveals the full console; Home is hidden.
   await advancedToggle(page).click()
-  await expect(page.getByRole('button', { name: 'Masters' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Clients' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Identity', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Device', exact: true })).toBeVisible()
   await expect(heroButton(page)).toBeHidden()
 
   // Back to Home.
@@ -99,7 +100,7 @@ test.describe('mobile', () => {
     expect(homeOverflow).toBeLessThanOrEqual(1)
 
     await advancedToggle(page).click()
-    await expect(page.getByRole('button', { name: 'Masters' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Identity', exact: true })).toBeVisible()
     const cockpitOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     )

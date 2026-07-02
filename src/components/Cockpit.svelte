@@ -1,74 +1,41 @@
 <script lang="ts">
-  // The advanced cockpit — the full 9-tab power surface, one tap from Home.
-  // Extracted verbatim from App.svelte so the guided Home can sit in front of it.
-  import MasterList from './MasterList.svelte'
-  import ClientList from './ClientList.svelte'
-  import RelayClients from './RelayClients.svelte'
-  import { device } from '../lib/device.svelte.js'
-  import Provision from './Provision.svelte'
-  import DangerZone from './DangerZone.svelte'
-  import OtaUpdate from './OtaUpdate.svelte'
+  // The advanced console — four plain-English sections, one tap from Home:
+  //   Apps      — manage what's connected and what it may sign
+  //   Identity  — identities on the signer, operator key, profile
+  //   Device    — connection, network, firmware, security, danger zone
+  //   Logs      — live output from the board
+  import AppsPanel from './AppsPanel.svelte'
+  import IdentityPanel from './IdentityPanel.svelte'
+  import DevicePanel from './DevicePanel.svelte'
   import LogMonitor from './LogMonitor.svelte'
-  import Settings from './Settings.svelte'
-  import Connectivity from './Connectivity.svelte'
-  import Flash from './Flash.svelte'
 
-  let currentTab = $state<'flash' | 'masters' | 'clients' | 'provision' | 'connectivity' | 'firmware' | 'logs' | 'settings' | 'danger'>('masters')
+  let currentTab = $state<'apps' | 'identity' | 'device' | 'logs'>('apps')
 </script>
 
 <nav>
-  <button class:active={currentTab === 'flash'} onclick={() => currentTab = 'flash'}>
-    Flash
+  <button class:active={currentTab === 'apps'} onclick={() => currentTab = 'apps'}>
+    Apps
   </button>
-  <button class:active={currentTab === 'masters'} onclick={() => currentTab = 'masters'}>
-    Masters
+  <button class:active={currentTab === 'identity'} onclick={() => currentTab = 'identity'}>
+    Identity
   </button>
-  <button class:active={currentTab === 'clients'} onclick={() => currentTab = 'clients'}>
-    Clients
-  </button>
-  <button class:active={currentTab === 'provision'} onclick={() => currentTab = 'provision'}>
-    Provision
-  </button>
-  <button class:active={currentTab === 'connectivity'} onclick={() => currentTab = 'connectivity'}>
-    Connectivity
-  </button>
-  <button class:active={currentTab === 'firmware'} onclick={() => currentTab = 'firmware'}>
-    Firmware
+  <button class:active={currentTab === 'device'} onclick={() => currentTab = 'device'}>
+    Device
   </button>
   <button class:active={currentTab === 'logs'} onclick={() => currentTab = 'logs'}>
     Logs
   </button>
-  <button class:active={currentTab === 'settings'} onclick={() => currentTab = 'settings'}>
-    Settings
-  </button>
-  <button class:active={currentTab === 'danger'} class="danger-tab" onclick={() => currentTab = 'danger'}>
-    Danger
-  </button>
 </nav>
 
 <section class="panel">
-  {#if currentTab === 'flash'}
-    <Flash />
-  {:else if currentTab === 'masters'}
-    <MasterList />
-  {:else if currentTab === 'clients'}
-    {#if device.mode === 'relay' || device.mode === 'serial'}
-      <RelayClients />
-    {:else}
-      <ClientList />
-    {/if}
-  {:else if currentTab === 'provision'}
-    <Provision />
-  {:else if currentTab === 'connectivity'}
-    <Connectivity />
-  {:else if currentTab === 'firmware'}
-    <OtaUpdate />
+  {#if currentTab === 'apps'}
+    <AppsPanel />
+  {:else if currentTab === 'identity'}
+    <IdentityPanel />
+  {:else if currentTab === 'device'}
+    <DevicePanel />
   {:else if currentTab === 'logs'}
     <LogMonitor />
-  {:else if currentTab === 'settings'}
-    <Settings />
-  {:else if currentTab === 'danger'}
-    <DangerZone />
   {/if}
 </section>
 
@@ -107,22 +74,16 @@
     border-bottom-color: var(--green);
   }
 
-  nav button.danger-tab.active {
-    border-bottom-color: var(--red);
-  }
-
   .panel {
     min-height: 400px;
     padding-top: 1.5rem;
   }
 
   /* Mobile-first: dock the tab bar to the bottom — the thumb zone — with
-     comfortable (44px+) touch targets. */
+     comfortable (44px+) touch targets. Four tabs fit without scrolling. */
   @media (max-width: 640px) {
     .panel { min-height: 0; padding-top: 1.25rem; }
 
-    /* Fixed bottom bar, still horizontally scrollable for all nine tabs. The
-       active marker moves to the top edge so it shows above the bar. */
     nav {
       position: fixed;
       left: 0; right: 0; bottom: 0;
@@ -133,9 +94,9 @@
       border-top: 2px solid var(--border);
       border-bottom: none;
       z-index: 20;
+      justify-content: space-around;
     }
     nav button { padding: 0.9rem 0.85rem; border-bottom: none; border-top: 3px solid transparent; }
     nav button.active { border-bottom-color: transparent; border-top-color: var(--green); }
-    nav button.danger-tab.active { border-bottom-color: transparent; border-top-color: var(--red); }
   }
 </style>

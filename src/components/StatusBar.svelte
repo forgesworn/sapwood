@@ -4,9 +4,9 @@
 
 {#if device.connected && device.masters.length > 0}
   <div class="status-bar">
-    <span class="stat">{device.masters.length} master{device.masters.length !== 1 ? 's' : ''}</span>
+    <span class="stat">{device.masters.length} identit{device.masters.length !== 1 ? 'ies' : 'y'}</span>
     <span class="dot"></span>
-    <span class="stat">{device.slots.length} client{device.slots.length !== 1 ? 's' : ''}</span>
+    <span class="stat">{device.slots.length} app{device.slots.length !== 1 ? 's' : ''}</span>
     {#if device.mode === 'http' && device.bridgeInfo}
       <span class="dot"></span>
       <span class="stat">{device.bridgeInfo.mode}</span>
