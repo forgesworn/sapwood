@@ -174,3 +174,26 @@ export function importOperator(skHex: string): Operator {
   localStorage.removeItem(LS_MNEMONIC)
   return op
 }
+
+/** localStorage key prefix recording that a given operator key was backed up. */
+const LS_BACKUP_PREFIX = 'heartwood.opBackup.'
+
+/**
+ * Whether the CURRENT operator key has been backed up (the user confirmed they
+ * wrote the phrase/secret down). Keyed by pubkey, so regenerating or importing
+ * a different key asks again.
+ */
+export function isOperatorBackedUp(): boolean {
+  try {
+    return localStorage.getItem(LS_BACKUP_PREFIX + getOrCreateOperator().pubHex) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Record that the current operator key has been backed up. */
+export function markOperatorBackedUp(): void {
+  try {
+    localStorage.setItem(LS_BACKUP_PREFIX + getOrCreateOperator().pubHex, '1')
+  } catch { /* storage unavailable — the card simply shows again */ }
+}

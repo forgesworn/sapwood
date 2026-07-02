@@ -9,7 +9,16 @@
   import DevicePanel from './DevicePanel.svelte'
   import LogMonitor from './LogMonitor.svelte'
 
-  let currentTab = $state<'apps' | 'identity' | 'device' | 'logs'>('apps')
+  type Tab = 'apps' | 'identity' | 'device' | 'logs'
+  interface Props {
+    /** Which section to open on — Home's nudges deep-link here (e.g. firmware → device). */
+    initialTab?: Tab
+  }
+  let { initialTab = 'apps' }: Props = $props()
+
+  // svelte-ignore state_referenced_locally — the initial tab is read once by design;
+  // the console remounts whenever Home hands over, so it always lands correctly.
+  let currentTab = $state<Tab>(initialTab)
 </script>
 
 <nav>

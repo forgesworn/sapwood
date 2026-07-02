@@ -17,10 +17,17 @@
     }
   }
 
-  // Two connected surfaces: the guided Home (default) and the advanced cockpit.
+  // Two connected surfaces: the guided Home (default) and the advanced console.
   let view = $state<'home' | 'advanced'>('home')
+  // Which console section to land on — Home's nudges deep-link (e.g. firmware → device).
+  let advancedTab = $state<'apps' | 'identity' | 'device' | 'logs'>('apps')
 
-  // A fresh connection always lands on Home, never deep inside the cockpit.
+  function openAdvanced(tab?: 'apps' | 'identity' | 'device' | 'logs') {
+    advancedTab = tab ?? 'apps'
+    view = 'advanced'
+  }
+
+  // A fresh connection always lands on Home, never deep inside the console.
   $effect(() => { if (!device.connected) view = 'home' })
 
   const showBottomNav = $derived(device.connected && view === 'advanced')
@@ -35,7 +42,7 @@
     </div>
     {#if device.connected}
       {#if view === 'home'}
-        <button class="header-link" onclick={() => (view = 'advanced')}>Advanced ⚙</button>
+        <button class="header-link" onclick={() => openAdvanced()}>Advanced ⚙</button>
       {:else}
         <button class="header-link" onclick={() => (view = 'home')}>← Home</button>
       {/if}
@@ -55,8 +62,8 @@
         <div><dt>From this link</dt><dd>{shortNpub(pendingImport.incomingPubHex)}</dd></div>
       </dl>
       <div class="import-confirm-actions">
-        <button class="btn-cancel" onclick={dismissPendingImport}>Keep my key</button>
-        <button class="btn-danger" onclick={confirmPendingImport}>Replace it</button>
+        <button class="btn btn-secondary" onclick={dismissPendingImport}>Keep my key</button>
+        <button class="btn btn-danger-solid" onclick={confirmPendingImport}>Replace it</button>
       </div>
     </div>
   {/if}
@@ -76,11 +83,10 @@
 
   {#if device.connected}
     {#if view === 'advanced'}
-      <!-- The cockpit speaks the technical language (masters, clients, slots). -->
       <StatusBar />
-      <Cockpit />
+      <Cockpit initialTab={advancedTab} />
     {:else}
-      <Home onadvanced={() => (view = 'advanced')} />
+      <Home onadvanced={openAdvanced} />
     {/if}
   {/if}
 
@@ -88,37 +94,6 @@
 </main>
 
 <style>
-  :global(*) {
-    box-sizing: border-box;
-  }
-
-  :global(body) {
-    margin: 0;
-    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
-    background: #050505;
-    color: var(--text);
-    line-height: 1.6;
-    font-size: 18px;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  :global(:root) {
-    --green: #00e87b;
-    --green-dim: #00a858;
-    --green-glow: 0 0 12px rgba(0, 232, 123, 0.3);
-    --red: #ff4444;
-    --red-dim: #cc2222;
-    --amber: #ffaa00;
-    --surface: #0c0c0c;
-    --surface-raised: #131313;
-    --surface-hover: #1a1a1a;
-    --border: #1e1e1e;
-    --border-bright: #2a2a2a;
-    --text: #f0f0f0;
-    --text-dim: #b9b9b9;
-    --text-muted: #8f8f8f;
-  }
-
   main {
     max-width: 1100px;
     margin: 0 auto;
@@ -183,14 +158,8 @@
   .key-compare dt { color: var(--text-muted); margin: 0; }
   .key-compare dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; word-break: break-all; }
   .import-confirm-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
-  .import-confirm-actions button {
-    font-family: inherit; font-size: 0.85rem; font-weight: 600; padding: 0.5rem 1rem;
-    border-radius: 5px; cursor: pointer; border: 1px solid transparent;
-  }
-  .btn-cancel { background: transparent; color: var(--text); border-color: var(--border-bright, #333); }
-  .btn-cancel:hover { background: var(--surface-hover, #1a1a1a); }
-  .btn-danger { background: var(--red, #ef4444); color: #150505; border-color: var(--red, #ef4444); }
-  .btn-danger:hover { filter: brightness(1.1); }
+  .btn-danger-solid { background: var(--red, #ef4444); color: #150505; border-color: var(--red, #ef4444); }
+  .btn-danger-solid:hover:not(:disabled) { filter: brightness(1.1); }
 
   h1 {
     margin: 0;

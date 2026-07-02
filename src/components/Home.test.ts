@@ -18,7 +18,9 @@ vi.mock('../lib/device.svelte.js', () => ({
   disconnect: vi.fn().mockResolvedValue(undefined),
   mgmtApproveSigning: vi.fn().mockResolvedValue(undefined),
   mgmtRevokeClient: vi.fn().mockResolvedValue(undefined),
+  mgmtUpdateClient: vi.fn().mockResolvedValue(undefined),
   mgmtCanApproveSigning: vi.fn(() => true),
+  getFirmwareVersion: vi.fn().mockResolvedValue(null),
   // Pulled in transitively by FirstIdentity (rendered only in the no-master case).
   serialTransport: { sendAndReceive: vi.fn() },
   connectRelay: vi.fn().mockResolvedValue(undefined),
@@ -91,6 +93,19 @@ describe('Home', () => {
     expect(vi.mocked(mgmtRevokeClient)).not.toHaveBeenCalled()
     await fireEvent.click(screen.getByText('Yes, disconnect'))
     expect(vi.mocked(mgmtRevokeClient)).toHaveBeenCalledWith(2)
+  })
+
+  it('nudges an operator-key backup until confirmed, then stays quiet', async () => {
+    const first = render(Home)
+    expect(screen.getByText('Back up your operator key')).toBeTruthy()
+    // Reveal, confirm, and the card goes away…
+    await fireEvent.click(screen.getByText(/Show my (recovery phrase|operator secret)/))
+    await fireEvent.click(screen.getByText("I've written it down"))
+    expect(screen.queryByText('Back up your operator key')).toBeNull()
+    // …and stays away on the next visit (persisted per key).
+    first.unmount()
+    render(Home)
+    expect(screen.queryByText('Back up your operator key')).toBeNull()
   })
 
   it('leads with guided setup when the device has no identity yet (over USB)', () => {
