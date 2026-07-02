@@ -166,7 +166,7 @@ describe('identity card auto-sync on serial master list', () => {
 
     emitMasterList([master])
     await vi.waitFor(() => expect(metaPushes()).toBe(1))
-    expect(placeholderMock).toHaveBeenCalledWith('bob')
+    expect(placeholderMock).toHaveBeenCalledWith('bob', 64)
     expect(loadAvatarMock).not.toHaveBeenCalled()
   })
 
@@ -182,7 +182,7 @@ describe('identity card auto-sync on serial master list', () => {
 
     emitMasterList([master])
     await vi.waitFor(() => expect(metaPushes()).toBe(1))
-    expect(placeholderMock).toHaveBeenCalledWith('carol')
+    expect(placeholderMock).toHaveBeenCalledWith('carol', 64)
   })
 
   it('releases the dedupe guard when no profile exists yet, so a later refresh retries', async () => {
@@ -228,6 +228,8 @@ describe('identity card auto-sync on serial master list', () => {
           30_000,
         )
       })
+      // Relay pushes shrink to 48x48 — a 64x64 event OOM-rebooted a T-Display.
+      expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48)
     } finally {
       await disconnect() // clears the 4s status poll
     }
