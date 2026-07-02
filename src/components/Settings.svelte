@@ -144,8 +144,8 @@
   let profilePending = $state(false)
 
   async function handleSyncProfile() {
-    if (device.mode !== 'serial') {
-      profileStatus = 'Syncing the profile picture requires a USB connection.'
+    if (device.mode !== 'serial' && device.mode !== 'relay') {
+      profileStatus = 'Syncing the profile picture requires a USB or WiFi connection.'
       return
     }
     profilePending = true
@@ -222,9 +222,9 @@
     <tr><td class="label">Slots</td><td>{device.slots.length} (master slot {device.selectedSlot})</td></tr>
   </tbody></table>
 
-  {#if device.mode === 'serial' && device.masters.length > 0}
+  {#if (device.mode === 'serial' || device.mode === 'relay') && device.masters.length > 0}
     <h2>Identity Card</h2>
-    <p class="info">The signer's name and picture sync automatically when it connects over USB. Use this to push again now — for example after you change your profile. The picture is shrunk in your browser; the signer never fetches or decodes images itself.</p>
+    <p class="info">The signer's name and picture sync automatically when it connects — over USB or WiFi. Use this to push again now — for example after you change your profile. The picture is shrunk in your browser; the signer never fetches or decodes images itself. (Over WiFi this needs firmware 0.9.12 or newer.)</p>
     <button class="btn" onclick={handleSyncProfile} disabled={profilePending}>
       {profilePending ? 'Syncing...' : 'Re-sync profile to signer'}
     </button>
