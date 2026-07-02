@@ -210,11 +210,15 @@ export async function syncIdentityMeta(): Promise<string | null> {
   const name = profileDisplayName(profile)
   if (!name) return null
 
+  // Relay pushes travel inside a NIP-44 event a classic ESP32 must parse while
+  // its TLS session already occupies the heap — 48x48 halves the bytes end to
+  // end (a 64x64 relay push OOM-rebooted a T-Display). USB keeps full 64x64.
+  const size = device.mode === 'relay' ? 48 : 64
   let avatar: Avatar
   try {
-    avatar = profile.picture ? await loadAvatar(profile.picture, 64) : placeholderAvatar(name)
+    avatar = profile.picture ? await loadAvatar(profile.picture, size) : placeholderAvatar(name, size)
   } catch {
-    avatar = placeholderAvatar(name) // image host refused — name + disc beats nothing
+    avatar = placeholderAvatar(name, size) // image host refused — name + disc beats nothing
   }
 
   if (device.mode === 'relay') {
