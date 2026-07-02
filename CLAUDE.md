@@ -4,11 +4,14 @@ Web management UI for the Heartwood ESP32 signing device. Connects directly to t
 
 ## What it does
 
-- **Masters** -- view provisioned master slots with npubs and modes
-- **Clients** -- list, revoke, and update TOFU-approved client policies
-- **Firmware** -- OTA firmware updates with SHA-256 verification and progress bar
+Two surfaces: a guided **Home** (signer card, connect-an-app flow, connected apps with inline permissions, operator-key backup nudge, firmware nudge, phone handoff) and an **Advanced console** with four sections:
+
+- **Apps** -- create connections, approve/revoke apps, per-kind signing permissions (one surface for USB, WiFi and bridge transports)
+- **Identity** -- identities (master slots) on the signer, add-identity (provision), identity-card sync, operator key, profile relays
+- **Device** -- connection info, network mode, OTA firmware updates (SHA-256 verified), security (boot PIN, bridge secret), bridge control, danger zone (disconnect all apps, factory reset -- physical button confirm)
 - **Logs** -- real-time ESP-IDF log output from the device
-- **Factory Reset** -- erase all keys and policies (requires physical button confirm)
+
+UI copy says "apps" and "identities"; code and the wire protocol keep the frame/struct names (clients, masters, slots). Shared design primitives (buttons, cards, fields, tags) live in `src/app.css`; components keep only layout in scoped styles.
 
 ## Architecture
 
