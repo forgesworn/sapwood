@@ -186,6 +186,43 @@
       <button class="wifi-usb-disconnect" onclick={() => disconnect()}>Disconnect</button>
     </section>
 
+  {:else if device.mode === 'relay' && !hasIdentity && device.relayStatus === null && !device.error}
+    <!-- Relay websocket is up but the device hasn't answered get_status yet.
+         Never show "needs an identity" here — a wifi signer in its relay loop
+         always has a master, so an empty list only ever means "no reply yet". -->
+    <section class="checking">
+      <span class="checking-spin"></span>
+      <div>
+        <h2 class="checking-title">Reaching your signer over WiFi…</h2>
+        <p class="checking-body">Asking it for its status over the relay. This usually takes a few
+          seconds and finishes on its own.</p>
+      </div>
+    </section>
+
+  {:else if device.mode === 'relay' && !hasIdentity && device.relayStatus === null}
+    <!-- The relay answered, the DEVICE never did. Same diagnosis MasterList
+         gives in the advanced console, in Home-friendly words. -->
+    <section class="wifi-usb">
+      <h2 class="wifi-usb-title">Connected to the relay, but your signer isn't answering</h2>
+      <p class="wifi-usb-body">
+        Sapwood reached the relay fine, but the signer never replied — it keeps retrying
+        automatically, so if the signer has just powered on give it ~10 seconds. If this doesn't
+        clear, it's almost always one of:
+      </p>
+      <ul class="wifi-usb-causes">
+        <li><strong>Different relays.</strong> Sapwood and the signer must share a relay — Sapwood is
+          asking on <code>{device.portInfo}</code>; check the signer booted onto the same one.</li>
+        <li><strong>Operator-key mismatch.</strong> The signer only accepts management from the
+          operator key baked in when it was flashed. If it was flashed from a different browser or
+          computer, this browser's key differs and the signer ignores it silently.</li>
+      </ul>
+      <p class="wifi-usb-body">
+        A USB cable always works: plug the signer into this computer and connect over USB. Full
+        diagnostics are in the <strong>Advanced console → Masters</strong> tab.
+      </p>
+      <button class="wifi-usb-disconnect" onclick={() => disconnect()}>Disconnect</button>
+    </section>
+
   {:else if !hasIdentity}
     <!-- No master yet — the just-flashed first-run state. Lead with setup. A slim
          connection line stands in for the signer card (there's no identity yet). -->
@@ -366,6 +403,15 @@
   }
   .wifi-usb-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin: 0 0 0.6rem; }
   .wifi-usb-body { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0 0 1rem; }
+  .wifi-usb-causes {
+    margin: 0 0 1rem; padding: 0.8rem 1rem 0.8rem 2rem;
+    background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.88rem; color: var(--text-dim); line-height: 1.65;
+  }
+  .wifi-usb-causes li { margin: 0 0 0.4rem; }
+  .wifi-usb-causes li:last-child { margin-bottom: 0; }
+  .wifi-usb-causes strong { color: var(--text); }
+  .wifi-usb-causes code { color: var(--green); word-break: break-all; }
   .wifi-usb-body strong { color: var(--text); }
   .wifi-usb-body code {
     color: var(--green-dim); background: #0a0a0a; padding: 0.05rem 0.3rem; border-radius: 3px;

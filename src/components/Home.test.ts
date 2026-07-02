@@ -108,4 +108,26 @@ describe('Home', () => {
     render(Home)
     expect(screen.getByText('This signer needs an identity')).toBeTruthy()
   })
+
+  it('shows a reaching-over-WiFi state (not "needs an identity") while the relay status is pending', () => {
+    ;(device as { masters: unknown[] }).masters = []
+    ;(device as { mode: string }).mode = 'relay'
+    ;(device as { relayStatus: unknown }).relayStatus = null
+    ;(device as { error: unknown }).error = null
+    render(Home)
+    expect(screen.getByText('Reaching your signer over WiFi…')).toBeTruthy()
+    expect(screen.queryByText('This signer needs an identity')).toBeNull()
+  })
+
+  it('diagnoses relay/operator mismatch (not "needs an identity") when the device never answers', () => {
+    ;(device as { masters: unknown[] }).masters = []
+    ;(device as { mode: string }).mode = 'relay'
+    ;(device as { relayStatus: unknown }).relayStatus = null
+    ;(device as { error: unknown }).error = 'timeout waiting for device (get_status)'
+    ;(device as { portInfo: string }).portInfo = 'npub1cc…cc · wss://relay.trotters.cc'
+    render(Home)
+    expect(screen.getByText("Connected to the relay, but your signer isn't answering")).toBeTruthy()
+    expect(screen.getByText(/Operator-key mismatch/)).toBeTruthy()
+    expect(screen.queryByText('This signer needs an identity')).toBeNull()
+  })
 })
