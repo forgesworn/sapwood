@@ -34,33 +34,43 @@ export interface Avatar {
 
 /**
  * Fetch `url`, cover-fit it into a `size`x`size` canvas, circular-crop on black,
- * and return Rgb565 bytes ready for the signer. Browser-only (Image + canvas).
- * Needs the image server to allow CORS (getImageData taints otherwise); callers
- * can route through a CORS-friendly resize proxy if a host refuses.
+ * and return Rgb565 bytes ready for the signer. Browser-only (fetch + canvas).
+ *
+ * Fetched as bytes and decoded via createImageBitmap rather than an <img>
+ * element: the app's CSP locks img-src to 'self' (so no picture host would
+ * ever load — every push silently fell back to the placeholder disc), while
+ * connect-src is necessarily open for relays and bridges. CORS still applies
+ * to the fetch; hosts that refuse fall back to the placeholder upstream.
  */
 export async function loadAvatar(url: string, size = 64): Promise<Avatar> {
-  const img = await loadImage(url)
-  const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('no 2d canvas context')
+  const resp = await fetch(url, { mode: 'cors', credentials: 'omit' })
+  if (!resp.ok) throw new Error(`avatar image fetch failed: ${resp.status} ${url}`)
+  const bitmap = await createImageBitmap(await resp.blob())
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('no 2d canvas context')
 
-  ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, size, size)
-  ctx.save()
-  ctx.beginPath()
-  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
-  ctx.clip()
-  // Cover-fit: scale so the image fills the square, centre-cropped.
-  const scale = Math.max(size / img.width, size / img.height)
-  const dw = img.width * scale
-  const dh = img.height * scale
-  ctx.drawImage(img, (size - dw) / 2, (size - dh) / 2, dw, dh)
-  ctx.restore()
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, size, size)
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
+    ctx.clip()
+    // Cover-fit: scale so the image fills the square, centre-cropped.
+    const scale = Math.max(size / bitmap.width, size / bitmap.height)
+    const dw = bitmap.width * scale
+    const dh = bitmap.height * scale
+    ctx.drawImage(bitmap, (size - dw) / 2, (size - dh) / 2, dw, dh)
+    ctx.restore()
 
-  const { data } = ctx.getImageData(0, 0, size, size)
-  return { w: size, h: size, bytes: rgbaToRgb565BE(data) }
+    const { data } = ctx.getImageData(0, 0, size, size)
+    return { w: size, h: size, bytes: rgbaToRgb565BE(data) }
+  } finally {
+    bitmap.close()
+  }
 }
 
 /** The firmware's Nostr-purple disc colour (palette.rs NOSTR, Rgb565 17/23/30).
@@ -97,16 +107,6 @@ export function placeholderAvatar(name: string, size = 64): Avatar {
 
   const { data } = ctx.getImageData(0, 0, size, size)
   return { w: size, h: size, bytes: rgbaToRgb565BE(data) }
-}
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous' // required for getImageData on a cross-origin image
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error(`avatar image load failed: ${url}`))
-    img.src = url
-  })
 }
 
 /**
