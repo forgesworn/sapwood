@@ -1,6 +1,6 @@
 {
-  "version": "0.10.1",
-  "builtAt": "2026-07-02T13:34:10Z",
+  "version": "0.10.2",
+  "builtAt": "2026-07-02T14:05:55Z",
   "boards": {
     "esp8266": {
       "app": "app.bin",
@@ -11,31 +11,31 @@
     },
     "heltec-v4": {
       "app": "app.bin",
-      "sha256": "305411d2bc5c1e644d03e49953f17e6b2ac32b2523c62ffef434119a60a7203b",
-      "bytes": 1726688,
+      "sha256": "7c8d07b18d3fcb698ba992884b38b019c2170e4b6222cf483b4eb30558320b5d",
+      "bytes": 1726944,
       "ota": true,
-      "signature": "3f6edfa909a7cf0584eba05aa9bee514e88f6255527d59e22c02bab7c2e7f1dfc65fb71f197e656972350b1b3fecd967093f535cebe9c5f687463c6f2170fc0a"
+      "signature": "1ecc3d4354283b57e56879448ebade3a169da3d79f2797af55ccbafc52ad8e5c8defd7344ff035cebe69b763e6fb89431a45d0bd66aa1bb31fbe796aa400b808"
     },
     "c6": {
       "app": "app.bin",
-      "sha256": "deb980585edf9298c17b3d37efcadc7f6f2020fa101385e77ba989493987189a",
-      "bytes": 1798128,
+      "sha256": "43bd3ed2bc113db9f0c7a6ead6621307c1a9177598903022a3ff54f52473c3a7",
+      "bytes": 1798368,
       "ota": false,
-      "signature": "2209ef121a55743c696ed6a9d50ebcd8db3750f5c23ac1e705958c7ccdbf62902a1ad6d46cd7f185ec8874a0a56238f39c8aed95f663f9e6d1fde77198caa905"
+      "signature": "e12245ad83daf6dee4c72098c8d3d677eb269288e69ca97e4c7dd7d33ae37c02ed892cf3689431e40ccf323a049e38c9ac02e3252efe533f01b41020e534e809"
     },
     "heltec-v3": {
       "app": "app.bin",
-      "sha256": "6ab6754fb9ef66ac10f987718795cd381e1b26eb13f0a447e61022950fb24ec9",
-      "bytes": 1730688,
+      "sha256": "07669a80b73d1dd05185c8c0d133f51cdfe8596f745f436ab11dbe22bc659f0e",
+      "bytes": 1730944,
       "ota": true,
-      "signature": "7d590e6e5ff6202c48f570e7f1a9ca72b0f3f4dd53b553c48974aae7f4cb1c66e6830b3218630ec1a85bc164a9a10c9375b49a81170dc532a8b936e8749aa00b"
+      "signature": "3c982a8c2e89a27002d4b4b4ab5f948cb8cb2fa02c08498710f2bbdb405f39a8206c284894c7708af2a7782c0b932d12ab831e3e5db66f73a2223c787a41e20a"
     },
     "tdisplay": {
       "app": "app.bin",
-      "sha256": "d035040ace60c5b3e6f83d50539f3aa656218c18e6babb05a631b4f4336085a4",
-      "bytes": 1757488,
+      "sha256": "b8b3faa884a079a134376d70f7aa52d8b5acb570a677778892a967377776b6f2",
+      "bytes": 1757744,
       "ota": false,
-      "signature": "b8315723801684e25bfd42bb3467e58204668e5b5c1f1dae0817889125c73c3f7a6fab53da5e45baeb36e6e8f9ff6ed6519d614bda48fcfb03dd2a965493260b"
+      "signature": "808873e986548256065c478573b8e5d32f913eb9288032e567bf7f7f39d309c380dd2b40000918092cf8b598ab9d775963758aefd1bf73d8328ab9a2f421340a"
     }
   }
 }
