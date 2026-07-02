@@ -7,13 +7,27 @@
 //
 // The user never sees the word "npub": the device address travels in the link.
 
-import { importOperator } from './op-mgmt.js'
+import { importOperator, peekOperatorPubHex, pubHexFromSecret } from './op-mgmt.js'
 import { rememberDevice } from './known-devices.js'
 import { connectRelay } from './device.svelte.js'
 import { nip19 } from 'nostr-tools'
 
 /** One-shot banner state: set when a deep-linked handoff has been consumed. */
 export const importNotice = $state<{ shown: boolean }>({ shown: false })
+
+/**
+ * A handoff link that would overwrite an *existing, different* operator key,
+ * held back for explicit confirmation. Importing it silently would destroy the
+ * user's current management credential (and, if the phrase was never written
+ * down, permanently), and switch them onto an attacker-supplied device/relay.
+ * The UI renders this as an old-vs-new prompt; nothing is imported until the
+ * user confirms.
+ */
+export const pendingImport = $state<{
+  link: HandoffLink | null
+  currentPubHex: string
+  incomingPubHex: string
+}>({ link: null, currentPubHex: '', incomingPubHex: '' })
 
 export interface HandoffLink {
   /** Operator secret (hex) — the management credential. */
@@ -71,15 +85,9 @@ export function parseImportOp(hash: string): string | null {
   return parseImportLink(hash)?.op ?? null
 }
 
-/**
- * If the current URL is a handoff deep link, load the operator key, remember the
- * device, auto-connect over relays, and clean the URL. Returns true if consumed.
- * Call once at startup, before mount.
- */
-export function consumeImportLink(): boolean {
-  if (typeof location === 'undefined') return false
-  const link = parseImportLink(location.hash)
-  if (!link) return false
+/** Load the operator key, remember the device, auto-connect, and show the
+ *  loaded banner. Shared by the no-conflict path and confirmed overwrites. */
+function applyLink(link: HandoffLink): boolean {
   try {
     importOperator(link.op)
   } catch {
@@ -91,11 +99,63 @@ export function consumeImportLink(): boolean {
     // surface via device.error (and the device is remembered for a manual retry).
     void connectRelay(link.deviceHex, link.relays).catch(() => { /* surfaced via device.error */ })
   }
+  importNotice.shown = true
+  return true
+}
+
+/** Strip the `#/import?…` (with its secret) from the address bar. */
+function cleanImportUrl(): void {
   try {
     history.replaceState(null, '', `${location.pathname}${location.search}#/`)
   } catch {
     location.hash = '#/'
   }
-  importNotice.shown = true
-  return true
+}
+
+/**
+ * If the current URL is a handoff deep link, load the operator key, remember the
+ * device, auto-connect over relays, and clean the URL. Returns true if consumed.
+ * Call once at startup, before mount.
+ *
+ * Safety: if a *different* operator key is already stored, the import is NOT
+ * performed silently — it is parked in `pendingImport` for the UI to confirm
+ * (overwriting would destroy the current management credential). A link that
+ * matches the existing key, or arrives when none is stored, imports directly.
+ */
+export function consumeImportLink(): boolean {
+  if (typeof location === 'undefined') return false
+  const link = parseImportLink(location.hash)
+  if (!link) return false
+
+  const currentPubHex = peekOperatorPubHex()
+  const incomingPubHex = pubHexFromSecret(link.op)
+  if (incomingPubHex === null) return false // malformed secret — nothing to import
+
+  // An existing, different operator key would be destroyed by this import.
+  // Defer to an explicit user confirmation rather than overwrite it silently.
+  if (currentPubHex && currentPubHex !== incomingPubHex) {
+    pendingImport.link = link
+    pendingImport.currentPubHex = currentPubHex
+    pendingImport.incomingPubHex = incomingPubHex
+    cleanImportUrl() // remove the secret from the address bar while we wait
+    return true
+  }
+
+  const ok = applyLink(link)
+  cleanImportUrl()
+  return ok
+}
+
+/** Confirm a parked overwrite (from `pendingImport`): perform the import. */
+export function confirmPendingImport(): boolean {
+  const link = pendingImport.link
+  if (!link) return false
+  const ok = applyLink(link)
+  pendingImport.link = null
+  return ok
+}
+
+/** Reject a parked overwrite: keep the existing operator key untouched. */
+export function dismissPendingImport(): void {
+  pendingImport.link = null
 }

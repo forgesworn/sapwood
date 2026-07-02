@@ -13,6 +13,12 @@ sapwood.forgesworn.dev {
 		# Privacy + hardening. The app's own CSP ships in index.html.
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
+		# Anti-clickjacking: the signer-management controls (regenerate the
+		# operator key, revoke clients, factory reset) are software-only, so a
+		# framed instance would be clickjackable. A <meta> CSP cannot express
+		# frame-ancestors, so it is set here as a real response header.
+		X-Frame-Options DENY
+		Content-Security-Policy "frame-ancestors 'none'"
 		-Server
 	}
 

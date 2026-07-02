@@ -1,9 +1,17 @@
-import { describe, it, expect } from 'vitest'
-import { parseImportLink, parseImportOp, buildHandoffLink } from './import-link.svelte'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { nip19 } from 'nostr-tools'
+
+// device.svelte pulls in the whole connection stack; stub the one thing the
+// import flow touches so these stay unit tests.
+vi.mock('./device.svelte.js', () => ({ connectRelay: vi.fn(async () => {}) }))
+
+import { parseImportLink, parseImportOp, buildHandoffLink, consumeImportLink, confirmPendingImport, dismissPendingImport, pendingImport, importNotice } from './import-link.svelte'
+import { peekOperatorPubHex, pubHexFromSecret } from './op-mgmt'
 
 const HEX = 'a1b2c3d4e5f6'.repeat(5) + 'abcd' // 64 hex chars
 const DEV = 'f'.repeat(64)
+// A second, distinct valid operator secret (for overwrite-collision tests).
+const HEX2 = 'b2c3d4e5f6a1'.repeat(5) + '1234'
 
 describe('parseImportOp (back-compat)', () => {
   it('extracts a 64-hex operator key', () => {
@@ -53,5 +61,71 @@ describe('buildHandoffLink', () => {
   it('omits device/relays when not given', () => {
     const url = buildHandoffLink('https://x.dev', HEX)
     expect(url).toBe(`https://x.dev/#/import?op=${HEX}`)
+  })
+})
+
+describe('consumeImportLink — overwrite guard', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    pendingImport.link = null
+    importNotice.shown = false
+    location.hash = ''
+  })
+
+  it('imports directly when no operator key exists yet', () => {
+    location.hash = `#/import?op=${HEX}`
+    expect(consumeImportLink()).toBe(true)
+    expect(pendingImport.link).toBeNull()          // no confirmation needed
+    expect(peekOperatorPubHex()).toBe(pubHexFromSecret(HEX))
+    expect(importNotice.shown).toBe(true)
+    expect(location.hash).toBe('#/')               // secret stripped from the URL
+  })
+
+  it('imports directly when the link matches the existing key', () => {
+    location.hash = `#/import?op=${HEX}`
+    consumeImportLink()
+    importNotice.shown = false
+    location.hash = `#/import?op=${HEX.toUpperCase()}` // same key, different case
+    expect(consumeImportLink()).toBe(true)
+    expect(pendingImport.link).toBeNull()
+    expect(importNotice.shown).toBe(true)
+  })
+
+  it('parks (does NOT silently overwrite) a different key for confirmation', () => {
+    location.hash = `#/import?op=${HEX}`
+    consumeImportLink()
+    const original = peekOperatorPubHex()
+
+    location.hash = `#/import?op=${HEX2}`
+    expect(consumeImportLink()).toBe(true)
+    // Nothing imported yet; the existing key is untouched.
+    expect(peekOperatorPubHex()).toBe(original)
+    expect(pendingImport.link?.op).toBe(HEX2)
+    expect(pendingImport.currentPubHex).toBe(original)
+    expect(pendingImport.incomingPubHex).toBe(pubHexFromSecret(HEX2))
+    expect(location.hash).toBe('#/')               // secret still stripped while pending
+  })
+
+  it('dismissing a parked overwrite keeps the original key', () => {
+    location.hash = `#/import?op=${HEX}`
+    consumeImportLink()
+    const original = peekOperatorPubHex()
+    location.hash = `#/import?op=${HEX2}`
+    consumeImportLink()
+
+    dismissPendingImport()
+    expect(pendingImport.link).toBeNull()
+    expect(peekOperatorPubHex()).toBe(original)    // unchanged
+  })
+
+  it('confirming a parked overwrite replaces the key', () => {
+    location.hash = `#/import?op=${HEX}`
+    consumeImportLink()
+    location.hash = `#/import?op=${HEX2}`
+    consumeImportLink()
+
+    expect(confirmPendingImport()).toBe(true)
+    expect(pendingImport.link).toBeNull()
+    expect(peekOperatorPubHex()).toBe(pubHexFromSecret(HEX2))
   })
 })

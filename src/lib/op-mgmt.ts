@@ -107,6 +107,31 @@ export function getOperatorMnemonic(): string | null {
   return mnemonic && validateMnemonic(mnemonic, wordlist) ? mnemonic : null
 }
 
+/** The current operator's x-only pubkey (hex), or `null` if none is stored.
+ *  Read-only: unlike `getOrCreateOperator` it never mints a key — used to
+ *  detect whether an incoming import would overwrite an existing operator. */
+export function peekOperatorPubHex(): string | null {
+  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
+  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
+    return operatorFromMnemonic(mnemonic).pubHex
+  }
+  const legacy = localStorage.getItem(LS_SK) ?? ''
+  if (/^[0-9a-f]{64}$/.test(legacy)) return pubFromSk(legacy)
+  return null
+}
+
+/** The x-only pubkey (hex) for a raw operator secret, or `null` if malformed.
+ *  Lets a caller preview which key a handoff link carries without importing it. */
+export function pubHexFromSecret(skHex: string): string | null {
+  const clean = skHex.trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(clean)) return null
+  try {
+    return pubFromSk(clean)
+  } catch {
+    return null
+  }
+}
+
 /** Replace the operator with a fresh phrase-backed key and return it.
  *  The old key is lost — devices flashed with it need re-flashing. */
 export function regenerateOperator(): Operator {

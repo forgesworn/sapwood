@@ -4,7 +4,18 @@
   import Home from './components/Home.svelte'
   import Cockpit from './components/Cockpit.svelte'
   import { device } from './lib/device.svelte.js'
-  import { importNotice } from './lib/import-link.svelte.js'
+  import { importNotice, pendingImport, confirmPendingImport, dismissPendingImport } from './lib/import-link.svelte.js'
+  import { nip19 } from 'nostr-tools'
+
+  // Short, recognisable npub for the overwrite confirmation (first/last chars).
+  function shortNpub(pubHex: string): string {
+    try {
+      const npub = nip19.npubEncode(pubHex)
+      return `${npub.slice(0, 12)}…${npub.slice(-6)}`
+    } catch {
+      return pubHex.slice(0, 10) + '…'
+    }
+  }
 
   // Two connected surfaces: the guided Home (default) and the advanced cockpit.
   let view = $state<'home' | 'advanced'>('home')
@@ -30,6 +41,25 @@
       {/if}
     {/if}
   </header>
+
+  {#if pendingImport.link}
+    <div class="import-confirm" role="alertdialog" aria-labelledby="import-confirm-title">
+      <h2 id="import-confirm-title">Replace your operator key?</h2>
+      <p>
+        This link wants to switch you to a different operator key. If you continue, the key
+        you currently manage signers with is <strong>replaced and lost</strong> — any signer
+        set up with it would need re-flashing.
+      </p>
+      <dl class="key-compare">
+        <div><dt>Current</dt><dd>{shortNpub(pendingImport.currentPubHex)}</dd></div>
+        <div><dt>From this link</dt><dd>{shortNpub(pendingImport.incomingPubHex)}</dd></div>
+      </dl>
+      <div class="import-confirm-actions">
+        <button class="btn-cancel" onclick={dismissPendingImport}>Keep my key</button>
+        <button class="btn-danger" onclick={confirmPendingImport}>Replace it</button>
+      </div>
+    </div>
+  {/if}
 
   {#if importNotice.shown}
     <div class="import-banner" role="status">
@@ -140,6 +170,27 @@
     line-height: 1; cursor: pointer; padding: 0 0.25rem; flex-shrink: 0;
   }
   .import-dismiss:hover { color: var(--text); }
+
+  .import-confirm {
+    background: #140b06; border: 1px solid var(--red, #ef4444); border-radius: 6px;
+    padding: 1rem 1.1rem; margin-bottom: 1rem; color: var(--text);
+  }
+  .import-confirm h2 { margin: 0 0 0.5rem; font-size: 1rem; color: #fff; }
+  .import-confirm p { margin: 0 0 0.8rem; font-size: 0.85rem; color: var(--text-dim); line-height: 1.55; }
+  .import-confirm p strong { color: var(--red, #ef4444); }
+  .key-compare { margin: 0 0 1rem; display: grid; gap: 0.35rem; }
+  .key-compare div { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.82rem; }
+  .key-compare dt { color: var(--text-muted); margin: 0; }
+  .key-compare dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; word-break: break-all; }
+  .import-confirm-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+  .import-confirm-actions button {
+    font-family: inherit; font-size: 0.85rem; font-weight: 600; padding: 0.5rem 1rem;
+    border-radius: 5px; cursor: pointer; border: 1px solid transparent;
+  }
+  .btn-cancel { background: transparent; color: var(--text); border-color: var(--border-bright, #333); }
+  .btn-cancel:hover { background: var(--surface-hover, #1a1a1a); }
+  .btn-danger { background: var(--red, #ef4444); color: #150505; border-color: var(--red, #ef4444); }
+  .btn-danger:hover { filter: brightness(1.1); }
 
   h1 {
     margin: 0;
