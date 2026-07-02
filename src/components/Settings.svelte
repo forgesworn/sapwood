@@ -154,7 +154,7 @@
       const name = await syncIdentityMeta()
       profileStatus = name
         ? `Sent "${name}" and avatar to the signer.`
-        : 'No profile picture found for this identity to send.'
+        : 'No profile found for this identity on the profile relays yet.'
     } catch (e) {
       profileStatus = e instanceof Error ? e.message : 'Failed to sync profile.'
     } finally {
@@ -224,9 +224,9 @@
 
   {#if device.mode === 'serial' && device.masters.length > 0}
     <h2>Identity Card</h2>
-    <p class="info">Fetch this signer's kind-0 profile, shrink the picture in your browser, and store the name + avatar on the device so its screen shows a proper identity card. The signer never fetches or decodes images itself.</p>
+    <p class="info">The signer's name and picture sync automatically when it connects over USB. Use this to push again now — for example after you change your profile. The picture is shrunk in your browser; the signer never fetches or decodes images itself.</p>
     <button class="btn" onclick={handleSyncProfile} disabled={profilePending}>
-      {profilePending ? 'Syncing...' : 'Sync profile picture to signer'}
+      {profilePending ? 'Syncing...' : 'Re-sync profile to signer'}
     </button>
     {#if profileStatus}<p class="info">{profileStatus}</p>{/if}
   {/if}

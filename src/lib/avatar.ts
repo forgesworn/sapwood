@@ -63,6 +63,42 @@ export async function loadAvatar(url: string, size = 64): Promise<Avatar> {
   return { w: size, h: size, bytes: rgbaToRgb565BE(data) }
 }
 
+/** The firmware's Nostr-purple disc colour (palette.rs NOSTR, Rgb565 17/23/30).
+ *  #8c5df7 packs to exactly those channel values, so the browser-drawn disc and
+ *  the firmware-drawn one are indistinguishable on the panel. */
+const PLACEHOLDER_DISC = '#8c5df7'
+
+/**
+ * Draw the fallback identity disc — the profile's initial on a Nostr-purple
+ * circle — for identities whose picture is missing or won't load (e.g. a
+ * CORS-refusing image host). Pushing this instead of nothing means the signer
+ * still gets a complete identity card with the name.
+ */
+export function placeholderAvatar(name: string, size = 64): Avatar {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d canvas context')
+
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, size, size)
+  ctx.fillStyle = PLACEHOLDER_DISC
+  ctx.beginPath()
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
+  ctx.fill()
+
+  const initial = (name.trim().charAt(0) || '?').toUpperCase()
+  ctx.fillStyle = '#fff'
+  ctx.font = `bold ${Math.round(size * 0.5)}px sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(initial, size / 2, size / 2)
+
+  const { data } = ctx.getImageData(0, 0, size, size)
+  return { w: size, h: size, bytes: rgbaToRgb565BE(data) }
+}
+
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()

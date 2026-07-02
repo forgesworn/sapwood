@@ -9,6 +9,10 @@
   let status = $state<'idle' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
 
+  // Network config travels as a USB frame and needs the device's button —
+  // it cannot be changed over the bridge or a relay.
+  const canConfigure = $derived(device.connected && device.mode === 'serial')
+
   async function send() {
     status = 'sending'
     message = ''
@@ -38,10 +42,14 @@
   <h2>Connectivity</h2>
   <p class="hint">USB-bridged is the high-assurance default. WiFi mode is the convenience tier — see the device docs.</p>
 
+  {#if device.connected && !canConfigure}
+    <p class="hint">Network settings are changed over USB. Plug the signer into this computer, connect, and come back here.</p>
+  {/if}
+
   <div class="form">
     <label class="field">
       <span>Mode</span>
-      <select bind:value={mode} disabled={!device.connected}>
+      <select bind:value={mode} disabled={!canConfigure}>
         <option value="usb">USB-bridged (radio off)</option>
         <option value="wifi">WiFi-standalone</option>
       </select>
@@ -50,22 +58,22 @@
     {#if mode === 'wifi'}
       <label class="field">
         <span>WiFi SSID</span>
-        <input bind:value={ssid} disabled={!device.connected} />
+        <input bind:value={ssid} disabled={!canConfigure} />
       </label>
       <label class="field">
         <span>WiFi password</span>
-        <input type="password" bind:value={password} disabled={!device.connected} />
+        <input type="password" bind:value={password} disabled={!canConfigure} />
       </label>
       <label class="field">
         <span>Relays (one per line)</span>
-        <textarea bind:value={relaysText} rows={3} disabled={!device.connected}></textarea>
+        <textarea bind:value={relaysText} rows={3} disabled={!canConfigure}></textarea>
       </label>
     {/if}
 
     <button
       class="btn"
       onclick={send}
-      disabled={!device.connected || status === 'sending'}
+      disabled={!canConfigure || status === 'sending'}
     >
       {status === 'sending' ? 'Sending…' : 'Save to device'}
     </button>

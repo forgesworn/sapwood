@@ -10,7 +10,7 @@ import {
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
-import { loadAvatar, buildSetIdentityMeta } from './avatar.js'
+import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
 import { RelayTransport } from './relay-transport.js'
 import { getOrCreateOperator } from './op-mgmt.js'
@@ -55,9 +55,11 @@ export const device = $state({
   bridgeAuthed: false,
   /** USB-direct: probing whether the freshly-connected device answers frames. */
   usbProbing: false,
-  /** USB-direct: device is connected at the port level but answers no frames —
-   *  almost always a provisioned WiFi signer that booted into its relay loop and
-   *  never reads USB. Drives the "manage over WiFi instead" guidance. */
+  /** USB-direct: device is connected at the port level but answers no frames.
+   *  Firmware v0.9.10+ serves USB in every mode, so silence now means older
+   *  WiFi firmware (whose relay loop ignored the cable), a device still
+   *  booting, or a port that isn't a signer. Drives the retry / "manage over
+   *  WiFi" guidance. */
   usbSilent: false,
 })
 
@@ -143,6 +145,8 @@ function handleFrame(frame: { type: number; payload: Uint8Array }) {
     case FrameType.PROVISION_LIST_RESPONSE:
       try {
         device.masters = JSON.parse(decoder.decode(frame.payload)) as MasterInfo[]
+        // Knowing the master npub is all we need to dress the signer's screen.
+        void autoSyncIdentityMeta()
       } catch {
         device.error = 'Failed to parse master list'
       }
@@ -174,10 +178,13 @@ export async function connectSerial(baudRate = 115200) {
  * Fetch the master's kind-0 profile, resize its avatar in-browser to a small
  * Rgb565 bitmap, and push the name + avatar to the signer over USB
  * (SET_IDENTITY_META, 0x5b). The signer stores it and shows it on its identity
- * card; it never fetches or decodes images itself. Best-effort: returns the
- * synced name, or null when there is no master / profile / picture to sync.
+ * card; it never fetches or decodes images itself. If the picture is missing or
+ * its host refuses the fetch (CORS), an initial-on-disc placeholder is pushed so
+ * the card still carries the name. Returns the synced name, or null when there
+ * is no master / no resolvable profile.
  */
 export async function syncIdentityMeta(): Promise<string | null> {
+  if (device.mode !== 'serial') return null
   const master = device.masters[0]
   if (!master?.npub) return null
   let pubHex: string
@@ -190,13 +197,47 @@ export async function syncIdentityMeta(): Promise<string | null> {
   const profile = (await resolveProfiles([pubHex])).get(pubHex)
   if (!profile) return null
   const name = profileDisplayName(profile)
-  if (!profile.picture) return null // nothing to draw on the disc yet
+  if (!name) return null
 
-  const avatar = await loadAvatar(profile.picture, 64)
+  let avatar: Avatar
+  try {
+    avatar = profile.picture ? await loadAvatar(profile.picture, 64) : placeholderAvatar(name)
+  } catch {
+    avatar = placeholderAvatar(name) // image host refused — name + disc beats nothing
+  }
   const frame = buildSetIdentityMeta(pubHex, name, avatar)
   const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 30_000)
   if (reply.type === FrameType.NACK) throw new Error('device rejected identity metadata')
   return name
+}
+
+// One auto-push per npub per page load: reconnects within a session don't
+// rewrite device NVS, while a fresh page load re-syncs (self-healing after a
+// factory reset or a profile change).
+const idMetaSynced = new Set<string>()
+
+/**
+ * Push the identity card to the signer as soon as we know who it is — fired
+ * whenever a serial master list lands, so plugging a device in is enough and
+ * no manual sync step is needed. Quiet best-effort: failures (and "no profile
+ * yet") release the guard so a later master-list refresh retries.
+ */
+async function autoSyncIdentityMeta() {
+  if (device.mode !== 'serial') return
+  const npub = device.masters[0]?.npub
+  if (!npub || idMetaSynced.has(npub)) return
+  idMetaSynced.add(npub) // claim before the await so overlapping triggers no-op
+  try {
+    const name = await syncIdentityMeta()
+    if (name) {
+      addLog(`identity card synced to signer: ${name}`)
+    } else {
+      idMetaSynced.delete(npub) // no profile on the relays yet — retry later
+    }
+  } catch (e) {
+    idMetaSynced.delete(npub)
+    addLog(`identity card sync failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -444,10 +485,10 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
  * On a fresh USB connection, work out whether the device actually answers
  * frames. A USB-reachable signer replies to PROVISION_LIST with either the
  * master list (provisioned) or a NACK (brand-new, still in the first-provision
- * loop). A provisioned WiFi signer, by contrast, boots straight into its relay
- * loop and never reads USB — so it stays silent. Detecting that lets Home steer
- * the operator to WiFi (or the force-USB escape hatch) instead of offering a
- * "create an identity" flow that can only time out.
+ * loop). Firmware v0.9.10+ answers the cable in every mode (including WiFi);
+ * older WiFi firmware booted straight into its relay loop and stayed silent.
+ * Detecting silence lets Home offer retry / WiFi management / the old-firmware
+ * PRG hatch instead of a "create an identity" flow that can only time out.
  *
  * Retries to ride out the ~6s boot animation a just-reset board plays before it
  * services any frame. If a PROVISION_LIST_RESPONSE lands, handleFrame populates
@@ -632,7 +673,11 @@ export async function bridgeRestart() {
 }
 
 export async function configureNetwork(cfg: NetConfig): Promise<boolean> {
-  if (!device.connected) return false
+  // SET_NET_CONFIG is a USB-only frame (button-confirmed on the device) — over
+  // http/relay there is no serial port open, so fail with guidance, not a hang.
+  if (device.mode !== 'serial') {
+    throw new Error('Network settings are changed over USB — connect the signer by cable first.')
+  }
   const frame = buildSetNetConfig(cfg)
   // 60s: must exceed the device's 30s button-approval window so a late confirm isn't lost.
   const resp = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 60_000)

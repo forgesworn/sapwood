@@ -222,8 +222,8 @@
     </div>
     {#if handoff}
       <p class="fi-lede">
-        This is a WiFi signer, so you manage it over the network from here on — not the cable.
-        Give it about 10 seconds to reboot and join WiFi, then connect:
+        This is a WiFi signer, so from here on you can manage it over the network — no cable
+        needed. Give it about 10 seconds to reboot and join WiFi, then connect:
       </p>
       {#if device.mode === 'relay'}
         <p class="fi-ok">✓ Connected over WiFi — you can connect your apps now.</p>
