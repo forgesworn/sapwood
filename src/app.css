@@ -36,3 +36,151 @@ body {
   font-size: 18px;
   -webkit-font-smoothing: antialiased;
 }
+
+/* ---------------------------------------------------------------------------
+   Shared primitives. Every component builds from these instead of redefining
+   its own buttons, cards, fields and boxes, so the whole app reads as one
+   surface. Components add layout in their scoped styles; look and feel lives
+   here.
+--------------------------------------------------------------------------- */
+
+/* Buttons: always `btn` plus one variant. Sizes via btn-sm / btn-block. */
+.btn {
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.6rem 1.3rem;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary { background: var(--green); color: #050505; border-color: var(--green); }
+.btn-primary:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
+
+.btn-secondary { background: transparent; color: var(--text); border-color: var(--border-bright); }
+.btn-secondary:hover:not(:disabled) { background: var(--surface-hover); border-color: #444; }
+
+.btn-ghost { background: transparent; color: var(--text-muted); }
+.btn-ghost:hover:not(:disabled) { color: var(--text-dim); }
+
+.btn-danger { background: transparent; color: var(--red); border-color: #442222; }
+.btn-danger:hover:not(:disabled) { background: #1a0808; }
+
+.btn-warn { background: #2a1a08; color: var(--amber); border-color: var(--amber); }
+.btn-warn:hover:not(:disabled) { background: #3a2410; }
+
+.btn-sm { font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.85rem; border-radius: 4px; }
+.btn-block { display: block; width: 100%; }
+
+/* A borderless inline text action (e.g. Cancel, Dismiss, rename links). */
+.btn-link {
+  background: none; border: none; color: var(--green-dim); cursor: pointer;
+  font-family: inherit; font-size: 0.85rem; padding: 0.2rem 0.3rem;
+}
+.btn-link:hover:not(:disabled) { color: var(--green); }
+.btn-link:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Cards: neutral by default; tinted variants carry meaning. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+}
+.card--raised { background: var(--surface-raised); border-color: var(--border-bright); border-radius: 8px; padding: 1.4rem; }
+.card--live { background: #06120e; border-color: var(--green-dim); }
+.card--warn { background: #100e00; border-color: #33290a; }
+.card--danger { background: #120808; border-color: #442222; }
+
+/* Section headings. */
+.section-title { font-size: 1.05rem; font-weight: 600; color: #fff; margin: 0 0 0.75rem; }
+.section-label {
+  font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-muted); margin: 0 0 0.75rem;
+}
+.section-label--amber { color: var(--amber); }
+
+/* Body text roles. */
+.hint { font-size: 0.85rem; color: var(--text-dim); line-height: 1.55; margin: 0 0 1rem; }
+.hint strong { color: var(--text); }
+.hint code { color: var(--green-dim); background: #0a0a0a; padding: 0.05rem 0.3rem; border-radius: 3px; }
+.hint-sm { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; margin: 0; }
+.warn-text { font-size: 0.8rem; color: var(--amber); line-height: 1.5; margin: 0.6rem 0 0; }
+.error-text { font-size: 0.85rem; color: var(--red); line-height: 1.5; margin: 0.6rem 0 0; }
+.success-text { font-size: 0.85rem; color: var(--green); line-height: 1.5; margin: 0.6rem 0 0; }
+.empty { color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }
+
+/* Form fields: label + input + optional hint, stacked. */
+.field { display: flex; flex-direction: column; gap: 0.45rem; }
+.field-label { font-size: 0.92rem; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+.field-input {
+  width: 100%;
+  background: #080808;
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  padding: 0.65rem 0.9rem;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+.field-input::placeholder { color: #555; }
+.field-input:focus { outline: none; border-color: var(--green-dim); }
+.field-input:disabled { opacity: 0.4; }
+select.field-input { cursor: pointer; }
+.field-hint { font-size: 0.8rem; color: var(--text-dim); line-height: 1.5; }
+.field-hint code { color: var(--green-dim); background: #0a0a0a; padding: 0.05rem 0.3rem; border-radius: 3px; }
+
+/* Input with a reveal-eye (PasswordReveal positions itself absolutely). */
+.pw-wrap { position: relative; display: flex; flex: 1; }
+.pw-wrap .field-input { padding-right: 2.2rem; }
+
+/* Secrets and one-time links: selectable text in a quiet box. */
+.uri-box {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  background: #050505; border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.6rem 0.8rem;
+}
+.uri-box code {
+  flex: 1; font-size: 0.78rem; color: var(--green); line-height: 1.5;
+  word-break: break-all; user-select: all;
+}
+.uri-box--muted code { color: var(--text-dim); }
+
+/* Progress bar. */
+.progress { height: 6px; background: #11221a; border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--green); transition: width 0.2s; }
+
+/* Status tags (SIGNED / AUTO / MANUAL / BUTTON …). */
+.tag {
+  display: inline-block; padding: 0.3rem 0.75rem; border-radius: 3px;
+  font-family: inherit; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em;
+  border: 1px solid #3a2200; background: #1a0e00; color: var(--amber);
+}
+.tag--green { background: #001a0a; border-color: #003a1a; color: var(--green); }
+.tag--blue { background: #001520; border-color: #003a5c; color: #44aaee; }
+button.tag { cursor: pointer; transition: all 0.12s; }
+button.tag:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Progressive disclosure (details/summary). */
+.disclosure summary {
+  cursor: pointer; font-size: 0.82rem; color: var(--text-dim); padding: 0.2rem 0;
+}
+.disclosure summary:hover { color: var(--text); }
+.disclosure > :not(summary) { margin-top: 0.6rem; }
+
+/* Key/value tables (device info, operator key). */
+.kv-table { width: 100%; border-collapse: collapse; }
+.kv-table td {
+  padding: 0.4rem 0.5rem; font-size: 0.82rem;
+  border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.kv-table td.label { color: var(--text-muted); width: 9rem; white-space: nowrap; }
+
+/* Selectable monospace values (pubkeys, phrases). */
+.mono { font-size: 0.78rem; color: var(--green-dim); word-break: break-all; user-select: all; }
+.mono--masked { color: #555; letter-spacing: 0.1em; user-select: none; }
