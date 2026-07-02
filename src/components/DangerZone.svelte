@@ -11,6 +11,11 @@
   let revokeAllResult = $state<string | null>(null)
   const canManageClients = $derived(device.mode === 'relay' || device.mode === 'serial')
 
+  // Factory reset is a USB/bridge frame with a physical-button confirm; the
+  // kind-24134 relay management channel has no reset method, deliberately —
+  // wiping the device should need it in your hands.
+  const canReset = $derived(device.mode === 'serial' || device.mode === 'http')
+
   async function handleRevokeAll() {
     const n = device.slots.length
     if (n === 0) { revokeAllResult = 'No apps are connected.'; return }
@@ -34,6 +39,10 @@
   }
 
   async function handleReset() {
+    if (!canReset) {
+      resetResult = 'Factory reset needs the device in your hands — connect it over USB.'
+      return
+    }
     if (!confirm('This will erase all keys and policies. The device will require button confirmation. Continue?')) return
     resetPending = true
     resetResult = null
@@ -121,9 +130,12 @@
 
   <h2>Factory Reset</h2>
   <p class="warning">Erases all master secrets, policies, bridge secret, and PIN. Irreversible. Requires physical button confirmation.</p>
+  {#if device.connected && !canReset}
+    <p class="hint">Not available over WiFi — wiping the signer needs it in your hands. Plug it into this computer over USB.</p>
+  {/if}
   <button
     class="btn-danger"
-    disabled={!device.connected || resetPending}
+    disabled={!canReset || resetPending}
     onclick={handleReset}
   >
     {resetPending ? 'Waiting for button...' : 'Factory Reset'}
