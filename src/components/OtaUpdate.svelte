@@ -157,14 +157,14 @@
 </script>
 
 <section class="ota" aria-label="Update firmware">
-  <h2>Update firmware</h2>
+  <h2 class="section-title">Update firmware</h2>
 
   {#if !canUpdate}
-    <p class="lede">
+    <p class="hint">
       Firmware updates run <strong>over USB</strong> — never over WiFi, for safety. Connect this
       signer with a cable to update it.
     </p>
-    <div class="usb-steps">
+    <div class="card card--live usb-steps">
       <p class="steps-head">Already-set-up WiFi signer? Put it in USB mode first:</p>
       <ol>
         <li>Plug it into this computer with a USB cable.</li>
@@ -175,37 +175,31 @@
       </ol>
     </div>
   {:else}
-    <div class="fw-status">
-      <div class="fw-row">
-        <span class="fw-key">On your signer</span>
-        <span class="fw-val">{running ? `v${running}` : 'unknown'}</span>
-      </div>
-      <div class="fw-row">
-        <span class="fw-key">Bundled with this app</span>
-        <span class="fw-val">{latest ? `v${latest}` : '—'}</span>
-      </div>
-    </div>
+    <table class="kv-table fw-status"><tbody>
+      <tr><td class="label">On your signer</td><td>{running ? `v${running}` : 'unknown'}</td></tr>
+      <tr><td class="label">Bundled with this app</td><td>{latest ? `v${latest}` : '—'}</td></tr>
+    </tbody></table>
 
     {#if upToDate}
-      <p class="fw-ok">✓ Your signer is up to date.</p>
+      <p class="success-text fw-ok">Your signer is up to date.</p>
       {#if appUrl}
-        <button class="btn ghost" disabled={busy} onclick={updateToLatest}>Re-install v{latest}</button>
+        <button class="btn btn-secondary" disabled={busy} onclick={updateToLatest}>Re-install v{latest}</button>
       {/if}
     {:else if latest && appUrl}
-      <p class="lede">
+      <p class="hint">
         A newer firmware is bundled here. Your signer will ask you to approve it with its button,
         check it, and restart — rolling back on its own if anything is wrong.
       </p>
-      <button class="btn primary" disabled={busy} onclick={updateToLatest}>
+      <button class="btn btn-primary" disabled={busy} onclick={updateToLatest}>
         {busy ? 'Updating…' : `Update to v${latest} →`}
       </button>
     {:else if latest && boardMeta && !otaCapable}
-      <p class="lede">
+      <p class="hint">
         This board has no over-the-air update slot, so it updates by <strong>re-flashing over USB</strong>.
         Open the <a href="#/flash">Flasher</a> to install v{latest} (you'll re-enter your Wi-Fi).
       </p>
     {:else}
-      <p class="lede">No bundled firmware was found. Use your own <code>.bin</code> below.</p>
+      <p class="hint">No bundled firmware was found. Use your own <code>.bin</code> below.</p>
     {/if}
 
     <button class="advanced-toggle" onclick={() => (showAdvanced = !showAdvanced)}>
@@ -221,49 +215,40 @@
           <input type="file" accept=".sig" onchange={handleSigFileSelect} disabled={busy} />
           {sigFile ? sigFile.name : 'Signature (.sig) — newer firmware requires it'}
         </label>
-        <button class="btn primary" disabled={busy} onclick={updateFromFile}>
+        <button class="btn btn-primary" disabled={busy} onclick={updateFromFile}>
           {busy ? 'Updating…' : 'Update over USB →'}
         </button>
       {/if}
     {/if}
 
     {#if status === 'uploading'}
-      <div class="progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
-        <div class="fill" style="width: {progress}%"></div>
+      <div class="progress ota-progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill" style="width: {progress}%"></div>
       </div>
     {/if}
 
     {#if message}
-      <p class="message" class:error={status === 'error'} class:done={status === 'done'}>{message}</p>
+      <p
+        class="status-msg"
+        class:error-text={status === 'error'}
+        class:success-text={status === 'done'}
+        class:hint-sm={status !== 'error' && status !== 'done'}
+      >{message}</p>
     {/if}
   {/if}
 </section>
 
 <style>
   .ota { color: var(--text); }
-  h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 0.8rem; color: #fff; }
-  .lede { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; margin: 0 0 1rem; }
-  .lede strong { color: var(--text); }
-  .lede code { color: var(--green); }
-  .lede a { color: var(--green); text-decoration: underline; }
 
-  .usb-steps {
-    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
-    padding: 0.9rem 1rem; font-size: 0.88rem; color: var(--text-dim); line-height: 1.6;
-  }
+  .usb-steps { font-size: 0.88rem; }
   .steps-head { margin: 0 0 0.5rem; color: var(--text); font-weight: 600; }
   .usb-steps ol { margin: 0; padding-left: 1.3rem; }
   .usb-steps li { margin: 0.2rem 0; }
   .usb-steps strong { color: var(--green); }
 
-  .fw-status {
-    background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px;
-    padding: 0.6rem 0.85rem; margin-bottom: 1rem;
-  }
-  .fw-row { display: flex; justify-content: space-between; align-items: baseline; padding: 0.2rem 0; }
-  .fw-key { font-size: 0.78rem; color: var(--text-dim); }
-  .fw-val { font-size: 0.9rem; color: var(--text); font-variant-numeric: tabular-nums; }
-  .fw-ok { font-size: 0.9rem; color: var(--green); margin: 0 0 0.8rem; }
+  .fw-status { margin-bottom: 1rem; }
+  .fw-ok { margin: 0 0 0.8rem; }
 
   .advanced-toggle {
     display: block; margin: 1rem 0 0.6rem; padding: 0; background: none; border: none;
@@ -280,20 +265,7 @@
   .file-picker.has-file { color: var(--green); border-color: var(--green-dim); }
   .file-picker input { display: none; }
 
-  .btn {
-    font-family: inherit; font-size: 0.92rem; font-weight: 600; padding: 0.6rem 1.4rem;
-    border-radius: 5px; cursor: pointer; border: 1px solid transparent;
-  }
-  .btn.primary { background: var(--green); color: #050505; border-color: var(--green); }
-  .btn.primary:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
-  .btn.ghost { background: transparent; color: var(--text-dim); border-color: var(--border-bright); }
-  .btn.ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ota-progress { margin-top: 1rem; }
 
-  .progress { height: 6px; background: #11221a; border-radius: 3px; margin-top: 1rem; overflow: hidden; }
-  .fill { height: 100%; background: var(--green); transition: width 0.2s; }
-
-  .message { font-size: 0.85rem; color: var(--text-dim); margin-top: 0.8rem; line-height: 1.5; }
-  .message.error { color: var(--red); }
-  .message.done { color: var(--green); }
+  .status-msg { margin-top: 0.8rem; }
 </style>

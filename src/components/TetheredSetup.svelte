@@ -22,6 +22,7 @@
   import { buildSetBridgeSecret, FrameType } from '../lib/frame.js'
   import { transport as serialTransport } from '../lib/serial.js'
   import { generateBridgeSecret, bridgeArtifacts, type BridgeArtifacts } from '../lib/bridge-setup.js'
+  import { copyText } from '../lib/clipboard.js'
 
   type Step = 'intro' | 'flash' | 'provision' | 'bridge' | 'done'
   let step = $state<Step>('intro')
@@ -174,12 +175,9 @@
   })
 
   async function copy(label: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text)
+    if (await copyText(text)) {
       copied = label
       setTimeout(() => (copied = copied === label ? '' : copied), 1500)
-    } catch {
-      /* clipboard blocked — the text is on screen to copy by hand */
     }
   }
 </script>
@@ -197,32 +195,34 @@
       <strong>bridge</strong> program on an always-on computer (a Raspberry Pi is ideal), connected to
       the signer by USB. We'll flash it, set its key, and give you the bridge to run — all here.
     </p>
-    <p class="note">
-      The key is created on <strong>this computer</strong>. In a moment you'll be asked to
-      <strong>disconnect it from the internet</strong> first — that's what keeps the key safe, the same
-      as the command-line tool.
-    </p>
-    <button class="btn primary" onclick={() => (step = 'flash')}>Begin →</button>
+    <div class="card">
+      <p class="hint">
+        The key is created on <strong>this computer</strong>. In a moment you'll be asked to
+        <strong>disconnect it from the internet</strong> first — that's what keeps the key safe, the same
+        as the command-line tool.
+      </p>
+    </div>
+    <button class="btn btn-primary" onclick={() => (step = 'flash')}>Begin →</button>
 
   {:else if step === 'flash'}
-    <h2>1 · Flash the firmware</h2>
+    <h2 class="section-title">1 · Flash the firmware</h2>
     <p class="lede">Plug the ESP8266 into this computer with a USB cable, then flash it. This writes
       the public firmware only — no key yet — so it's fine to do online.</p>
     {#if flashing || flashPct > 0}
-      <div class="progress"><div class="fill" style="width: {flashPct}%"></div></div>
+      <div class="progress"><div class="progress-fill" style="width: {flashPct}%"></div></div>
     {/if}
-    {#if flashMsg}<p class="msg">{flashMsg}</p>{/if}
+    {#if flashMsg}<p class="hint">{flashMsg}</p>{/if}
     <div class="row">
-      <button class="btn primary" disabled={flashing} onclick={flash}>
+      <button class="btn btn-primary" disabled={flashing} onclick={flash}>
         {flashing ? `Flashing… ${flashPct}%` : flashDone ? 'Re-flash' : 'Flash firmware'}
       </button>
-      <button class="btn ghost" onclick={() => (step = 'provision')}>
+      <button class="btn btn-secondary" onclick={() => (step = 'provision')}>
         {flashDone ? 'Continue →' : 'Skip (already flashed) →'}
       </button>
     </div>
 
   {:else if step === 'provision'}
-    <h2>2 · Set the key</h2>
+    <h2 class="section-title">2 · Set the key</h2>
 
     <div class="gate" class:armed={offlineAck}>
       <p class="gate-title">⚠ Go offline first</p>
@@ -245,7 +245,7 @@
       {#if source === 'create'}
         <p class="lede">Generate a recovery phrase. <strong>Write it down on paper</strong> — it is the
           only backup of this signer's key.</p>
-        <button class="btn ghost" onclick={newPhrase}>{mnemonic ? 'Regenerate' : 'Generate phrase'}</button>
+        <button class="btn btn-secondary" onclick={newPhrase}>{mnemonic ? 'Regenerate' : 'Generate phrase'}</button>
         {#if mnemonic}
           <pre class="phrase">{mnemonic}</pre>
           <label class="check"><input type="checkbox" bind:checked={written} /> I've written it down safely.</label>
@@ -255,72 +255,71 @@
         <textarea bind:value={importText} rows="3" placeholder="nsec1… or twelve word recovery phrase" spellcheck="false"></textarea>
       {/if}
 
-      {#if provisionMsg}<p class="msg">{provisionMsg}</p>{/if}
-      <button class="btn primary" disabled={!canProvision || provisioning} onclick={provision}>
+      {#if provisionMsg}<p class="hint">{provisionMsg}</p>{/if}
+      <button class="btn btn-primary" disabled={!canProvision || provisioning} onclick={provision}>
         {provisioning ? 'Provisioning…' : 'Connect + write key →'}
       </button>
     </fieldset>
 
   {:else if step === 'bridge'}
-    <h2>3 · Run the bridge</h2>
-    {#if npub}<p class="ok">✓ Key written. Signer npub: <code class="npub">{npub}</code></p>{/if}
+    <h2 class="section-title">3 · Run the bridge</h2>
+    {#if npub}<p class="success-text">✓ Key written. Signer npub: <code class="mono">{npub}</code></p>{/if}
     <p class="lede">On the always-on computer the signer plugs into, set its USB port + relays, then
       run these. The bridge secret below is already set on your device.</p>
 
     <div class="grid">
-      <label>Bridge secret (already on your device)
-        <input type="text" value={bridgeSecret} readonly />
+      <label class="field">
+        <span class="field-label">Bridge secret (already on your device)</span>
+        <input type="text" class="field-input" value={bridgeSecret} readonly />
       </label>
-      <label>Signer's port on that computer
-        <input type="text" bind:value={hostPort} placeholder={defaultPort} />
-        <span class="hint">Linux/Pi: <code>/dev/ttyUSB0</code> · macOS: <code>/dev/cu.usbserial-…</code> · Windows: <code>COM3</code></span>
+      <label class="field">
+        <span class="field-label">Signer's port on that computer</span>
+        <input type="text" class="field-input" bind:value={hostPort} placeholder={defaultPort} />
+        <span class="field-hint">Linux/Pi: <code>/dev/ttyUSB0</code> · macOS: <code>/dev/cu.usbserial-…</code> · Windows: <code>COM3</code></span>
       </label>
-      <label>Relays (one per line)
-        <textarea bind:value={relaysText} rows="2"></textarea>
+      <label class="field">
+        <span class="field-label">Relays (one per line)</span>
+        <textarea class="field-input" bind:value={relaysText} rows="2"></textarea>
       </label>
     </div>
 
     {#if artifacts}
-      <div class="card">
-        <div class="card-head"><span>Create the bridge's config</span>
-          <button class="copy" onclick={() => copy('setup', artifacts.setupScript)}>{copied === 'setup' ? 'Copied' : 'Copy'}</button>
+      <div class="code-card">
+        <div class="code-card-head"><span>Create the bridge's config</span>
+          <button class="btn btn-secondary btn-sm" onclick={() => copy('setup', artifacts.setupScript)}>{copied === 'setup' ? 'Copied' : 'Copy'}</button>
         </div>
         <pre>{artifacts.setupScript}</pre>
       </div>
-      <div class="card">
-        <div class="card-head"><span>Run the bridge</span>
-          <button class="copy" onclick={() => copy('run', artifacts.runCommand)}>{copied === 'run' ? 'Copied' : 'Copy'}</button>
+      <div class="code-card">
+        <div class="code-card-head"><span>Run the bridge</span>
+          <button class="btn btn-secondary btn-sm" onclick={() => copy('run', artifacts.runCommand)}>{copied === 'run' ? 'Copied' : 'Copy'}</button>
         </div>
         <pre>{artifacts.runCommand}</pre>
       </div>
-      <button class="btn ghost" onclick={() => (step = 'done')}>Done →</button>
+      <button class="btn btn-secondary" onclick={() => (step = 'done')}>Done →</button>
     {:else}
-      <p class="note">Enter the signer's port and at least one relay to generate the bridge config.</p>
+      <p class="hint-sm">Enter the signer's port and at least one relay to generate the bridge config.</p>
     {/if}
 
   {:else if step === 'done'}
-    <h2>✓ Your tethered signer is ready</h2>
+    <h2 class="section-title">✓ Your tethered signer is ready</h2>
     <p class="lede">
       You can reconnect this computer to the internet now. Start the bridge on your always-on computer
-      (step 3) and it answers NIP-46 over your relays — including any <strong>personas</strong> a client
-      derives from this signer. Point a NIP-46 client at the signer's npub to sign.
+      (step 3) and it answers NIP-46 over your relays — including any <strong>personas</strong> an app
+      derives from this signer. Point a NIP-46 app at the signer's npub to sign.
     </p>
-    <button class="btn ghost" onclick={() => { step = 'intro'; offlineAck = false }}>Set up another</button>
+    <button class="btn btn-secondary" onclick={() => { step = 'intro'; offlineAck = false }}>Set up another</button>
   {/if}
 </section>
 
 <style>
   .tethered { color: var(--text); max-width: 640px; }
   h1 { font-size: 1.25rem; font-weight: 700; color: #fff; margin: 0 0 1rem; }
-  h2 { font-size: 1.05rem; font-weight: 700; color: #fff; margin: 0 0 0.8rem; }
   .lede { font-size: 0.92rem; color: var(--text-dim); line-height: 1.6; margin: 0 0 1rem; }
-  .lede strong, .note strong { color: var(--text); }
-  .lede code, .hint code { color: var(--green); word-break: break-all; }
-  .note { font-size: 0.85rem; color: var(--text-muted); line-height: 1.55; margin: 0 0 1rem;
-    background: #110d08; border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.85rem; }
-  .ok { font-size: 0.9rem; color: var(--green); margin: 0 0 1rem; }
-  .npub { color: var(--green); word-break: break-all; }
-  .msg { font-size: 0.85rem; color: var(--text-dim); margin: 0.6rem 0; line-height: 1.5; }
+  .lede strong { color: var(--text); }
+  .lede code { color: var(--green); word-break: break-all; }
+  .hint { margin: 0.6rem 0; }
+  .card > .hint { margin: 0; }
   .row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
 
   .gate { background: #1a0d0d; border: 1px solid var(--red); border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.2rem; }
@@ -332,14 +331,6 @@
   .keybox { border: none; padding: 0; margin: 0; min-width: 0; }
   .keybox:disabled { opacity: 0.45; }
 
-  .btn { font-family: inherit; font-size: 0.92rem; font-weight: 600; padding: 0.6rem 1.4rem;
-    border-radius: 5px; cursor: pointer; border: 1px solid transparent; }
-  .btn.primary { background: var(--green); color: #050505; border-color: var(--green); }
-  .btn.primary:hover:not(:disabled) { background: #00ff88; }
-  .btn.ghost { background: transparent; color: var(--text-dim); border-color: var(--border-bright); }
-  .btn.ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
   .seg { display: inline-flex; border: 1px solid var(--border-bright); border-radius: 6px; overflow: hidden; margin-bottom: 1rem; }
   .seg button { background: transparent; color: var(--text-dim); border: none; padding: 0.5rem 1rem; cursor: pointer; font-family: inherit; font-size: 0.85rem; }
   .seg button.active { background: var(--green); color: #050505; font-weight: 600; }
@@ -349,22 +340,13 @@
     word-spacing: 0.3rem; margin: 0.8rem 0; }
   .check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1rem; }
 
-  input[type=text], textarea { width: 100%; box-sizing: border-box; background: #0a0a0a;
-    border: 1px solid var(--border-bright); border-radius: 6px; color: var(--text);
-    font-family: inherit; font-size: 0.9rem; padding: 0.6rem; margin: 0.3rem 0 0.4rem; }
   input[readonly] { color: var(--text-muted); }
   .grid { display: grid; gap: 0.4rem; margin-bottom: 1rem; }
-  .grid label { font-size: 0.82rem; color: var(--text-dim); }
-  .hint { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.6rem; }
 
-  .card { background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.9rem; overflow: hidden; }
-  .card-head { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.7rem;
+  .code-card { background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.9rem; overflow: hidden; }
+  .code-card-head { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.7rem;
     border-bottom: 1px solid var(--border); font-size: 0.82rem; color: var(--text-dim); }
-  .card pre { margin: 0; padding: 0.7rem; font-size: 0.8rem; color: var(--text); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
-  .copy { background: transparent; border: 1px solid var(--border-bright); color: var(--text-dim);
-    border-radius: 4px; padding: 0.2rem 0.6rem; font-size: 0.75rem; cursor: pointer; }
-  .copy:hover { color: var(--text); border-color: var(--green-dim); }
+  .code-card pre { margin: 0; padding: 0.7rem; font-size: 0.8rem; color: var(--text); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
 
-  .progress { height: 6px; background: #11221a; border-radius: 3px; margin: 0.6rem 0; overflow: hidden; }
-  .fill { height: 100%; background: var(--green); transition: width 0.2s; }
+  .progress { margin: 0.6rem 0; }
 </style>

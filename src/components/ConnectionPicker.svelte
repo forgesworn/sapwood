@@ -139,7 +139,7 @@
   }
 </script>
 
-<div class="connection">
+<div class="connection card">
   {#if device.connected}
     <div class="status-row">
       <span class="indicator connected"></span>
@@ -147,7 +147,7 @@
       <span class="conn-detail">
         {device.mode === 'serial' ? 'USB' : device.mode === 'relay' ? 'WIFI' : 'BRIDGE'} &mdash; {device.portInfo}
       </span>
-      <button class="btn btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
+      <button class="btn btn-danger btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
     </div>
   {:else}
     {#if !justFlashed}
@@ -158,8 +158,8 @@
     {/if}
     {#if showRelayForm}
       <div class="relay-setup">
-        <h3 class="relay-title">Connect over your network</h3>
-        <p class="relay-lead">
+        <h3 class="section-title relay-title">Connect over your network</h3>
+        <p class="hint relay-lead">
           No cable needed — your Heartwood is on your WiFi. To find it, fill in the two boxes
           below. Easiest of all: on the computer where you first set the device up, show its QR
           code and scan it — both boxes then fill themselves in.
@@ -208,7 +208,7 @@
             </span>
           </label>
 
-          {#if relayError}<p class="error">{relayError}</p>{/if}
+          {#if relayError}<p class="error-text error">{relayError}</p>{/if}
 
           <div class="relay-actions">
             <button type="submit" class="btn btn-primary" disabled={connecting || !relayPubInput.trim()}>
@@ -221,22 +221,22 @@
         </form>
       </div>
     {:else if justFlashed}
-      <div class="finish-setup">
-        <h3 class="finish-title">✓ Flashed! Now let's finish your signer</h3>
+      <div class="card card--raised card--live finish-setup">
+        <h3 class="finish-title">✓ Flashed — now let's finish your signer</h3>
         <p class="finish-lead">
           Tap to connect to your new signer — then we'll name it and make its keys.
           <br /><strong>If it isn't found, press the RESET button on the board first</strong> (it needs a
           restart to start the new firmware), then tap again.
         </p>
         <button
-          class="btn btn-primary finish-btn"
+          class="btn btn-primary btn-block finish-btn"
           onclick={handleConnectSerial}
           disabled={connecting || !('serial' in navigator)}
         >
           {connecting ? 'Connecting…' : 'Connect to my new signer →'}
         </button>
         {#if !('serial' in navigator)}
-          <p class="notice">This needs Chrome or Edge on a computer — it talks over the USB cable.</p>
+          <p class="warn-text notice">This needs Chrome or Edge on a computer — it talks over the USB cable.</p>
         {/if}
         <button class="btn btn-ghost finish-other" onclick={clearJustFlashed}>
           Connect a different way
@@ -246,10 +246,10 @@
         </button>
       </div>
     {:else if !showHttpForm}
-      <button class="btn btn-setup" onclick={() => navigate('flash')}>
+      <button class="btn btn-primary btn-block btn-setup" onclick={() => navigate('flash')}>
         Set up a new device →
       </button>
-      <p class="connect-hint">Already have one? Connect to manage it:</p>
+      <p class="hint connect-hint">Already have one? Connect to manage it:</p>
       <div class="connect-buttons">
         <button
           class="btn btn-secondary"
@@ -263,19 +263,20 @@
         </button>
       </div>
       {#if !('serial' in navigator)}
-        <p class="notice">Connecting by USB cable needs Chrome or Edge.</p>
+        <p class="warn-text notice">Connecting by USB cable needs Chrome or Edge.</p>
       {/if}
-      <details class="more-ways">
+      <details class="disclosure more-ways">
         <summary>Other ways to connect</summary>
         <button class="btn btn-secondary more-ways-btn" onclick={() => showHttpForm = true} disabled={connecting}>
           Connect to a bridge
         </button>
-        <p class="more-ways-note">For a device run through a bridge on your network (advanced).</p>
+        <p class="hint-sm more-ways-note">For a device run through a bridge on your network (advanced).</p>
       </details>
     {:else}
       <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectHttp() }}>
         <input
           type="text"
+          class="field-input"
           bind:value={httpAddress}
           placeholder="192.168.0.107:3100"
           disabled={connecting}
@@ -291,15 +292,12 @@
     {/if}
   {/if}
   {#if device.error}
-    <p class="error">{device.error}</p>
+    <p class="error-text error">{device.error}</p>
   {/if}
 </div>
 
 <style>
   .connection {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
     padding: 1.25rem 1.5rem;
     margin-bottom: 1rem;
   }
@@ -340,34 +338,18 @@
   }
 
   .btn-setup {
-    display: block;
-    width: 100%;
     margin-top: 1.25rem;
-    background: var(--green);
-    color: #050505;
-    border-color: var(--green);
-    font-weight: 600;
     font-size: 1.05rem;
     padding: 0.85rem 1.5rem;
   }
-  .btn-setup:hover:not(:disabled) {
-    background: #00ff88;
-    box-shadow: var(--green-glow);
-  }
 
   .connect-hint {
-    font-size: 0.85rem;
-    color: var(--text-dim);
     margin: 1.5rem 0 0.6rem;
   }
 
   /* WiFi (relay) connect: a roomy, labelled form that explains itself. */
   .finish-setup {
     margin-top: 1.25rem;
-    border: 1px solid var(--green-dim);
-    border-radius: 8px;
-    padding: 1.5rem;
-    background: #06120e;
     text-align: center;
   }
   .finish-title {
@@ -384,7 +366,6 @@
     max-width: 30rem;
   }
   .finish-btn {
-    width: 100%;
     padding: 0.95rem 1rem;
     font-size: 1.05rem;
   }
@@ -395,54 +376,14 @@
 
   .relay-setup { margin-top: 1.25rem; }
   .relay-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: #fff;
     margin: 0 0 0.5rem;
     letter-spacing: 0.02em;
   }
   .relay-lead {
     font-size: 0.9rem;
-    color: var(--text-dim);
-    line-height: 1.55;
     margin: 0 0 1.4rem;
   }
   .relay-form { display: flex; flex-direction: column; gap: 1.2rem; }
-
-  .field { display: flex; flex-direction: column; gap: 0.45rem; }
-  .field-label {
-    font-size: 0.92rem;
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: 0.02em;
-  }
-  .field-input {
-    width: 100%;
-    background: #080808;
-    border: 1px solid var(--border-bright);
-    color: var(--text);
-    padding: 0.8rem 1rem;
-    border-radius: 6px;
-    font-family: inherit;
-    font-size: 1rem;
-  }
-  .field-input::placeholder { color: #444; }
-  .field-input:focus {
-    outline: none;
-    border-color: var(--green-dim);
-    box-shadow: var(--green-glow);
-  }
-  .field-hint {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    line-height: 1.5;
-  }
-  .field-hint code {
-    color: var(--green-dim);
-    background: #0a0a0a;
-    padding: 0.05rem 0.3rem;
-    border-radius: 3px;
-  }
 
   .relay-actions { display: flex; gap: 0.75rem; margin-top: 0.25rem; }
   .relay-actions .btn-primary { flex: 1; }
@@ -453,89 +394,25 @@
     margin-top: 0;
   }
 
-  .btn {
-    font-family: inherit;
-    font-size: 1rem;
-    font-weight: 500;
-    padding: 0.65rem 1.5rem;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s;
-    border: 1px solid transparent;
-    letter-spacing: 0.02em;
-  }
-
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-  .btn-primary {
-    background: var(--green);
-    color: #050505;
-    border-color: var(--green);
-    font-weight: 600;
-  }
-  .btn-primary:hover:not(:disabled) {
-    background: #00ff88;
-    box-shadow: var(--green-glow);
-  }
-
-  .btn-secondary {
-    background: transparent;
-    color: var(--text);
-    border-color: var(--border-bright);
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--surface-hover);
-    border-color: #444;
-  }
-
-  .btn-disconnect {
-    background: transparent;
-    color: var(--red);
-    border-color: #442222;
-    margin-left: auto;
-  }
-  .btn-disconnect:hover { background: #1a0808; }
-
-  .btn-ghost {
-    background: transparent;
-    color: var(--text-muted);
-    border: none;
-    padding: 0.65rem 1rem;
-  }
-  .btn-ghost:hover { color: var(--text-dim); }
+  .btn-disconnect { margin-left: auto; }
 
   .http-form {
     display: flex;
     gap: 0.75rem;
     align-items: center;
     margin-top: 1.25rem;
+    flex-wrap: wrap;
   }
 
-  .http-form input {
-    background: #080808;
-    border: 1px solid var(--border-bright);
-    color: var(--text);
-    padding: 0.65rem 1rem;
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 1rem;
-    width: 240px;
-  }
-  .http-form input::placeholder { color: #444; }
-  .http-form input:focus { outline: none; border-color: var(--green-dim); }
-  .http-form { flex-wrap: wrap; }
+  .http-form input { width: 240px; }
 
   .more-ways { margin-top: 1rem; }
-  .more-ways summary {
-    cursor: pointer; font-size: 0.82rem; color: var(--text-dim); letter-spacing: 0.02em;
-    list-style: revert; padding: 0.2rem 0;
-  }
-  .more-ways summary:hover { color: var(--text); }
+  .more-ways summary { letter-spacing: 0.02em; list-style: revert; }
   .more-ways-btn { margin-top: 0.75rem; }
-  .more-ways-note { font-size: 0.78rem; color: var(--text-muted); margin: 0.5rem 0 0; line-height: 1.45; }
+  .more-ways-note { margin: 0.5rem 0 0; line-height: 1.45; }
 
-  .notice { font-size: 0.85rem; color: var(--amber); margin-top: 0.75rem; }
-  .error { font-size: 0.9rem; color: var(--red); margin-top: 0.75rem; }
+  .notice { font-size: 0.85rem; margin-top: 0.75rem; }
+  .error { font-size: 0.9rem; margin-top: 0.75rem; }
 
   /* Mobile: stack the connect actions and let forms fill the width. */
   @media (max-width: 640px) {

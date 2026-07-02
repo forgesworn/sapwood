@@ -13,6 +13,7 @@
   import {
     PERMISSION_PRESETS, resolveKinds, isRestricted, type PresetId,
   } from '../lib/client-presets.js'
+  import { copyText } from '../lib/clipboard.js'
 
   interface Props {
     /** Called after the operator finishes (dismisses the result). */
@@ -80,7 +81,7 @@
         } catch (e) {
           // The connection still exists; only the limit failed to apply.
           permNote = overUsb
-            ? 'Connection made, but applying the limit needs a button press on the device — set it under Advanced › Clients.'
+            ? 'Connection made, but applying the limit needs a button press on the device — set it under Advanced › Apps.'
             : `Connection made, but the permission limit could not be applied: ${e instanceof Error ? e.message : 'unknown error'}.`
         }
       }
@@ -96,24 +97,7 @@
 
   async function copyLink() {
     if (!created?.bunker_uri) return
-    let ok = false
-    try {
-      await navigator.clipboard.writeText(created.bunker_uri)
-      ok = true
-    } catch {
-      // clipboard API can be blocked (insecure context / permissions) — fall
-      // back to a hidden textarea + execCommand so copy still works.
-      try {
-        const ta = document.createElement('textarea')
-        ta.value = created.bunker_uri
-        ta.style.position = 'fixed'
-        ta.style.opacity = '0'
-        document.body.appendChild(ta)
-        ta.select()
-        ok = document.execCommand('copy')
-        document.body.removeChild(ta)
-      } catch { /* the URI is shown as selectable text below — copy by hand */ }
-    }
+    const ok = await copyText(created.bunker_uri)
     if (ok) {
       copied = true
       setTimeout(() => (copied = false), 1600)
@@ -140,26 +124,26 @@
   <section class="flow" aria-label="Connect an app">
     {#if step === 'name'}
       <h3 class="flow-title">What are you connecting?</h3>
-      <p class="flow-hint">Give it a name you will recognise — the app and where it runs.</p>
+      <p class="hint">Give it a name you will recognise — the app and where it runs.</p>
       <input
         type="text"
-        class="text-input"
+        class="field-input"
         bind:value={name}
         placeholder="e.g. Damus on my phone"
         onkeydown={(e) => { if (e.key === 'Enter' && canCreate(name)) step = 'permissions' }}
         disabled={creating}
       />
-      {#if error}<p class="flow-error">{error}</p>{/if}
+      {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
-        <button class="btn-ghost" onclick={cancel}>Cancel</button>
-        <button class="btn-primary" disabled={!canCreate(name)} onclick={() => { error = null; step = 'permissions' }}>
+        <button class="btn btn-ghost" onclick={cancel}>Cancel</button>
+        <button class="btn btn-primary" disabled={!canCreate(name)} onclick={() => { error = null; step = 'permissions' }}>
           Continue
         </button>
       </div>
 
     {:else if step === 'permissions'}
       <h3 class="flow-title">What can “{name.trim()}” do?</h3>
-      <p class="flow-hint">You can change this later under Advanced.</p>
+      <p class="hint">You can change this later under Advanced.</p>
       <div class="presets">
         {#each PERMISSION_PRESETS as preset (preset.id)}
           <button
@@ -189,12 +173,12 @@
       {/if}
 
       {#if overUsb}
-        <p class="flow-note">Over USB the first signature is approved by a physical button press on the device.</p>
+        <p class="hint-sm flow-note">Over USB the first signature is approved by a physical button press on the device.</p>
       {/if}
-      {#if error}<p class="flow-error">{error}</p>{/if}
+      {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
-        <button class="btn-ghost" onclick={() => { error = null; step = 'name' }} disabled={creating}>Back</button>
-        <button class="btn-primary" onclick={create} disabled={creating}>
+        <button class="btn btn-ghost" onclick={() => { error = null; step = 'name' }} disabled={creating}>Back</button>
+        <button class="btn btn-primary" onclick={create} disabled={creating}>
           {creating ? 'Creating…' : 'Create connection'}
         </button>
       </div>
@@ -205,21 +189,23 @@
         <h3 class="flow-title">Connection ready</h3>
       </div>
       {#if created.bunker_uri}
-        <p class="flow-hint">Scan this with the app — or copy the link below and paste it in. It works once.</p>
+        <p class="hint">Scan this with the app — or copy the link below and paste it in. It works once.</p>
         <div class="qr">{@html qr}</div>
-        <div class="uri-box"><code>{created.bunker_uri}</code></div>
-        <button class="btn-copy" class:copied onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link'}</button>
-        <p class="flow-warn">This link carries the connection secret. Anyone who has it can sign as this app.</p>
+        <div class="uri-box copy-uri">
+          <code>{created.bunker_uri}</code>
+        </div>
+        <button class="btn btn-secondary copy-link" class:copied onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link'}</button>
+        <p class="warn-text">This link carries the connection secret. Anyone who has it can sign as this app.</p>
       {:else}
-        <p class="flow-warn">
+        <p class="warn-text">
           Created, but this device has no relay set, so there is no link to scan yet. Set a relay
           (Advanced › Connectivity), then reopen the connection. The secret is
           <code class="inline-secret">{created.secret}</code>.
         </p>
       {/if}
-      {#if permNote}<p class="flow-note">{permNote}</p>{/if}
+      {#if permNote}<p class="hint-sm flow-note">{permNote}</p>{/if}
       <div class="flow-actions">
-        <button class="btn-primary" onclick={finish}>Done</button>
+        <button class="btn btn-primary" onclick={finish}>Done</button>
       </div>
     {/if}
   </section>
@@ -257,24 +243,10 @@
     padding: 1.4rem;
   }
   .flow-title { font-size: 1.1rem; font-weight: 600; color: #fff; margin: 0 0 0.35rem; }
-  .flow-hint { font-size: 0.86rem; color: var(--text-dim); margin: 0 0 1rem; line-height: 1.5; }
-  .flow-note { font-size: 0.78rem; color: var(--text-dim); margin: 0.9rem 0 0; line-height: 1.45; }
-  .flow-warn { font-size: 0.78rem; color: var(--amber); margin: 0.9rem 0 0; line-height: 1.45; }
-  .flow-error { font-size: 0.85rem; color: var(--red); margin: 0.6rem 0 0; }
+  /* .hint/.hint-sm default to zero or generic top margin; this flow stacks
+     them after other elements so they need a little breathing room above. */
+  .flow-note { margin-top: 0.9rem; }
   .inline-secret { color: var(--green); word-break: break-all; user-select: all; }
-
-  .text-input {
-    width: 100%;
-    background: #0e0e0e;
-    border: 1px solid #3a3a3a;
-    color: #eee;
-    padding: 0.7rem 0.9rem;
-    border-radius: 5px;
-    font-family: inherit;
-    font-size: 1rem;
-  }
-  .text-input:focus { outline: none; border-color: var(--green); }
-  .text-input::placeholder { color: #666; }
 
   .presets { display: flex; flex-direction: column; gap: 0.5rem; }
   .preset {
@@ -318,38 +290,10 @@
 
   /* The bunker link as selectable text — always copyable by hand, even if the
      clipboard button is blocked. Tap/click selects the whole URI. */
-  .uri-box {
-    background: #050505; border: 1px solid var(--border); border-radius: 5px;
-    padding: 0.6rem 0.7rem; margin: 0 0 0.7rem;
-  }
-  .uri-box code {
-    display: block; font-size: 0.76rem; color: var(--green); line-height: 1.5;
-    word-break: break-all; user-select: all;
-  }
+  .copy-uri { margin: 0 0 0.7rem; }
+  .copy-link.copied { border-color: var(--green-dim); color: var(--green); }
 
   .flow-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.2rem; }
-
-  .btn-primary {
-    background: var(--green); color: #050505; border: none; padding: 0.6rem 1.4rem;
-    border-radius: 5px; font-family: inherit; font-size: 0.92rem; font-weight: 600;
-    cursor: pointer; transition: background 0.15s, box-shadow 0.15s;
-  }
-  .btn-primary:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
-  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
-
-  .btn-ghost {
-    background: transparent; color: var(--text-dim); border: 1px solid var(--border-bright);
-    padding: 0.6rem 1.2rem; border-radius: 5px; font-family: inherit; font-size: 0.92rem; cursor: pointer;
-  }
-  .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: #444; }
-  .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .btn-copy {
-    background: var(--surface); border: 1px solid var(--border-bright); color: var(--text);
-    padding: 0.5rem 1.1rem; border-radius: 5px; font-family: inherit; font-size: 0.85rem; cursor: pointer;
-  }
-  .btn-copy:hover { background: var(--surface-hover); }
-  .btn-copy.copied { border-color: var(--green-dim); color: var(--green); }
 
   @media (max-width: 640px) {
     .flow { padding: 1.1rem; }

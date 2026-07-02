@@ -133,7 +133,7 @@
 
       if (resp.type === FrameType.ACK) {
         status = 'done'
-        message = `Master '${label}' provisioned.`
+        message = `Identity '${label}' added to the signer.`
         // Remember this device so it can be managed over the relay once it
         // boots into wifi-standalone mode (Connect WiFi in the top bar).
         rememberProvisioned(npubPreview, label)
@@ -169,41 +169,39 @@
 </script>
 
 <div class="provision">
-  <h2>Provision Master</h2>
-
   {#if status === 'done'}
     <!-- Checked before the USB guard: the device may have already rebooted into
          wifi mode (USB dropped), but the operator still needs this result + handoff. -->
-    <p class="success">{message}</p>
+    <p class="success-text">{message}</p>
     {#if npubPreview}
-      <div class="provisioned-npub">
-        <span class="np-label">Device identity</span>
-        <code class="np-value">{npubPreview}</code>
+      <div class="field provisioned-npub">
+        <span class="field-label">Device identity</span>
+        <div class="uri-box"><code class="mono">{npubPreview}</code></div>
       </div>
     {/if}
     {#if handoff}
-      <div class="handoff">
+      <div class="card card--live handoff">
         <p class="handoff-hint">
           This is now a wifi signer — it manages over the relay, not USB. Give it ~10s to reboot
           and join wifi, then:
         </p>
         {#if device.mode === 'relay'}
-          <p class="handoff-ok">✓ Connected over WiFi — open the Masters or Clients tab.</p>
+          <p class="success-text handoff-ok">Connected over WiFi — open the Identity or Apps tab.</p>
         {:else}
-          <button class="btn manage-wifi" onclick={handleManageWifi} disabled={handoffConnecting}>
+          <button class="btn btn-primary manage-wifi" onclick={handleManageWifi} disabled={handoffConnecting}>
             {handoffConnecting ? 'Connecting…' : 'Manage over WiFi'}
           </button>
         {/if}
-        {#if handoffError}<p class="handoff-error">{handoffError}</p>{/if}
+        {#if handoffError}<p class="error-text handoff-error">{handoffError}</p>{/if}
       </div>
     {/if}
-    <button class="btn" onclick={handleCancel}>Provision Another</button>
+    <button class="btn btn-secondary" onclick={handleCancel}>Add another</button>
   {:else if device.mode !== 'serial'}
-    <div class="usb-gate">
+    <div class="card card--warn usb-gate">
       <p class="usb-gate-lead">🔌 Plug in a USB cable to set up this device.</p>
       <p class="usb-gate-why">
         Setting up creates the device's <strong>master key</strong> — the one secret that
-        every account on it is built from. Think of it as the master key to a whole building:
+        every identity on it is built from. Think of it as the master key to a whole building:
         if it ever gets out, every door is open and you can't change the locks.
       </p>
       <p class="usb-gate-why">
@@ -223,17 +221,17 @@
           This is the <strong>new address</strong> your signer will have — check it before sending:
         {/if}
       </p>
-      <p class="npub">{npubPreview}</p>
+      <div class="uri-box confirm-npub"><code class="mono">{npubPreview}</code></div>
       <div class="actions">
-        <button class="btn send" onclick={handleSend}>Send to Device</button>
-        <button class="btn cancel" onclick={handleCancel}>Cancel</button>
+        <button class="btn btn-primary" onclick={handleSend}>Send to device</button>
+        <button class="btn-ghost" onclick={handleCancel}>Cancel</button>
       </div>
     </div>
   {:else}
     <div class="form">
       <label class="field">
-        <span>How do you want to set up this signer?</span>
-        <select bind:value={mode} disabled={status !== 'idle'}>
+        <span class="field-label">How do you want to set up this signer?</span>
+        <select class="field-input" bind:value={mode} disabled={status !== 'idle'}>
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
           <option value="bunker">Existing nsec — sign as-is (keeps your npub)</option>
           <option value="tree-nsec">Existing nsec — derive a new key (new npub)</option>
@@ -249,14 +247,15 @@
       </div>
 
       <label class="field">
-        <span>Label</span>
-        <input type="text" bind:value={label} placeholder="default" maxlength="32" disabled={status !== 'idle'} />
+        <span class="field-label">Label</span>
+        <input class="field-input" type="text" bind:value={label} placeholder="default" maxlength="32" disabled={status !== 'idle'} />
       </label>
 
       {#if mode === 'tree-mnemonic'}
         <label class="field">
-          <span>Mnemonic</span>
+          <span class="field-label">Mnemonic</span>
           <textarea
+            class="field-input"
             bind:value={secret}
             placeholder="12 or 24 words"
             rows="3"
@@ -266,18 +265,19 @@
           ></textarea>
         </label>
         <label class="field">
-          <span>Passphrase</span>
-          <div class="pw">
-            <input type={showPassphrase ? 'text' : 'password'} bind:value={passphrase} placeholder="Optional" disabled={status !== 'idle'} />
+          <span class="field-label">Passphrase</span>
+          <div class="pw-wrap">
+            <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" disabled={status !== 'idle'} />
             <PasswordReveal bind:shown={showPassphrase} disabled={status !== 'idle'} />
           </div>
         </label>
       {:else}
         <label class="field">
-          <span>{mode === 'tree-nsec' ? 'nsec (tree derivation)' : 'nsec (raw, no derivation)'}</span>
-          <div class="pw">
+          <span class="field-label">{mode === 'tree-nsec' ? 'nsec (tree derivation)' : 'nsec (raw, no derivation)'}</span>
+          <div class="pw-wrap">
             <input
               type={showSecret ? 'text' : 'password'}
+              class="field-input"
               bind:value={secret}
               placeholder="nsec1..."
               disabled={status !== 'idle'}
@@ -289,7 +289,7 @@
       {/if}
 
       <button
-        class="btn derive"
+        class="btn btn-primary derive"
         disabled={!device.connected || device.mode !== 'serial' || status === 'deriving' || !secret.trim()}
         onclick={handleDerive}
       >
@@ -298,7 +298,7 @@
     </div>
 
     {#if status === 'error'}
-      <p class="error">{message}</p>
+      <p class="error-text">{message}</p>
     {/if}
   {/if}
 
@@ -308,91 +308,41 @@
 </div>
 
 <style>
-  h2 { font-size: 1rem; font-weight: 600; margin: 0 0 1rem; color: #ccc; }
-
   .form { display: flex; flex-direction: column; gap: 0.75rem; }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .field span {
-    font-size: 0.75rem;
-    color: #666;
-  }
-
-  .field select, .field input, .field textarea {
-    background: #0a0a0a;
-    border: 1px solid #333;
-    color: #ccc;
-    padding: 0.35rem 0.5rem;
-    border-radius: 3px;
-    font-family: inherit;
-    font-size: 0.8rem;
-    resize: vertical;
-  }
-
-  .field select { cursor: pointer; }
-  .pw { position: relative; display: flex; }
-  .pw input { flex: 1; padding-right: 2.2rem; }
-  .field input:disabled, .field textarea:disabled, .field select:disabled { opacity: 0.4; }
-  .field input::placeholder, .field textarea::placeholder { color: #444; }
-
-  .btn {
-    background: #1a1a1a;
-    border: 1px solid #333;
-    color: #ccc;
-    padding: 0.4rem 1rem;
-    border-radius: 3px;
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-
-  .btn:hover:not(:disabled) { background: #222; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn.derive { border-color: #4a9; color: #4a9; align-self: flex-start; margin-top: 0.25rem; }
-  .btn.send { border-color: #4a9; color: #4a9; }
-  .btn.cancel { color: #666; }
+  .derive { align-self: flex-start; margin-top: 0.25rem; }
 
   .confirm { margin: 1rem 0; }
-  .npub { font-size: 0.7rem; color: #4a9; word-break: break-all; margin: 0.5rem 0; background: #111; padding: 0.5rem; border-radius: 3px; }
-  .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+  .confirm-npub { margin: 0.5rem 0; }
+  .actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
 
-  .info { font-size: 0.8rem; color: #888; margin: 0; }
-  .info strong { color: #ccc; }
+  .info { font-size: 0.8rem; color: var(--text-dim); margin: 0; }
+  .info strong { color: var(--text); }
 
   .mode-info {
     border: 1px solid #243; border-left: 3px solid #4a9; border-radius: 4px;
     padding: 0.6rem 0.8rem; background: #08120e; margin: -0.25rem 0 0.25rem;
   }
   .mode-info.same { border-left-color: var(--green); }
-  .mode-info-body { font-size: 0.78rem; color: #9a9; line-height: 1.5; margin: 0 0 0.5rem; }
-  .mode-info-addr { font-size: 0.78rem; color: #cdd; margin: 0; display: flex; align-items: center; gap: 0.45rem; }
+  .mode-info-body { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin: 0 0 0.5rem; }
+  .mode-info-addr { font-size: 0.78rem; color: var(--text-dim); margin: 0; display: flex; align-items: center; gap: 0.45rem; }
   .addr-chip {
     font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
     color: #cba24a; border: 1px solid #5a4a20; border-radius: 3px; padding: 0.1rem 0.4rem; flex-shrink: 0;
   }
   .mode-info.same .addr-chip { color: var(--green); border-color: var(--green-dim); }
 
-  .usb-gate { border: 1px solid #3a3320; border-radius: 4px; padding: 0.9rem 1.1rem; background: #120f06; }
-  .usb-gate-lead { font-size: 0.9rem; color: #cba24a; font-weight: 600; margin: 0 0 0.7rem; }
-  .usb-gate-why { font-size: 0.8rem; color: #999; line-height: 1.55; margin: 0 0 0.6rem; }
-  .usb-gate-why strong { color: #cba24a; font-weight: 600; }
-  .usb-gate-why em { color: #4a9; font-style: normal; }
-  .usb-gate-todo { font-size: 0.8rem; color: #4a9; line-height: 1.45; margin: 0.4rem 0 0; }
-  .error { font-size: 0.8rem; color: #a44; margin-top: 0.5rem; }
-  .success { font-size: 0.85rem; color: #4a9; }
-  .security-note { font-size: 0.7rem; color: #444; margin-top: 1.5rem; border-top: 1px solid #1a1a1a; padding-top: 0.75rem; }
+  .usb-gate-lead { font-size: 0.9rem; color: var(--amber); font-weight: 600; margin: 0 0 0.7rem; }
+  .usb-gate-why { font-size: 0.8rem; color: var(--text-dim); line-height: 1.55; margin: 0 0 0.6rem; }
+  .usb-gate-why strong { color: var(--amber); font-weight: 600; }
+  .usb-gate-why em { color: var(--green-dim); font-style: normal; }
+  .usb-gate-todo { font-size: 0.8rem; color: var(--green-dim); line-height: 1.45; margin: 0.4rem 0 0; }
 
-  .provisioned-npub { display: flex; flex-direction: column; gap: 0.25rem; margin: 0.75rem 0; }
-  .np-label { font-size: 0.7rem; color: #666; letter-spacing: 0.08em; text-transform: uppercase; }
-  .np-value { font-size: 0.72rem; color: #4a9; word-break: break-all; background: #111; padding: 0.5rem; border-radius: 3px; user-select: all; }
-  .handoff { border: 1px solid #1c3a2a; border-radius: 4px; padding: 0.75rem 1rem; margin: 0.75rem 0; background: #06120e; }
-  .handoff-hint { font-size: 0.78rem; color: #9a9; margin: 0 0 0.6rem; line-height: 1.4; }
-  .handoff-ok { font-size: 0.82rem; color: #4a9; margin: 0; }
-  .handoff-error { font-size: 0.75rem; color: #a93; margin: 0.5rem 0 0; line-height: 1.4; }
-  .manage-wifi { border-color: #4a9; color: #4a9; }
+  .security-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+
+  .provisioned-npub { margin: 0.75rem 0; }
+  .handoff { margin: 0.75rem 0; }
+  .handoff-hint { font-size: 0.78rem; color: var(--text-dim); margin: 0 0 0.6rem; line-height: 1.4; }
+  .handoff-ok { margin: 0; }
+  .handoff-error { margin: 0.5rem 0 0; }
+  .manage-wifi { margin-top: 0.25rem; }
 </style>

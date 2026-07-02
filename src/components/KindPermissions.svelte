@@ -80,7 +80,7 @@
         {/if}
       </button>
       {#if !updating && !unrestricted}
-        <button class="perms-reset" onclick={allowAll}>Allow all</button>
+        <button class="btn btn-secondary btn-sm perms-reset" onclick={allowAll}>Allow all</button>
       {/if}
     </div>
 
@@ -196,18 +196,7 @@
   }
   .perms-summary.restricted { color: var(--amber); }
 
-  .perms-reset {
-    background: none;
-    border: 1px solid var(--border-bright);
-    color: var(--text-dim);
-    padding: 0.2rem 0.6rem;
-    border-radius: 3px;
-    font-family: inherit;
-    font-size: 0.75rem;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .perms-reset:hover { background: var(--surface-hover); color: #fff; }
+  .perms-reset { flex-shrink: 0; }
 
   /* Kind chip grid */
   .perms-grid {

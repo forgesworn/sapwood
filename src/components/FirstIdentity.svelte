@@ -1,10 +1,10 @@
 <script lang="ts">
   // The guided "give your signer its first identity" flow, shown on Home when a
-  // device is connected over USB but has no master yet. The DEVICE generates its
+  // device is connected over USB but has no identity yet. The DEVICE generates its
   // own seed from its hardware RNG and shows the 12-word recovery phrase on its
   // OWN screen — the phrase is never generated or displayed in the browser. We
   // only ask it to generate and then show the resulting public npub. Power users
-  // with an existing key take the "I already have one" door to Advanced › Provision.
+  // with an existing key take the "I already have one" door to Advanced › Identity.
   import { device, connectRelay, generateIdentity, restoreIdentity, getFirmwareVersion } from '../lib/device.svelte.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { navigate } from '../lib/route.svelte.js'
@@ -144,8 +144,8 @@
       from your phone.
     </p>
     <div class="fi-actions">
-      <button class="btn primary" onclick={startCreate}>Create a fresh identity →</button>
-      <button class="btn ghost" onclick={startRestore}>Restore from my 12 words</button>
+      <button class="btn btn-primary" onclick={startCreate}>Create a fresh identity →</button>
+      <button class="btn btn-secondary" onclick={startRestore}>Restore from my 12 words</button>
     </div>
     <button class="fi-advanced" onclick={() => onadvanced?.()}>Advanced: use a raw key (nsec/bunker)</button>
 
@@ -161,23 +161,23 @@
       {/if}
     </p>
     <label class="field">
-      <span>Name this signer (optional)</span>
-      <input type="text" bind:value={name} placeholder="e.g. My signer" maxlength="32" />
+      <span class="field-label">Name this signer (optional)</span>
+      <input type="text" class="field-input" bind:value={name} placeholder="e.g. My signer" maxlength="32" />
     </label>
-    {#if nameError(name)}<p class="fi-error">{nameError(name)}</p>{/if}
-    {#if error}<p class="fi-error">{error}</p>{/if}
+    {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
+    {#if error}<p class="error-text">{error}</p>{/if}
     {#if status === 'generating'}
       <p class="fi-working">⏳ Your device is creating its keys — this takes a few seconds. Watch its
         screen; the 12 words appear there when it's ready.</p>
     {/if}
     <div class="fi-actions">
-      <button class="btn ghost" onclick={() => (step = 'intro')} disabled={status === 'generating'}>Back</button>
+      <button class="btn btn-secondary" onclick={() => (step = 'intro')} disabled={status === 'generating'}>Back</button>
       {#if mode === 'restore'}
-        <button class="btn primary" disabled={!nameOk(name)} onclick={restoreOnDevice}>
+        <button class="btn btn-primary" disabled={!nameOk(name)} onclick={restoreOnDevice}>
           Restore on my device →
         </button>
       {:else}
-        <button class="btn primary" disabled={!nameOk(name) || status === 'generating'} onclick={generateOnDevice}>
+        <button class="btn btn-primary" disabled={!nameOk(name) || status === 'generating'} onclick={generateOnDevice}>
           {status === 'generating' ? 'Creating on device…' : 'Create it on my device →'}
         </button>
       {/if}
@@ -196,15 +196,15 @@
       saved. A WiFi signer then reboots and joins your network — give it about 10 seconds.
     </p>
     {#if npub}
-      <p class="npub">{npub}</p>
-      <p class="fi-hint">↑ your signer's public address — safe to share</p>
+      <div class="uri-box"><code>{npub}</code></div>
+      <p class="hint-sm">↑ your signer's public address — safe to share</p>
     {/if}
     <label class="confirm-save">
       <input type="checkbox" bind:checked={saved} />
       <span>I've stepped through all 12 words, written them down, and held the button to save.</span>
     </label>
     <div class="fi-actions">
-      <button class="btn primary" disabled={!saved} onclick={finish}>Continue</button>
+      <button class="btn btn-primary" disabled={!saved} onclick={finish}>Continue</button>
     </div>
 
   {:else if step === 'restoring'}
@@ -247,17 +247,17 @@
         needed. Give it about 10 seconds to reboot and join WiFi, then connect:
       </p>
       {#if device.mode === 'relay'}
-        <p class="fi-ok">✓ Connected over WiFi — you can connect your apps now.</p>
+        <p class="success-text">✓ Connected over WiFi — you can connect your apps now.</p>
       {:else}
-        <button class="btn primary" onclick={manageWifi} disabled={handoffConnecting}>
+        <button class="btn btn-primary" onclick={manageWifi} disabled={handoffConnecting}>
           {handoffConnecting ? 'Connecting…' : 'Manage over WiFi'}
         </button>
-        {#if handoffError}<p class="fi-warn">{handoffError}</p>{/if}
+        {#if handoffError}<p class="warn-text">{handoffError}</p>{/if}
       {/if}
     {:else}
       <p class="fi-lede">It's ready. You can connect your first app now.</p>
       <div class="fi-actions">
-        <button class="btn primary" onclick={() => ondone?.()}>Continue</button>
+        <button class="btn btn-primary" onclick={() => ondone?.()}>Continue</button>
       </div>
     {/if}
     <button class="fi-another" onclick={() => navigate('flash')}>
@@ -281,11 +281,7 @@
   .fi-title { font-size: 1.35rem; font-weight: 700; color: #fff; margin: 0 0 0.6rem; letter-spacing: 0.01em; }
   .fi-lede { font-size: 0.92rem; color: var(--text-dim); line-height: 1.65; margin: 0 0 1.2rem; }
   .fi-lede strong { color: var(--text); }
-  .fi-warn { font-size: 0.8rem; color: var(--amber); line-height: 1.5; margin: 0.8rem 0 0; }
-  .fi-error { font-size: 0.85rem; color: var(--red); margin: 0.6rem 0 0; }
   .fi-working { font-size: 0.85rem; color: var(--green-dim); line-height: 1.55; margin: 0.6rem 0 0; }
-  .fi-ok { font-size: 0.9rem; color: var(--green); margin: 0; }
-  .fi-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.3rem 0 1rem; }
 
   .fi-advanced {
     display: block; margin: 1rem 0 0; padding: 0; width: 100%;
@@ -308,19 +304,7 @@
   }
   .confirm-save input { margin-top: 0.2rem; accent-color: var(--green); width: 1.1rem; height: 1.1rem; flex-shrink: 0; }
 
-  .field { display: flex; flex-direction: column; gap: 0.35rem; }
-  .field span { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
-  .field input {
-    background: #0e0e0e; border: 1px solid var(--border-bright); color: #eee;
-    padding: 0.7rem 0.85rem; border-radius: 5px; font-family: inherit; font-size: 1rem;
-  }
-  .field input:focus { outline: none; border-color: var(--green); }
-  .field input::placeholder { color: #555; }
-
-  .npub {
-    font-size: 0.78rem; color: var(--green); word-break: break-all; user-select: all;
-    background: #050505; border: 1px solid var(--border); border-radius: 5px; padding: 0.7rem 0.8rem; margin: 0 0 0.4rem;
-  }
+  .uri-box { margin: 0 0 0.4rem; }
 
   .done-head { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.5rem; }
   .done-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: var(--green-glow); flex-shrink: 0; }
@@ -334,16 +318,6 @@
     color: var(--text-dim); cursor: pointer; font-family: inherit; font-size: 0.85rem; text-align: left;
   }
   .fi-another:hover { color: var(--green); }
-
-  .btn {
-    font-family: inherit; font-size: 0.92rem; font-weight: 500; padding: 0.65rem 1.4rem;
-    border-radius: 5px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
-  }
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-  .btn.primary { background: var(--green); color: #050505; border-color: var(--green); font-weight: 600; }
-  .btn.primary:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
-  .btn.ghost { background: transparent; color: var(--text-dim); border-color: var(--border-bright); }
-  .btn.ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
 
   @media (max-width: 640px) {
     .fi { padding: 1.2rem; }
