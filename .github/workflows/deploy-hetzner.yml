@@ -26,6 +26,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Self-contained gate: a direct push to main must not deploy untested
+      # code just because no PR ran CI first.
+      - run: npm run check
+      - run: npm test
       - run: npm run build
       - name: Deploy to Hetzner (sapwood.forgesworn.dev)
         env:
