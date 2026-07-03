@@ -344,7 +344,8 @@
       <p class="hint">
         This browser holds the key that manages this signer. If the browser's storage is lost,
         so is your access: {opMnemonic ? 'write these words down once' : 'store this secret once'}
-        and keep them somewhere safe.
+        and keep them somewhere safe. You can see it again any time under
+        Identity › Operator key in the Advanced console.
       </p>
       {#if !backupOpen}
         <button class="btn btn-warn" onclick={() => (backupOpen = true)}>

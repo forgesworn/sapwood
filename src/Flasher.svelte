@@ -473,8 +473,9 @@
         <div class="card card--warn bridge-todo">
           <p class="bridge-todo-title">To let Nostr apps reach this signer remotely</p>
           <p class="hint-sm">
-            Run the <strong>heartwood bridge daemon</strong> (from the heartwood-esp32 project) on
-            a computer that stays on, with the signer plugged into it. The daemon holds the cable
+            Run the <strong>heartwood bridge daemon</strong> (from the
+            <a href="https://github.com/forgesworn/heartwood-esp32" target="_blank" rel="noopener">heartwood-esp32</a>
+            project) on a computer that stays on, with the signer plugged into it. The daemon holds the cable
             and couriers signing requests to and from your relays. The signer itself never
             touches the network. Once it's running, open Sapwood from the bridge's address (or use
             “Other ways to connect › Connect to a bridge”) to manage the signer through it.
