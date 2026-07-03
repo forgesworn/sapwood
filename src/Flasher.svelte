@@ -140,7 +140,7 @@
 
   <section class="panel">
     {#if tethered}
-      <button class="btn-link" onclick={() => (tethered = false)}>← Back to Wi-Fi setup</button>
+      <button class="btn-link" onclick={() => (tethered = false)}>← Choose a different board</button>
       <TetheredSetup />
     {:else if step === 'welcome'}
       <h2>Set up your Heartwood</h2>
@@ -162,11 +162,6 @@
       <div class="actions">
         <button class="btn btn-primary" onclick={goNext} disabled={!webSerial}>Start</button>
       </div>
-      {#if webSerial}
-        <button class="btn-link tethered-link" onclick={() => (tethered = true)}>
-          Setting up a USB-tethered ESP8266 signer instead? →
-        </button>
-      {/if}
 
     {:else if step === 'board'}
       <h2>Which device do you have?</h2>
@@ -183,6 +178,18 @@
             <span class="board-tick">{data.boardId === b.id ? '●' : '○'}</span>
           </button>
         {/each}
+        <!-- The ESP8266 is a board like any other to choose — but its setup is its
+             own guided flow (no WiFi on the signer; provisioned in-browser; runs
+             behind the bridge daemon), so picking it hands over rather than
+             advancing this wizard. -->
+        <button class="board-card board-card--tethered" onclick={() => (tethered = true)}>
+          <span class="board-body">
+            <span class="board-name">ESP8266 <span class="board-tag">USB-tethered · hardened</span></span>
+            <span class="board-sub">No WiFi on the signer — it stays plugged into an always-on
+              computer and the bridge daemon carries its traffic. Its own guided setup.</span>
+          </span>
+          <span class="board-tick">→</span>
+        </button>
       </div>
       <p class="hint-sm">Plug the board into this computer with a USB cable now, if you haven't already.</p>
       <div class="actions">
@@ -456,7 +463,16 @@
   }
   .board-card:hover { background: var(--surface-hover); }
   .board-card.selected { border-color: var(--green); background: #06120e; }
-  .board-tick { color: var(--green); font-size: 1.1rem; }
+  .board-tick { color: var(--green); font-size: 1.1rem; flex-shrink: 0; }
+
+  .board-card--tethered { align-items: flex-start; }
+  .board-body { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+  .board-card--tethered .board-name { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .board-tag {
+    font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+    color: var(--amber); border: 1px solid #5a4a20; border-radius: 3px; padding: 0.1rem 0.4rem;
+  }
+  .board-sub { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; }
 
   .mode-cards { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.25rem; }
   .mode-card {
