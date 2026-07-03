@@ -26,6 +26,25 @@ export const USER_STEPS: readonly WizardStep[] = ['welcome', 'board', 'network',
  *    it only through a bridge daemon on the computer it is plugged into. */
 export type NetMode = 'wifi' | 'usb'
 
+/** Default relays for a new WiFi signer, drawn from the set the wider
+ *  forgesworn/pallasite ecosystem publishes to. Deliberately a small subset:
+ *  each listed relay is a live TLS websocket the ESP32 keeps open, so the
+ *  default stays light and the editor offers the rest one tap away. */
+export const DEFAULT_SIGNER_RELAYS: readonly string[] = [
+  'wss://relay.trotters.cc',
+  'wss://nos.lol',
+  'wss://relay.damus.io',
+]
+
+/** The full ecosystem set (pallasite's DEFAULT_RELAYS), offered as one-tap
+ *  additions. nostr.wine is deliberately absent: paid, rejected our writes. */
+export const SUGGESTED_SIGNER_RELAYS: readonly string[] = [
+  ...DEFAULT_SIGNER_RELAYS,
+  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
+  'wss://relay.ditto.pub',
+]
+
 export interface WizardData {
   /** BoardSpec.id of the chosen board. */
   boardId: string
@@ -34,8 +53,8 @@ export interface WizardData {
   ssid: string
   /** WPA2 passphrase; empty means an open network. */
   password: string
-  /** Raw relay field (comma/newline separated); parsed with `parseRelays`. */
-  relaysText: string
+  /** Relays the signer will serve NIP-46 over (WiFi mode only). */
+  relays: string[]
   /** Wipe the whole flash first (clean slate, destroys any existing master). */
   fullErase: boolean
 }
@@ -46,7 +65,7 @@ export function initialData(overrides: Partial<WizardData> = {}): WizardData {
     netMode: 'wifi',
     ssid: '',
     password: '',
-    relaysText: 'wss://relay.trotters.cc',
+    relays: [...DEFAULT_SIGNER_RELAYS],
     fullErase: false,
     ...overrides,
   }
@@ -59,12 +78,11 @@ export function parseRelays(text: string): string[] {
   return text.split(/[\n,]/).map((s) => s.trim()).filter(Boolean)
 }
 
-/** Validate the relay field. Returns a message, or null when valid. */
-export function relayError(text: string): string | null {
-  const relays = parseRelays(text)
+/** Validate a relay list. Returns a message, or null when valid. */
+export function relayError(relays: string[]): string | null {
   if (relays.length === 0) return 'Add at least one relay so the device can be reached.'
   const bad = relays.find((r) => !/^wss?:\/\/.+/i.test(r))
-  if (bad) return `"${bad}" is not a relay URL — it should start with wss:// or ws://.`
+  if (bad) return `"${bad}" is not a relay address. It should start with wss:// or ws://.`
   return null
 }
 
@@ -91,7 +109,7 @@ export function passwordError(password: string): string | null {
  *  its own relay config), so that mode always validates. */
 export function networkError(d: WizardData): string | null {
   if (d.netMode === 'usb') return null
-  return ssidError(d.ssid) ?? passwordError(d.password) ?? relayError(d.relaysText)
+  return ssidError(d.ssid) ?? passwordError(d.password) ?? relayError(d.relays)
 }
 
 // --- Step gating ---------------------------------------------------------

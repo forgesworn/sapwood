@@ -193,12 +193,12 @@
     <p class="lede">
       The ESP8266 signer has <strong>no Wi-Fi</strong>. It reaches Nostr through a small
       <strong>bridge</strong> program on an always-on computer (a Raspberry Pi is ideal), connected to
-      the signer by USB. We'll flash it, set its key, and give you the bridge to run — all here.
+      the signer by USB. We'll flash it, set its key, and give you the bridge to run, all here.
     </p>
     <div class="card">
       <p class="hint">
         The key is created on <strong>this computer</strong>. In a moment you'll be asked to
-        <strong>disconnect it from the internet</strong> first — that's what keeps the key safe, the same
+        <strong>disconnect it from the internet</strong> first. That's what keeps the key safe, the same
         as the command-line tool.
       </p>
     </div>
@@ -207,7 +207,7 @@
   {:else if step === 'flash'}
     <h2 class="section-title">1 · Flash the firmware</h2>
     <p class="lede">Plug the ESP8266 into this computer with a USB cable, then flash it. This writes
-      the public firmware only — no key yet — so it's fine to do online.</p>
+      the public firmware only, no key yet, so it's fine to do online.</p>
     {#if flashing || flashPct > 0}
       <div class="progress"><div class="progress-fill" style="width: {flashPct}%"></div></div>
     {/if}
@@ -230,7 +230,7 @@
         any network cable now.</strong> Anyone who can reach this machine over a network while the key
         exists could steal it.</p>
       {#if online}
-        <p class="gate-online">This browser still reports a network connection — disconnect, then tick the box.</p>
+        <p class="gate-online">This browser still reports a network connection. Disconnect, then tick the box.</p>
       {/if}
       <label class="check"><input type="checkbox" bind:checked={offlineAck} />
         This computer is disconnected from the internet.</label>
@@ -243,7 +243,7 @@
       </div>
 
       {#if source === 'create'}
-        <p class="lede">Generate a recovery phrase. <strong>Write it down on paper</strong> — it is the
+        <p class="lede">Generate a recovery phrase. <strong>Write it down on paper</strong>. It is the
           only backup of this signer's key.</p>
         <button class="btn btn-secondary" onclick={newPhrase}>{mnemonic ? 'Regenerate' : 'Generate phrase'}</button>
         {#if mnemonic}
@@ -305,7 +305,7 @@
     <h2 class="section-title">✓ Your tethered signer is ready</h2>
     <p class="lede">
       You can reconnect this computer to the internet now. Start the bridge on your always-on computer
-      (step 3) and it answers NIP-46 over your relays — including any <strong>personas</strong> an app
+      (step 3) and it answers NIP-46 over your relays, including any <strong>personas</strong> an app
       derives from this signer. Point a NIP-46 app at the signer's npub to sign.
     </p>
     <button class="btn btn-secondary" onclick={() => { step = 'intro'; offlineAck = false }}>Set up another</button>

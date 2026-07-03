@@ -69,7 +69,7 @@
     } catch (e) {
       smartError = e instanceof Error
         ? e.message
-        : 'Could not reach it over the network — is it powered on?'
+        : 'Could not reach it over the network: is it powered on?'
     } finally {
       connecting = false
     }
@@ -135,7 +135,7 @@
         discoveredRelays = profile.relays ?? []
       }
       if (!hex) {
-        relayError = "That doesn't look like a device — use its npub1… address or a name like you@example.com."
+        relayError = "That doesn't look like a device: use its npub1… address or a name like you@example.com."
         return
       }
       // The relay box wins; fall back to any relays the name advertised.
@@ -199,7 +199,7 @@
       <span class="indicator connected"></span>
       <span class="conn-label">CONNECTED</span>
       <span class="conn-detail">
-        {device.mode === 'serial' ? 'USB' : device.mode === 'relay' ? 'WIFI' : 'BRIDGE'} &mdash; {device.portInfo}
+        {device.mode === 'serial' ? 'USB' : device.mode === 'relay' ? 'WIFI' : 'BRIDGE'} · {device.portInfo}
       </span>
       <button class="btn btn-danger btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
     </div>
@@ -214,9 +214,9 @@
       <div class="relay-setup">
         <h3 class="section-title relay-title">Connect over your network</h3>
         <p class="hint relay-lead">
-          No cable needed — your Heartwood is on your WiFi. To find it, fill in the two boxes
+          No cable needed: your Heartwood is on your WiFi. To find it, fill in the two boxes
           below. Easiest of all: on the computer where you first set the device up, show its QR
-          code and scan it — both boxes then fill themselves in.
+          code and scan it. Both boxes then fill themselves in.
         </p>
         <form class="relay-form" onsubmit={(e) => { e.preventDefault(); handleConnectRelay() }}>
           {#if knownDevices.length}
@@ -242,7 +242,7 @@
             />
             <span class="field-hint">
               Its <code>npub1…</code> address, or a name like <code>you@example.com</code> if it has
-              one — both are safe to share. You chose this when setting the device up, so if that was
+              one, both are safe to share. You chose this when setting the device up, so if that was
               on this computer it's already filled in.
             </span>
           </label>
@@ -276,9 +276,9 @@
       </div>
     {:else if justFlashed}
       <div class="card card--raised card--live finish-setup">
-        <h3 class="finish-title">✓ Flashed — now let's finish your signer</h3>
+        <h3 class="finish-title">✓ Flashed: now let's finish your signer</h3>
         <p class="finish-lead">
-          Tap to connect to your new signer — then we'll name it and make its keys.
+          Tap to connect to your new signer, then we'll name it and make its keys.
           <br /><strong>If it isn't found, press the RESET button on the board first</strong> (it needs a
           restart to start the new firmware), then tap again.
         </p>
@@ -290,7 +290,7 @@
           {connecting ? 'Connecting…' : 'Connect to my new signer →'}
         </button>
         {#if !('serial' in navigator)}
-          <p class="warn-text notice">This needs Chrome or Edge on a computer — it talks over the USB cable.</p>
+          <p class="warn-text notice">This needs Chrome or Edge on a computer: it talks over the USB cable.</p>
         {/if}
         <button class="btn btn-ghost finish-other" onclick={clearJustFlashed}>
           Connect a different way
@@ -310,7 +310,7 @@
             : `Connect to “${smartDevice!.label}” →`}
         </button>
         {#if attachedPort}
-          <p class="hint-sm smart-sub">Found a signer on the USB cable — this connects straight to it.</p>
+          <p class="hint-sm smart-sub">Found a signer on the USB cable. This connects straight to it.</p>
         {/if}
         {#if smartError}<p class="warn-text notice">{smartError}</p>{/if}
         <p class="hint connect-hint">Using a cable, another signer, or setting up a new one:</p>

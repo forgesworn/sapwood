@@ -22,14 +22,14 @@
   async function handleCopySecret() {
     opStatus = (await copyText(operator.skHex))
       ? 'Operator secret copied to clipboard.'
-      : 'Copy failed — reveal and copy manually.'
+      : 'Copy failed. Reveal and copy manually.'
   }
 
   async function handleCopyPhrase() {
     if (!opMnemonic) return
     opStatus = (await copyText(opMnemonic))
       ? 'Recovery phrase copied to clipboard.'
-      : 'Copy failed — reveal and write the words down manually.'
+      : 'Copy failed. Reveal and write the words down manually.'
   }
 
   function handleImport() {
@@ -38,7 +38,7 @@
       opMnemonic = getOperatorMnemonic()
       opImportValue = ''
       opReveal = false
-      opStatus = `Imported. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… — reconnect over WiFi.`
+      opStatus = `Imported. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… Reconnect over WiFi.`
     } catch (e) {
       opStatus = e instanceof Error ? e.message : 'Import failed'
     }
@@ -50,7 +50,7 @@
       opMnemonic = getOperatorMnemonic()
       opPhraseImport = ''
       opPhraseReveal = false
-      opStatus = `Restored from phrase. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… — reconnect over WiFi.`
+      opStatus = `Restored from phrase. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… Reconnect over WiFi.`
     } catch (e) {
       opStatus = e instanceof Error ? e.message : 'Restore failed'
     }
@@ -62,15 +62,15 @@
     opReveal = false
     opPhraseReveal = false
     opImportValue = ''
-    opStatus = 'New operator key generated — write down its recovery phrase below.'
+    opStatus = 'New operator key generated. Write down its recovery phrase below.'
   }
 </script>
 
 <section class="operator">
   <h2 class="section-title">Operator key</h2>
   <p class="hint">
-    Your authority to manage signers over WiFi. A signer learns its operator when you flash it —
-    management only works if this key matches. (This is <em>not</em> the master seed; it's a
+    Your authority to manage signers over WiFi. A signer learns its operator when you flash it.
+    Management only works if this key matches. (This is <em>not</em> the master seed; it's a
     separate, lower-stakes key.) <strong>Back it up</strong>: write down the recovery phrase and
     you can restore this exact key in any browser.
   </p>
@@ -94,7 +94,7 @@
             </div>
           {/if}
         {:else}
-          <span class="hint-sm">No phrase — this is a legacy key. <strong class="amber">Regenerate</strong> to create a phrase-backed key (needs a re-flash).</span>
+          <span class="hint-sm">No phrase. This is a legacy key. <strong class="amber">Regenerate</strong> to create a phrase-backed key (needs a re-flash).</span>
         {/if}
       </td>
     </tr>

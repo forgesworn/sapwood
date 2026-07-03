@@ -149,7 +149,7 @@ export function regenerateOperator(): Operator {
 export function importOperatorMnemonic(mnemonic: string): Operator {
   const clean = mnemonic.trim().toLowerCase().replace(/\s+/g, ' ')
   if (!validateMnemonic(clean, wordlist)) {
-    throw new Error('invalid recovery phrase — check the words and their order')
+    throw new Error('invalid recovery phrase: check the words and their order')
   }
   const op = operatorFromMnemonic(clean)
   localStorage.setItem(LS_MNEMONIC, clean)

@@ -32,7 +32,7 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
   {
     id: 'posting',
     label: 'Posting only',
-    description: 'Notes, reactions, reposts and articles. Keeps an app to posting — it cannot touch your profile or contacts.',
+    description: 'Notes, reactions, reposts and articles. Keeps an app to posting, so it cannot touch your profile or contacts.',
     kinds: [1, 5, 6, 7, 30023],
   },
   {

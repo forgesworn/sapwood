@@ -191,11 +191,11 @@
   <section>
     <h2 class="section-title">Security</h2>
     {#if !overUsb}
-      <p class="hint">The boot PIN and bridge secret are changed over USB — plug the signer into
+      <p class="hint">The boot PIN and bridge secret are changed over USB. Plug the signer into
         this computer and connect by cable.</p>
     {:else}
       <h3 class="sub-title">Boot PIN</h3>
-      <p class="hint">Locks the device at boot — it must be unlocked before it signs anything.
+      <p class="hint">Locks the device at boot. It must be unlocked before it signs anything.
         The device asks for its button to confirm.</p>
       <div class="inline-form">
         <div class="pw-wrap">
@@ -282,8 +282,8 @@
   <!-- Set up another device -->
   <section>
     <h2 class="section-title">Flash a device</h2>
-    <p class="hint">Install or re-install firmware on a Heartwood board — new device or full
-      re-flash — in the guided <a class="flash-link" href="#/flash">flasher</a>.</p>
+    <p class="hint">Install or re-install firmware on a Heartwood board, whether a new device or a
+      full re-flash, in the guided <a class="flash-link" href="#/flash">flasher</a>.</p>
   </section>
 
   <!-- Danger zone -->
@@ -313,7 +313,7 @@
         <span class="hint-sm">Erases all keys, apps, bridge secret and PIN. Irreversible.
           The device asks for its button to confirm.</span>
         {#if device.connected && !canReset}
-          <span class="hint-sm">Not available over WiFi — wiping the signer needs it in your
+          <span class="hint-sm">Not available over WiFi. Wiping the signer needs it in your
             hands. Plug it in over USB.</span>
         {/if}
       </div>

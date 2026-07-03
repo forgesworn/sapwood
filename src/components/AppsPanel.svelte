@@ -203,11 +203,11 @@
     {#if created}
       <div class="created-head">
         <span class="dot"></span>
-        <span class="created-title">Connection ready{created.signing_approved ? ' — signing allowed' : ''}</span>
+        <span class="created-title">Connection ready{created.signing_approved ? ', signing allowed' : ''}</span>
         <button class="btn-link" onclick={dismissCreated}>Dismiss</button>
       </div>
       {#if created.bunker_uri}
-        <p class="hint">Paste this link into the app (or scan it there). It carries the connection secret — shown once.</p>
+        <p class="hint">Paste this link into the app (or scan it there). It carries the connection secret, shown once.</p>
         <div class="uri-box">
           <code>{created.bunker_uri}</code>
           <button class="btn btn-secondary btn-sm" onclick={() => copy(created!.bunker_uri, 'created')}>
@@ -220,7 +220,7 @@
           {#if created.secret}The secret is <code class="inline-secret">{created.secret}</code>.{/if}</p>
       {/if}
       {#if created.signing_approved === false}
-        <p class="warn-text">Signing is not allowed yet — the app can connect, but its first signature needs
+        <p class="warn-text">Signing is not allowed yet. The app can connect, but its first signature needs
           {overUsb ? 'one press of the button on the device' : 'approval (use “Allow signing” below)'}.</p>
       {/if}
     {:else}
@@ -240,7 +240,7 @@
         {#if canApprove}
           <label class="approve-toggle">
             <input type="checkbox" bind:checked={preApprove} disabled={creating} />
-            <span>Allow signing straight away — no approval needed once the app connects</span>
+            <span>Allow signing straight away, so no approval is needed once the app connects</span>
           </label>
         {:else}
           <p class="hint-sm usb-note">Over USB the first management action, and each app's first signature,
@@ -328,7 +328,7 @@
               <button
                 class="tag"
                 class:tag--green={slot.auto_approve}
-                title={slot.auto_approve ? 'Signs without asking — click to require the button per signature' : 'Each signature needs the button — click to sign automatically'}
+                title={slot.auto_approve ? 'Signs without asking. Click to require the button per signature' : 'Each signature needs the button. Click to sign automatically'}
                 disabled={updatingSlot === slot.slot_index}
                 onclick={() => handleUpdate(slot, { auto_approve: !slot.auto_approve })}
               >

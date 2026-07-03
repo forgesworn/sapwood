@@ -54,7 +54,7 @@
       <h2 id="import-confirm-title">Replace your operator key?</h2>
       <p>
         This link wants to switch you to a different operator key. If you continue, the key
-        you currently manage signers with is <strong>replaced and lost</strong> — any signer
+        you currently manage signers with is <strong>replaced and lost</strong>, so any signer
         set up with it would need re-flashing.
       </p>
       <dl class="key-compare">
@@ -70,7 +70,7 @@
 
   {#if importNotice.shown}
     <div class="import-banner" role="status">
-      <span>Operator key loaded — you can manage this signer from here.</span>
+      <span>Operator key loaded. You can manage this signer from here.</span>
       <button class="import-dismiss" onclick={() => (importNotice.shown = false)} aria-label="Dismiss">×</button>
     </div>
   {/if}

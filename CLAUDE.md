@@ -85,6 +85,7 @@ BLE connectivity planned for portable mode (child key only, short range). Additi
 - Monospace font throughout (terminal/cockpit feel)
 - Dark theme only
 - Tone: sovereign, precise, calm. No exclamation marks. State facts.
+- No em dashes in UI copy: use a full stop, comma or colon instead. (A bare "--" as an empty-value placeholder in tables is fine.)
 - Git commits: `type: description` format. No Co-Authored-By lines.
 
 ## Ecosystem

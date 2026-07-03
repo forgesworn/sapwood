@@ -94,7 +94,7 @@
               class:allowed
               class:prompt={!allowed}
               onclick={() => toggle(ki.kind)}
-              title="{ki.label} (kind {ki.kind}) — {allowed ? 'auto-sign' : 'prompt (button)'}"
+              title="{ki.label} (kind {ki.kind}): {allowed ? 'auto-sign' : 'prompt (button)'}"
             >
               <span class="chip-dot" style="background: {allowed ? 'var(--green)' : 'var(--amber)'}"></span>
               {ki.label}

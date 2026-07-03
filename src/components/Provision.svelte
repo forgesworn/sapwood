@@ -53,14 +53,14 @@
     },
     'bunker': {
       title: 'Existing nsec — sign as-is',
-      body: 'Use an nsec you already have directly. The device signs AS that exact identity — no derivation. Pick this if you want this signer to BE your existing key.',
+      body: 'Use an nsec you already have directly. The device signs AS that exact identity: no derivation. Pick this if you want this signer to BE your existing key.',
       address: 'The SAME npub as your nsec.',
       addressKind: 'same',
     },
     'tree-nsec': {
       title: 'Existing nsec — derive a new key',
       body: 'Bring an nsec you already have, but the device derives a brand-new master key from it (a tree root). You get the multi-account tree from a secret you already hold.',
-      address: 'A NEW, different address — not your nsec’s npub.',
+      address: 'A NEW, different address, not your nsec’s npub.',
       addressKind: 'new',
     },
   }
@@ -166,7 +166,7 @@
       <!-- No "hop to WiFi" ceremony: current firmware answers the cable in every
            mode, and the front page's one-tap connect now remembers this signer. -->
       <p class="hint handoff-hint">
-        This signer is on your network — keep managing it here over the cable, or from any
+        This signer is on your network. Keep managing it here over the cable, or from any
         browser via <strong>Connect to “{label}”</strong> on the front page.
       </p>
     {/if}
@@ -175,15 +175,15 @@
     <div class="card card--warn usb-gate">
       <p class="usb-gate-lead">🔌 Plug in a USB cable to set up this device.</p>
       <p class="usb-gate-why">
-        Setting up creates the device's <strong>master key</strong> — the one secret that
+        Setting up creates the device's <strong>master key</strong>: the one secret that
         every identity on it is built from. Think of it as the master key to a whole building:
         if it ever gets out, every door is open and you can't change the locks.
       </p>
       <p class="usb-gate-why">
         Because it matters that much, we only ever hand it over down a <strong>cable you can
-        see and hold</strong> — never over WiFi or the internet, where it would pass through
+        see and hold</strong>, never over WiFi or the internet, where it would pass through
         routers and computers you don't control. Once the device is set up, everything else
-        (adding apps, approving, revoking) <em>can</em> be done over WiFi — just not this.
+        (adding apps, approving, revoking) <em>can</em> be done over WiFi, just not this.
       </p>
       <p class="usb-gate-todo">→ Connect the device to this computer with a USB cable, then come back to this tab.</p>
     </div>
@@ -191,9 +191,9 @@
     <div class="confirm">
       <p class="info">
         {#if mode === 'bunker'}
-          This should be the <strong>same npub</strong> as the nsec you entered — check it matches before sending:
+          This should be the <strong>same npub</strong> as the nsec you entered, so check it matches before sending:
         {:else}
-          This is the <strong>new address</strong> your signer will have — check it before sending:
+          This is the <strong>new address</strong> your signer will have, so check it before sending:
         {/if}
       </p>
       <div class="uri-box confirm-npub"><code class="mono">{npubPreview}</code></div>
@@ -208,8 +208,8 @@
         <span class="field-label">How do you want to set up this signer?</span>
         <select class="field-input" bind:value={mode} disabled={status !== 'idle'}>
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
-          <option value="bunker">Existing nsec — sign as-is (keeps your npub)</option>
-          <option value="tree-nsec">Existing nsec — derive a new key (new npub)</option>
+          <option value="bunker">Existing nsec: sign as-is (keeps your npub)</option>
+          <option value="tree-nsec">Existing nsec: derive a new key (new npub)</option>
         </select>
       </label>
 

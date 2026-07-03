@@ -33,14 +33,14 @@ describe('parseRelays', () => {
 
 describe('relayError', () => {
   it('requires at least one relay', () => {
-    expect(relayError('')).toMatch(/at least one relay/)
+    expect(relayError([])).toMatch(/at least one relay/)
   })
   it('rejects a non-relay URL', () => {
-    expect(relayError('https://relay.example')).toMatch(/wss:\/\//)
+    expect(relayError(['https://relay.example'])).toMatch(/wss:\/\//)
   })
   it('accepts ws:// and wss://', () => {
-    expect(relayError('ws://localhost:7777')).toBeNull()
-    expect(relayError('wss://relay.trotters.cc')).toBeNull()
+    expect(relayError(['ws://localhost:7777'])).toBeNull()
+    expect(relayError(['wss://relay.trotters.cc'])).toBeNull()
   })
 })
 
@@ -77,13 +77,13 @@ describe('networkError', () => {
   it('reports the first problem in order: ssid, then password, then relays', () => {
     expect(networkError(valid({ ssid: '' }))).toMatch(/name of your Wi-Fi/)
     expect(networkError(valid({ password: 'bad' }))).toMatch(/at least 8/)
-    expect(networkError(valid({ relaysText: '' }))).toMatch(/at least one relay/)
+    expect(networkError(valid({ relays: [] }))).toMatch(/at least one relay/)
   })
   it('is null for fully valid data', () => {
     expect(networkError(valid())).toBeNull()
   })
   it('always validates in USB-only mode — no WiFi or relays needed', () => {
-    expect(networkError(valid({ netMode: 'usb', ssid: '', password: '', relaysText: '' }))).toBeNull()
+    expect(networkError(valid({ netMode: 'usb', ssid: '', password: '', relays: [] }))).toBeNull()
   })
 })
 
@@ -100,8 +100,8 @@ describe('canAdvance', () => {
     expect(canAdvance('network', valid())).toBe(true)
   })
   it('lets a USB-only signer leave the network step with nothing entered', () => {
-    expect(canAdvance('network', valid({ netMode: 'usb', ssid: '', relaysText: '' }))).toBe(true)
-    expect(canAdvance('review', valid({ netMode: 'usb', ssid: '', relaysText: '' }))).toBe(true)
+    expect(canAdvance('network', valid({ netMode: 'usb', ssid: '', relays: [] }))).toBe(true)
+    expect(canAdvance('review', valid({ netMode: 'usb', ssid: '', relays: [] }))).toBe(true)
   })
   it('requires both board and network at review', () => {
     expect(canAdvance('review', valid({ boardId: '' }))).toBe(false)

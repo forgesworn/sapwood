@@ -1,13 +1,15 @@
 <script lang="ts">
   import { device, configureNetwork } from '../lib/device.svelte.js'
   import type { NetConfig } from '../lib/frame'
+  import { DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS } from '../lib/wizard.js'
   import PasswordReveal from './PasswordReveal.svelte'
+  import RelayEditor from './RelayEditor.svelte'
 
   let mode = $state<'usb' | 'wifi'>('wifi')
   let ssid = $state('')
   let password = $state('')
   let showPw = $state(false)
-  let relaysText = $state('wss://relay.trotters.cc')
+  let relays = $state<string[]>([...DEFAULT_SIGNER_RELAYS])
   let status = $state<'idle' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
 
@@ -21,7 +23,7 @@
     const cfg: NetConfig = {
       ssid: ssid.trim(),
       password,
-      relays: relaysText.split(/[\n,]/).map(s => s.trim()).filter(Boolean),
+      relays: mode === 'wifi' ? relays : [],
       mode,
     }
     if (mode === 'wifi' && (!cfg.ssid || cfg.relays.length === 0)) {
@@ -42,7 +44,7 @@
 
 <div class="connectivity">
   <h2 class="section-title">Network</h2>
-  <p class="hint"><strong>WiFi-standalone</strong> is the standard setup — the signer sits on your
+  <p class="hint"><strong>WiFi-standalone</strong> is the standard setup: the signer sits on your
     network and works from anywhere. <strong>USB-only (radio off)</strong> is the hardened tier:
     no network stack runs on the key-holding chip, and Nostr apps reach it through the bridge
     daemon on the computer it's plugged into.</p>
@@ -55,8 +57,8 @@
     <label class="field">
       <span class="field-label">Mode</span>
       <select class="field-input" bind:value={mode} disabled={!canConfigure}>
-        <option value="wifi">WiFi-standalone — standard</option>
-        <option value="usb">USB-only, radio off — hardened</option>
+        <option value="wifi">WiFi-standalone (standard)</option>
+        <option value="usb">USB-only, radio off (hardened)</option>
       </select>
     </label>
 
@@ -78,10 +80,15 @@
           <PasswordReveal bind:shown={showPw} disabled={!canConfigure} />
         </div>
       </label>
-      <label class="field">
-        <span class="field-label">Relays (one per line)</span>
-        <textarea class="field-input" bind:value={relaysText} rows={3} disabled={!canConfigure}></textarea>
-      </label>
+      <div class="field">
+        <span class="field-label">Relays</span>
+        <RelayEditor
+          {relays}
+          suggestions={SUGGESTED_SIGNER_RELAYS}
+          disabled={!canConfigure}
+          onchange={(next) => (relays = next)}
+        />
+      </div>
     {/if}
 
     <button

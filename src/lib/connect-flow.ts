@@ -15,7 +15,7 @@ export const CONNECT_STEPS: readonly ConnectStep[] = ['name', 'permissions', 're
 export function nameError(name: string): string | null {
   const s = name.trim()
   if (!s) return 'Give this app a name so you can recognise it later.'
-  if (s.length > 48) return 'That name is a little long — keep it under 48 characters.'
+  if (s.length > 48) return 'That name is a little long. Keep it under 48 characters.'
   return null
 }
 

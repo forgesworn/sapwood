@@ -13,11 +13,12 @@
   import type { NetConfig } from './lib/frame'
   import {
     type WizardStep, type WizardData,
-    USER_STEPS, initialData, parseRelays, networkError, canAdvance,
-    nextStep, prevStep, friendlyStage,
+    USER_STEPS, initialData, networkError, canAdvance,
+    nextStep, prevStep, friendlyStage, SUGGESTED_SIGNER_RELAYS,
   } from './lib/wizard.js'
   import TetheredSetup from './components/TetheredSetup.svelte'
   import PasswordReveal from './components/PasswordReveal.svelte'
+  import RelayEditor from './components/RelayEditor.svelte'
 
   const webSerial = typeof navigator !== 'undefined' && 'serial' in navigator
 
@@ -57,7 +58,7 @@
 
   function applyCandidates(c: BoardCandidates, { quiet = false } = {}) {
     if (!c.boardIds.length) {
-      if (!quiet) detectError = "Couldn't recognise that USB device — pick your board from the list."
+      if (!quiet) detectError = "Couldn't recognise that USB device. Pick your board from the list."
       return
     }
     detected = c
@@ -117,7 +118,7 @@
 
   async function startFlash() {
     const wifi = data.netMode === 'wifi'
-    const relays = wifi ? parseRelays(data.relaysText) : []
+    const relays = wifi ? data.relays : []
     const op = getOrCreateOperator()
     const cfg: NetConfig = {
       ssid: wifi ? data.ssid.trim() : '',
@@ -195,14 +196,14 @@
     {:else if step === 'welcome'}
       <h2>Set up your Heartwood</h2>
       <p class="lede">
-        This installs the signing software on your device and sets up how it connects — usually
-        your Wi-Fi, so you can manage it from your phone afterwards. You'll need the device and a
+        This installs the signing software on your device and sets up how it connects. Usually
+        that's your Wi-Fi, so you can manage it from your phone afterwards. You'll need the device and a
         USB cable. It takes about a minute.
       </p>
       {#if !webSerial}
         <div class="card card--danger">
           <p class="error-text">
-            Flashing needs a computer running Chrome or Edge — they can talk to USB devices from the
+            Flashing needs a computer running Chrome or Edge, which can talk to USB devices from the
             browser. Open this page there, then come back.
           </p>
         </div>
@@ -218,8 +219,8 @@
       <p class="lede">Pick the board you're holding. The model is printed on it.</p>
       {#if detected}
         <p class="detect-note">
-          ✓ Recognised {detected.via} on your cable —
-          {detected.boardIds.length === 1 ? 'selected the matching board.' : 'it is one of the tagged boards.'}
+          ✓ Recognised {detected.via} on your cable.
+          {detected.boardIds.length === 1 ? 'The matching board is selected.' : 'It is one of the tagged boards.'}
         </p>
       {:else if webSerial}
         <button class="btn-link detect-link" onclick={detectFromCable}>
@@ -250,7 +251,7 @@
             <span class="board-name">ESP8266 <span class="board-tag">USB-tethered · hardened</span>
               {#if detected?.boardIds.includes('esp8266')}<span class="detect-tag">on your cable</span>{/if}
             </span>
-            <span class="board-sub">No WiFi on the signer — it stays plugged into an always-on
+            <span class="board-sub">No WiFi on the signer. It stays plugged into an always-on
               computer and the bridge daemon carries its traffic. Its own guided setup.</span>
           </span>
           <span class="board-tick">→</span>
@@ -263,6 +264,19 @@
       </div>
 
     {:else if step === 'network'}
+      {#snippet wipeOption()}
+        <!-- Destructive, so it wears the danger colours even behind the
+             Advanced disclosure, with a full-size control. -->
+        <div class="card card--danger wipe">
+          <p class="wipe-title">Wipe the device first</p>
+          <p class="wipe-desc">Clears any identity already on it for a clean start.
+            This destroys all keys on the device.</p>
+          <label class="wipe-toggle">
+            <input type="checkbox" bind:checked={data.fullErase} />
+            <span>Yes, wipe everything on this device</span>
+          </label>
+        </div>
+      {/snippet}
       <h2>How will it connect?</h2>
       <div class="mode-cards">
         <button
@@ -272,8 +286,8 @@
           aria-pressed={data.netMode === 'wifi'}
         >
           <span class="mode-name">Join my Wi-Fi <span class="mode-tag">recommended</span></span>
-          <span class="mode-desc">The signer sits on your network and works from anywhere —
-            manage it from your phone. No extra software.</span>
+          <span class="mode-desc">The signer sits on your network and works from anywhere,
+            so you can manage it from your phone. No extra software.</span>
         </button>
         <button
           class="mode-card"
@@ -282,7 +296,7 @@
           aria-pressed={data.netMode === 'usb'}
         >
           <span class="mode-name">USB-only <span class="mode-tag mode-tag--amber">hardened</span></span>
-          <span class="mode-desc">The radio stays off — the key-holding chip never touches a
+          <span class="mode-desc">The radio stays off, so the key-holding chip never touches a
             network. Needs a bridge daemon for apps to reach it remotely.</span>
         </button>
       </div>
@@ -301,19 +315,20 @@
           </div>
         </label>
 
+        <div class="field relay-field">
+          <span class="field-label">Relays</span>
+          <span class="field-hint">The shared postboxes your signer listens on. The defaults work
+            for most people; add or remove to match the relays your apps use.</span>
+          <RelayEditor
+            relays={data.relays}
+            suggestions={SUGGESTED_SIGNER_RELAYS}
+            onchange={(relays) => (data.relays = relays)}
+          />
+        </div>
+
         <details class="disclosure advanced" bind:open={showAdvanced}>
           <summary>Advanced</summary>
-          <label class="field">
-            <span class="field-label">Relays (one per line)</span>
-            <textarea class="field-input" bind:value={data.relaysText} rows="2"></textarea>
-          </label>
-          <label class="erase-field">
-            <input type="checkbox" bind:checked={data.fullErase} />
-            <span>
-              <strong>Wipe the device first.</strong> Clears any identity already on it for a clean start.
-              <em>This destroys all keys on the device.</em>
-            </span>
-          </label>
+          {@render wipeOption()}
         </details>
 
         {#if netError && (data.ssid || data.password)}
@@ -325,7 +340,7 @@
           <ul class="usb-only-list">
             <li>It signs over the cable, and you manage it here whenever it's plugged in.</li>
             <li>For Nostr apps to reach it remotely, you run the <strong>heartwood bridge
-              daemon</strong> on a computer that stays on with the signer plugged in — it couriers
+              daemon</strong> on a computer that stays on with the signer plugged in. It couriers
               signing requests between your relays and the cable. We'll show what it needs after
               the flash.</li>
             <li>You can switch to Wi-Fi later under Advanced › Device › Network.</li>
@@ -333,13 +348,7 @@
         </div>
         <details class="disclosure advanced" bind:open={showAdvanced}>
           <summary>Advanced</summary>
-          <label class="erase-field">
-            <input type="checkbox" bind:checked={data.fullErase} />
-            <span>
-              <strong>Wipe the device first.</strong> Clears any identity already on it for a clean start.
-              <em>This destroys all keys on the device.</em>
-            </span>
-          </label>
+          {@render wipeOption()}
         </details>
       {/if}
       <div class="actions">
@@ -353,19 +362,19 @@
         <li><span>Device</span><strong>{board?.label ?? '—'}</strong></li>
         {#if data.netMode === 'wifi'}
           <li><span>Wi-Fi</span><strong>{data.ssid}</strong></li>
-          <li><span>Relays</span><strong>{parseRelays(data.relaysText).join(', ') || '—'}</strong></li>
+          <li><span>Relays</span><strong>{data.relays.map((r) => r.replace(/^wss?:\/\//i, '')).join(', ') || '—'}</strong></li>
         {:else}
-          <li><span>Network</span><strong>USB-only — radio off (hardened)</strong></li>
+          <li><span>Network</span><strong>USB-only, radio off (hardened)</strong></li>
         {/if}
-        {#if data.fullErase}<li><span>Wipe first</span><strong class="danger">Yes — erases existing keys</strong></li>{/if}
+        {#if data.fullErase}<li><span>Wipe first</span><strong class="danger">Yes, erases existing keys</strong></li>{/if}
       </ul>
       <p class="hint-sm">
-        When you start, your browser asks which USB device to use — pick your board from the list.
+        When you start, your browser asks which USB device to use. Pick your board from the list.
       </p>
       {#if device.connected}
         <div class="card card--warn">
           <p class="warn-text">
-            The console is connected to a device over USB. Flashing needs exclusive access —
+            The console is connected to a device over USB. Flashing needs exclusive access:
             <button class="btn-link" onclick={() => disconnect()}>disconnect it first</button>.
           </p>
         </div>
@@ -414,7 +423,7 @@
         {#if data.netMode === 'wifi'}
           It's joining <strong>{data.ssid}</strong>.
         {:else}
-          It's a USB-only signer — its radio is off, and it signs over the cable.
+          It's a USB-only signer. Its radio is off and it signs over the cable.
         {/if}
         {#if data.fullErase}
           It boots ready for a fresh identity.
@@ -429,18 +438,18 @@
             <p class="op-title">✍ Write down these 12 words</p>
             <p class="op-desc">
               They're the master key to manage this signer from anywhere later. Keep them safe and
-              private — like the keys to your house. You don't need them for the next steps.
+              private, like the keys to your house. You don't need them for the next steps.
               Heads up: in a moment your signer shows <strong>a different 12 words on its own
-              screen</strong> — that's its recovery phrase, a separate thing. Label this one
+              screen</strong>. That's its recovery phrase, a separate thing. Label this one
               <strong>“operator”</strong> so you don't mix them up.
             </p>
             <pre class="op-phrase">{operator.mnemonic}</pre>
           {:else}
             <p class="op-title">⚿ Your operator key</p>
-            <p class="op-desc">Keep this safe — it's how you manage this signer remotely later.</p>
+            <p class="op-desc">Keep this safe. It's how you manage this signer remotely later.</p>
           {/if}
           <details class="disclosure op-advanced">
-            <summary>Advanced — connect bray to this signer</summary>
+            <summary>Advanced: connect bray to this signer</summary>
             <div class="uri-box"><code>NOSTR_SECRET_KEY={operator.skHex}</code></div>
             <button class="btn btn-secondary btn-sm" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy'}</button>
           </details>
@@ -453,12 +462,12 @@
           <p class="hint-sm">
             Run the <strong>heartwood bridge daemon</strong> (from the heartwood-esp32 project) on
             a computer that stays on, with the signer plugged into it. The daemon holds the cable
-            and couriers signing requests to and from your relays — the signer itself never
+            and couriers signing requests to and from your relays. The signer itself never
             touches the network. Once it's running, open Sapwood from the bridge's address (or use
             “Other ways to connect › Connect to a bridge”) to manage the signer through it.
           </p>
           <p class="hint-sm">
-            Nothing to do right now — finishing setup below works over this cable, and local
+            Nothing to do right now. Finishing setup below works over this cable, and local
             signing needs no daemon at all.
           </p>
         </div>
@@ -468,7 +477,7 @@
         <p class="section-label">One more step</p>
         <p class="hint-sm">
           Leave it plugged in. Next we'll give your signer a <strong>name</strong> and create its
-          <strong>keys</strong> — the console picks up the cable automatically and walks you through it.
+          <strong>keys</strong>. The console picks up the cable automatically and walks you through it.
         </p>
         <div class="actions">
           <button class="btn btn-primary" onclick={() => navigate('admin')}>Continue setup →</button>
@@ -578,10 +587,15 @@
   .bridge-todo strong { color: var(--text); }
 
   .advanced { margin: 0.5rem 0 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
-  .erase-field { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin-top: 0.5rem; }
-  .erase-field input { margin-top: 0.2rem; accent-color: var(--amber); }
-  .erase-field strong { color: var(--amber); }
-  .erase-field em { color: var(--red); font-style: normal; }
+
+  .wipe { margin-top: 0.6rem; padding: 1rem 1.1rem; }
+  .wipe-title { font-size: 0.92rem; font-weight: 700; color: var(--red); margin: 0 0 0.3rem; }
+  .wipe-desc { font-size: 0.8rem; color: var(--text-dim); line-height: 1.5; margin: 0 0 0.75rem; }
+  .wipe-toggle {
+    display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
+    font-size: 0.95rem; font-weight: 600; color: var(--text);
+  }
+  .wipe-toggle input { width: 1.25rem; height: 1.25rem; accent-color: var(--red); cursor: pointer; flex-shrink: 0; }
 
   .summary { list-style: none; padding: 0; margin: 0 0 1rem; border: 1px solid var(--border); border-radius: 6px; }
   .summary li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }

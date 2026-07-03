@@ -81,7 +81,7 @@
         } catch (e) {
           // The connection still exists; only the limit failed to apply.
           permNote = overUsb
-            ? 'Connection made, but applying the limit needs a button press on the device — set it under Advanced › Apps.'
+            ? 'Connection made, but applying the limit needs a button press on the device. Set it under Advanced › Apps.'
             : `Connection made, but the permission limit could not be applied: ${e instanceof Error ? e.message : 'unknown error'}.`
         }
       }
@@ -124,7 +124,7 @@
   <section class="flow" aria-label="Connect an app">
     {#if step === 'name'}
       <h3 class="flow-title">What are you connecting?</h3>
-      <p class="hint">Give it a name you will recognise — the app and where it runs.</p>
+      <p class="hint">Give it a name you will recognise: the app and where it runs.</p>
       <input
         type="text"
         class="field-input"
@@ -189,7 +189,7 @@
         <h3 class="flow-title">Connection ready</h3>
       </div>
       {#if created.bunker_uri}
-        <p class="hint">Scan this with the app — or copy the link below and paste it in. It works once.</p>
+        <p class="hint">Scan this with the app, or copy the link below and paste it in. It works once.</p>
         <div class="qr">{@html qr}</div>
         <div class="uri-box copy-uri">
           <code>{created.bunker_uri}</code>

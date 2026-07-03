@@ -137,7 +137,7 @@ describe('Flasher — happy path', () => {
     expect((screen.getByText('Next') as HTMLButtonElement).disabled).toBe(false)
 
     await fireEvent.click(screen.getByText('Next'))
-    expect(screen.getByText(/USB-only — radio off/)).toBeTruthy()
+    expect(screen.getByText(/USB-only, radio off/)).toBeTruthy()
     await fireEvent.click(screen.getByText('Flash'))
     expect(await screen.findByText('Your signer is flashed')).toBeTruthy()
 

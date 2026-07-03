@@ -126,7 +126,7 @@
       await connectRelay(handoff.hex, handoff.relays, friendlyLabel(name))
     } catch (e) {
       handoffError = e instanceof Error ? e.message
-        : 'Could not reach it yet — give it ~10s to reboot and join WiFi, then retry.'
+        : 'Could not reach it yet: give it ~10s to reboot and join WiFi, then retry.'
     } finally {
       handoffConnecting = false
     }
@@ -139,7 +139,7 @@
     <h2 class="fi-title">Let's give your signer its identity</h2>
     <p class="fi-lede">
       Your device is connected but doesn't have an identity yet. We'll have the device
-      <strong>create its own recovery phrase and show it on its own screen</strong> — the secret
+      <strong>create its own recovery phrase and show it on its own screen</strong>. The secret
       never appears on this computer. Do this once; afterwards you connect apps and manage it
       from your phone.
     </p>
@@ -154,7 +154,7 @@
     <p class="fi-lede">
       {#if mode === 'restore'}
         Give it a friendly name (optional), then we'll ask the device to take your recovery phrase.
-        You'll type your <strong>12 words on the device's screen</strong> using its button — never here.
+        You'll type your <strong>12 words on the device's screen</strong> using its button, never here.
       {:else}
         Give it a friendly name (optional), then we'll ask the device to make its identity.
         The recovery phrase appears <strong>on the device's screen</strong>, not here.
@@ -167,7 +167,7 @@
     {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
     {#if status === 'generating'}
-      <p class="fi-working">⏳ Your device is creating its keys — this takes a few seconds. Watch its
+      <p class="fi-working">⏳ Your device is creating its keys. This takes a few seconds. Watch its
         screen; the 12 words appear there when it's ready.</p>
     {/if}
     <div class="fi-actions">
@@ -188,16 +188,16 @@
     <p class="fi-lede">
       Your signer is showing its <strong>12-word recovery phrase, one big word at a time</strong>.
       <strong>Tap the button on the signer to step through them</strong>, writing each one down in
-      order. Keep them safe — they're the only way to recover this signer, and
+      order. Keep them safe: they're the only way to recover this signer, and
       <strong>anyone who has them controls it</strong>. They appear only on the device, never here.
     </p>
     <p class="fi-lede">
       After the last word, <strong>press and hold the button</strong> until the screen says it's
-      saved. A WiFi signer then reboots and joins your network — give it about 10 seconds.
+      saved. A WiFi signer then reboots and joins your network, so give it about 10 seconds.
     </p>
     {#if npub}
       <div class="uri-box"><code>{npub}</code></div>
-      <p class="hint-sm">↑ your signer's public address — safe to share</p>
+      <p class="hint-sm">↑ your signer's public address, safe to share</p>
     {/if}
     <label class="confirm-save">
       <input type="checkbox" bind:checked={saved} />
@@ -211,7 +211,7 @@
     <h2 class="fi-title">Enter your 12 words on the device</h2>
     <p class="fi-lede">
       Your signer is now asking for your recovery phrase <strong>on its own screen</strong>. Enter each
-      word there with the button — nothing is typed on this computer.
+      word there with the button. Nothing is typed on this computer.
     </p>
     {#if twoButton}
       <ul class="fi-gestures">
@@ -220,7 +220,7 @@
         <li><strong>Hold A</strong> to delete the last letter, or step back a word</li>
       </ul>
       <p class="fi-lede">
-        After the 12th word, the device shows the account it worked out — check it's the right one,
+        After the 12th word, the device shows the account it worked out: check it's the right one,
         then <strong>hold B to save</strong>. We'll confirm here when it's done.
       </p>
     {:else}
@@ -230,7 +230,7 @@
         <li><strong>Hold</strong> to delete the last letter or step back a word</li>
       </ul>
       <p class="fi-lede">
-        After the 12th word, the device shows the account it worked out — check it's the right one,
+        After the 12th word, the device shows the account it worked out: check it's the right one,
         then <strong>hold the button to save</strong>. We'll confirm here when it's done.
       </p>
     {/if}
@@ -243,11 +243,11 @@
     </div>
     {#if handoff}
       <p class="fi-lede">
-        This is a WiFi signer, so from here on you can manage it over the network — no cable
+        This is a WiFi signer, so from here on you can manage it over the network, no cable
         needed. Give it about 10 seconds to reboot and join WiFi, then connect:
       </p>
       {#if device.mode === 'relay'}
-        <p class="success-text">✓ Connected over WiFi — you can connect your apps now.</p>
+        <p class="success-text">✓ Connected over WiFi. You can connect your apps now.</p>
       {:else}
         <button class="btn btn-primary" onclick={manageWifi} disabled={handoffConnecting}>
           {handoffConnecting ? 'Connecting…' : 'Manage over WiFi'}

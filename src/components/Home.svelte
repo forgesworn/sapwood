@@ -159,7 +159,7 @@
       await connectRelay(d.pubHex, d.relays, d.label)
     } catch (e) {
       wifiErr = e instanceof Error ? e.message
-        : 'Could not reach it over the network yet — give it ~10s to join, then retry.'
+        : 'Could not reach it over the network yet: give it ~10s to join, then retry.'
     } finally {
       wifiBusy = false
     }
@@ -201,7 +201,7 @@
       <div>
         <h2 class="checking-title">Checking your signer…</h2>
         <p class="hint no-gap">Talking to the device over the cable. A WiFi signer can take up to
-          a minute after power-on before it answers — this finishes on its own.</p>
+          a minute after power-on before it answers. This finishes on its own.</p>
       </div>
     </section>
 
@@ -231,12 +231,12 @@
 
       <details class="disclosure">
         <summary>Why this happens</summary>
-        <p class="hint-sm">A WiFi signer on older firmware ignores the cable while serving WiFi —
-          manage it over the network instead (choose <strong>“Connect over your network”</strong>
+        <p class="hint-sm">A WiFi signer on older firmware ignores the cable while serving WiFi,
+          so manage it over the network instead (choose <strong>“Connect over your network”</strong>
           after disconnecting, then enter the <code>npub1…</code> shown on its screen). Otherwise,
           check the cable carries data, not just power.</p>
         <p class="hint-sm">On older firmware and need the cable? Press <strong>RESET</strong> on
-          the board and watch the screen — if it offers <strong>“Hold PRG = USB”</strong>, hold
+          the board and watch the screen: if it offers <strong>“Hold PRG = USB”</strong>, hold
           the <strong>PRG</strong> button for ~3 seconds until it says <strong>“USB mode”</strong>,
           reconnect here, then update the firmware so this step isn't needed again.</p>
       </details>
@@ -261,14 +261,14 @@
     <!-- The relay answered, the DEVICE never did. -->
     <section class="card card--live wifi-usb">
       <h2 class="state-title">Connected to the relay, but your signer isn't answering</h2>
-      <p class="hint">Sapwood keeps retrying automatically — if the signer has just powered on,
+      <p class="hint">Sapwood keeps retrying automatically. If the signer has just powered on,
         give it ~10 seconds. A USB cable always works: plug it into this computer and connect
         over USB.</p>
 
       <details class="disclosure">
         <summary>Why this happens</summary>
         <ul class="state-causes">
-          <li><strong>Different relays.</strong> Sapwood and the signer must share a relay —
+          <li><strong>Different relays.</strong> Sapwood and the signer must share a relay:
             Sapwood is asking on <code>{device.portInfo}</code>; check the signer booted onto the
             same one.</li>
           <li><strong>Operator-key mismatch.</strong> The signer only accepts management from the
@@ -295,7 +295,7 @@
         <h2 class="state-title amber">This signer needs an identity</h2>
         <p class="hint no-gap">
           It doesn't have one yet. Creating it hands over the master key, so it only happens down a
-          cable you can hold — never over the network. Plug the device into a computer with a USB
+          cable you can hold, never over the network. Plug the device into a computer with a USB
           cable, connect over USB, and the setup step appears here.
         </p>
       </section>
@@ -325,7 +325,7 @@
       {/if}
       {#if address}
         <p class="signer-addr"><span class="addr-tag">address</span>{address}</p>
-        <p class="signer-hint">This is your signer's public address — safe to share.</p>
+        <p class="signer-hint">This is your signer's public address, safe to share.</p>
       {/if}
       <div class="signer-foot">
         <span class="signer-conn">Connected over {transportLabel}</span>
@@ -343,7 +343,7 @@
       </div>
       <p class="hint">
         This browser holds the key that manages this signer. If the browser's storage is lost,
-        so is your access — {opMnemonic ? 'write these words down once' : 'store this secret once'}
+        so is your access: {opMnemonic ? 'write these words down once' : 'store this secret once'}
         and keep them somewhere safe.
       </p>
       {#if !backupOpen}
@@ -371,7 +371,7 @@
   <!-- Firmware nudge (USB only — the cable is the only place updates happen) -->
   {#if fwUpdateAvailable}
     <div class="fw-nudge">
-      <span class="fw-nudge-text">Firmware v{fwLatest} is available — your signer runs v{fwRunning}.</span>
+      <span class="fw-nudge-text">Firmware v{fwLatest} is available. Your signer runs v{fwRunning}.</span>
       <button class="btn btn-secondary btn-sm" onclick={() => onadvanced?.('device')}>Update it →</button>
     </div>
   {/if}
@@ -441,7 +441,7 @@
 
   <!-- Footer: the escape hatch -->
   <section class="footer">
-    <button class="footer-link" onclick={() => onadvanced?.()}>Advanced ⚙ — every setting and tool</button>
+    <button class="footer-link" onclick={() => onadvanced?.()}>Advanced ⚙: every setting and tool</button>
   </section>
 </div>
 

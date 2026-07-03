@@ -82,7 +82,7 @@
           : undefined
         await httpTransport.otaUpload(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer, sigHex)
         status = 'done'
-        message = 'Done — your signer is restarting with the new firmware.'
+        message = 'Done. Your signer is restarting with the new firmware.'
         return
       }
       await streamOta(serialTransport, data, {
@@ -97,7 +97,7 @@
         onProgress: (pct) => { progress = pct; message = `Sending… ${pct}%` },
       }, signature)
       status = 'done'
-      message = 'Done — your signer is restarting with the new firmware.'
+      message = 'Done. Your signer is restarting with the new firmware.'
       running = latest // optimistic: it rebooted into the version we just sent
     } catch (e) {
       status = 'error'
@@ -142,7 +142,7 @@
       signature = parseSignature(hex)
       if (!signature) {
         status = 'error'
-        message = "That signature file doesn't look right — expected 128 hex characters."
+        message = "That signature file doesn't look right: expected 128 hex characters."
         return
       }
     }
@@ -161,7 +161,7 @@
 
   {#if !canUpdate}
     <p class="hint">
-      Firmware updates run <strong>over USB</strong> — never over WiFi, for safety. Connect this
+      Firmware updates run <strong>over USB</strong>, never over WiFi, for safety. Connect this
       signer with a cable to update it.
     </p>
     <div class="card card--live usb-steps">
@@ -169,7 +169,7 @@
       <ol>
         <li>Plug it into this computer with a USB cable.</li>
         <li>Press <strong>RESET</strong> on the board (or unplug and replug it).</li>
-        <li>As it starts it shows <strong>"Hold PRG = USB"</strong> for 3 seconds — hold the
+        <li>As it starts it shows <strong>"Hold PRG = USB"</strong> for 3 seconds. Hold the
           <strong>PRG</strong> button until the screen says <strong>"USB mode"</strong>.</li>
         <li>Then connect over USB here and come back to this screen.</li>
       </ol>
@@ -188,7 +188,7 @@
     {:else if latest && appUrl}
       <p class="hint">
         A newer firmware is bundled here. Your signer will ask you to approve it with its button,
-        check it, and restart — rolling back on its own if anything is wrong.
+        check it, and restart, rolling back on its own if anything is wrong.
       </p>
       <button class="btn btn-primary" disabled={busy} onclick={updateToLatest}>
         {busy ? 'Updating…' : `Update to v${latest} →`}
@@ -213,7 +213,7 @@
       {#if file}
         <label class="file-picker" class:has-file={!!sigFile}>
           <input type="file" accept=".sig" onchange={handleSigFileSelect} disabled={busy} />
-          {sigFile ? sigFile.name : 'Signature (.sig) — newer firmware requires it'}
+          {sigFile ? sigFile.name : 'Signature (.sig): newer firmware requires it'}
         </label>
         <button class="btn btn-primary" disabled={busy} onclick={updateFromFile}>
           {busy ? 'Updating…' : 'Update over USB →'}

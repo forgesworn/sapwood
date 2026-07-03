@@ -73,7 +73,7 @@
         </details>
       </div>
     {:else if device.masters.length === 0}
-      <p class="empty">No identities yet. Add one below — or use the guided setup on Home.</p>
+      <p class="empty">No identities yet. Add one below, or use the guided setup on Home.</p>
     {:else}
       {#each device.masters as master (master.slot)}
         <div class="card id-card">
@@ -94,7 +94,7 @@
       <h2 class="section-title">Identity card</h2>
       <p class="hint">
         The signer's name and picture sync automatically when it connects. Use this to push them
-        again — for example after you change your profile. The picture is shrunk in your browser;
+        again, for example after you change your profile. The picture is shrunk in your browser;
         the signer never fetches images itself.
       </p>
       <button class="btn btn-secondary" onclick={handleSyncProfile} disabled={profilePending}>

@@ -56,12 +56,12 @@
     <p class="section-title">⚲ Manage from your phone</p>
     <p class="hint">
       Scan this with your phone's camera. It opens the console there, already connected to this
-      signer — nothing to type.
+      signer, nothing to type.
     </p>
     <div class="qr">{@html qr}</div>
     <button class="btn btn-secondary btn-sm" onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link instead'}</button>
     <p class="warn-text">
-      This link carries your operator key. Treat it like a password — anyone who scans it can manage
+      This link carries your operator key. Treat it like a password: anyone who scans it can manage
       this device. It is not the device's secret seed.
     </p>
   </section>

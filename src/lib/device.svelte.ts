@@ -739,7 +739,7 @@ export async function configureNetwork(cfg: NetConfig): Promise<boolean> {
   // SET_NET_CONFIG is a USB-only frame (button-confirmed on the device) — over
   // http/relay there is no serial port open, so fail with guidance, not a hang.
   if (device.mode !== 'serial') {
-    throw new Error('Network settings are changed over USB — connect the signer by cable first.')
+    throw new Error('Network settings are changed over USB. Connect the signer by cable first.')
   }
   const frame = buildSetNetConfig(cfg)
   // 60s: must exceed the device's 30s button-approval window so a late confirm isn't lost.
