@@ -4,6 +4,8 @@
   // live" in one calm flow. All decisions delegate to the pure wizard lib; the
   // flash itself goes through flashDevice (same path the old Flash tab used).
   import { flashDevice, BOARDS, type FlasherBackend } from './lib/flasher.js'
+  import { boardCandidates, type BoardCandidates } from './lib/board-detect.js'
+  import { findAttachedGrantedPort } from './lib/serial-ports.js'
   import { getOrCreateOperator, type Operator } from './lib/op-mgmt.js'
   import { device, disconnect } from './lib/device.svelte.js'
   import { navigate } from './lib/route.svelte.js'
@@ -44,6 +46,54 @@
   const board = $derived(BOARDS.find((b) => b.id === data.boardId))
   const netError = $derived(networkError(data))
   const userStepNo = $derived(USER_STEPS.indexOf(step) + 1) // 1..4, or 0 outside
+
+  // --- Board detection from the cable ---
+  // The USB descriptor names the bridge chip, which narrows the board: one
+  // certain match is selected for you; native-USB boards (V4/C6) tie, so both
+  // are tagged and you pick. Runs prompt-free on entry when the port was
+  // granted before; the button covers a brand-new device (one chooser).
+  let detected = $state<BoardCandidates | null>(null)
+  let detectError = $state('')
+
+  function applyCandidates(c: BoardCandidates, { quiet = false } = {}) {
+    if (!c.boardIds.length) {
+      if (!quiet) detectError = "Couldn't recognise that USB device — pick your board from the list."
+      return
+    }
+    detected = c
+    detectError = ''
+    // Auto-select only a single, certain ESP32 match, and never override a
+    // choice already made. The ESP8266 gets tagged, not auto-entered — its
+    // setup is a different flow, so that stays a deliberate click.
+    if (c.boardIds.length === 1 && c.boardIds[0] !== 'esp8266' && !data.boardId) {
+      data.boardId = c.boardIds[0]
+    }
+  }
+
+  // Prompt-free pass whenever the board step is (re)entered.
+  $effect(() => {
+    if (step !== 'board' || detected) return
+    void findAttachedGrantedPort().then((port) => {
+      if (port && step === 'board') applyCandidates(boardCandidates(port.getInfo()), { quiet: true })
+    })
+  })
+
+  async function detectFromCable() {
+    detectError = ''
+    try {
+      const port = await navigator.serial.requestPort({
+        filters: [
+          { usbVendorId: 0x303a, usbProductId: 0x1001 },
+          { usbVendorId: 0x1a86 },
+          { usbVendorId: 0x10c4 },
+          { usbVendorId: 0x0403 },
+        ],
+      })
+      applyCandidates(boardCandidates(port.getInfo()))
+    } catch {
+      /* chooser dismissed — nothing to do */
+    }
+  }
 
   function goNext() {
     if (canAdvance(step, data)) step = nextStep(step)
@@ -166,6 +216,17 @@
     {:else if step === 'board'}
       <h2>Which device do you have?</h2>
       <p class="lede">Pick the board you're holding. The model is printed on it.</p>
+      {#if detected}
+        <p class="detect-note">
+          ✓ Recognised {detected.via} on your cable —
+          {detected.boardIds.length === 1 ? 'selected the matching board.' : 'it is one of the tagged boards.'}
+        </p>
+      {:else if webSerial}
+        <button class="btn-link detect-link" onclick={detectFromCable}>
+          Plugged in already? Work it out from the cable →
+        </button>
+        {#if detectError}<p class="warn-text">{detectError}</p>{/if}
+      {/if}
       <div class="boards">
         {#each BOARDS as b (b.id)}
           <button
@@ -174,7 +235,9 @@
             onclick={() => (data.boardId = b.id)}
             aria-pressed={data.boardId === b.id}
           >
-            <span class="board-name">{b.label}</span>
+            <span class="board-name">{b.label}
+              {#if detected?.boardIds.includes(b.id)}<span class="detect-tag">on your cable</span>{/if}
+            </span>
             <span class="board-tick">{data.boardId === b.id ? '●' : '○'}</span>
           </button>
         {/each}
@@ -184,7 +247,9 @@
              advancing this wizard. -->
         <button class="board-card board-card--tethered" onclick={() => (tethered = true)}>
           <span class="board-body">
-            <span class="board-name">ESP8266 <span class="board-tag">USB-tethered · hardened</span></span>
+            <span class="board-name">ESP8266 <span class="board-tag">USB-tethered · hardened</span>
+              {#if detected?.boardIds.includes('esp8266')}<span class="detect-tag">on your cable</span>{/if}
+            </span>
             <span class="board-sub">No WiFi on the signer — it stays plugged into an always-on
               computer and the bridge daemon carries its traffic. Its own guided setup.</span>
           </span>
@@ -464,6 +529,14 @@
   .board-card:hover { background: var(--surface-hover); }
   .board-card.selected { border-color: var(--green); background: #06120e; }
   .board-tick { color: var(--green); font-size: 1.1rem; flex-shrink: 0; }
+
+  .detect-link { padding: 0; margin: -0.75rem 0 1rem; display: inline-block; font-size: 0.85rem; }
+  .detect-note { font-size: 0.85rem; color: var(--green); margin: -0.75rem 0 1rem; }
+  .detect-tag {
+    font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+    color: var(--green); border: 1px solid var(--green-dim); border-radius: 3px;
+    padding: 0.1rem 0.4rem; margin-left: 0.5rem; vertical-align: middle;
+  }
 
   .board-card--tethered { align-items: flex-start; }
   .board-body { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }

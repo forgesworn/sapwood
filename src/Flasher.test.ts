@@ -107,6 +107,23 @@ describe('Flasher — happy path', () => {
     expect((screen.getByText('Next') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('recognises the board from an already-granted cable and preselects it', async () => {
+    // A granted, physically-attached CP210x bridge → Heltec V3, no prompts.
+    const port = { connected: true, getInfo: () => ({ usbVendorId: 0x10c4, usbProductId: 0xea60 }) }
+    Object.defineProperty(navigator, 'serial', {
+      value: { getPorts: async () => [port] },
+      configurable: true,
+    })
+
+    render(Flasher)
+    await fireEvent.click(screen.getByText('Start'))
+
+    expect(await screen.findByText(/Recognised a CP210x USB bridge/)).toBeTruthy()
+    const v3 = screen.getByText(/Heltec WiFi LoRa 32 V3/).closest('button') as HTMLButtonElement
+    expect(v3.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('on your cable')).toBeTruthy()
+  })
+
   it('flashes a USB-only (hardened) signer with the radio off and no WiFi details', async () => {
     render(Flasher)
     await fireEvent.click(screen.getByText('Start'))
