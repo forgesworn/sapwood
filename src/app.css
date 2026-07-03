@@ -56,10 +56,16 @@ body {
   white-space: nowrap;
   transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled { cursor: not-allowed; box-shadow: none; }
+.btn:disabled:not(.btn-primary) { opacity: 0.4; }
 
 .btn-primary { background: var(--green); color: #050505; border-color: var(--green); }
 .btn-primary:hover:not(:disabled) { background: #00ff88; box-shadow: var(--green-glow); }
+.btn-primary:disabled {
+  background: #102117;
+  color: #68786f;
+  border-color: #203428;
+}
 
 .btn-secondary { background: transparent; color: var(--text); border-color: var(--border-bright); }
 .btn-secondary:hover:not(:disabled) { background: var(--surface-hover); border-color: #444; }

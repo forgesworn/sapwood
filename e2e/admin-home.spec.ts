@@ -77,10 +77,10 @@ test('a device with no identity yet leads with guided setup', async ({ page }) =
 test('the disconnected console offers plain-language connect options', async ({ page }) => {
   await page.goto('/#/')
   await expect(page.getByRole('button', { name: 'Connect by USB cable' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Connect over your network' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect by signer address' })).toBeVisible()
   // The bridge (advanced) option is tucked behind a disclosure, not flat in the list.
   await expect(page.getByText('Other ways to connect')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Connect to a bridge' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Connect to local bridge' })).toBeHidden()
 })
 
 test.describe('mobile', () => {

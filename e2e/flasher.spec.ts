@@ -27,7 +27,7 @@ test('walks the whole wizard and flashes end-to-end', async ({ page }) => {
   // …and the technical secret is tucked behind Advanced, not in a newcomer's face.
   const secret = page.getByText(/NOSTR_SECRET_KEY=[0-9a-f]{64}/)
   await expect(secret).toBeHidden()
-  await page.getByText('Advanced: connect bray to this signer').click()
+  await page.getByText('Advanced: manage this signer from other tools').click()
   await expect(secret).toBeVisible()
 
   // Handoff: continuing leads straight into "finish your new signer", never the

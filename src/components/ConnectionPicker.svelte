@@ -212,7 +212,7 @@
     {/if}
     {#if showRelayForm}
       <div class="relay-setup">
-        <h3 class="section-title relay-title">Connect over your network</h3>
+        <h3 class="section-title relay-title">Connect by signer address</h3>
         <p class="hint relay-lead">
           No cable needed: your Heartwood is on your WiFi. To find it, fill in the two boxes
           below. Easiest of all: on the computer where you first set the device up, show its QR
@@ -220,47 +220,57 @@
         </p>
         <form class="relay-form" onsubmit={(e) => { e.preventDefault(); handleConnectRelay() }}>
           {#if knownDevices.length}
-            <label class="field">
-              <span class="field-label">A device you've used before</span>
-              <select class="field-input" onchange={pickKnown} disabled={connecting}>
+            <div class="field">
+              <label class="field-label" for="known-device">A device you've used before</label>
+              <select
+                id="known-device"
+                class="field-input"
+                onchange={pickKnown}
+                disabled={connecting}
+                aria-describedby="known-device-hint"
+              >
                 {#each knownDevices as d (d.pubHex)}
                   <option value={d.pubHex}>{d.label}</option>
                 {/each}
               </select>
-              <span class="field-hint">Pick one to fill in both boxes, or type a new device below.</span>
-            </label>
+              <span id="known-device-hint" class="field-hint">Pick one to fill in both boxes, or type a new device below.</span>
+            </div>
           {/if}
 
-          <label class="field">
-            <span class="field-label">1 · Your device's address</span>
+          <div class="field">
+            <label class="field-label" for="relay-pub-input">1 · Your device's address</label>
             <input
+              id="relay-pub-input"
               class="field-input"
               type="text"
               bind:value={relayPubInput}
               placeholder="npub1… or you@example.com"
               disabled={connecting}
+              aria-describedby="relay-pub-hint"
             />
-            <span class="field-hint">
+            <span id="relay-pub-hint" class="field-hint">
               Its <code>npub1…</code> address, or a name like <code>you@example.com</code> if it has
               one, both are safe to share. You chose this when setting the device up, so if that was
               on this computer it's already filled in.
             </span>
-          </label>
+          </div>
 
-          <label class="field">
-            <span class="field-label">2 · The relay it talks through</span>
+          <div class="field">
+            <label class="field-label" for="relay-url-input">2 · The relay it talks through</label>
             <input
+              id="relay-url-input"
               class="field-input"
               type="text"
               bind:value={relayUrlInput}
               placeholder="wss://relay.trotters.cc"
               disabled={connecting}
+              aria-describedby="relay-url-hint"
             />
-            <span class="field-hint">
+            <span id="relay-url-hint" class="field-hint">
               A relay is a shared postbox on the internet: your browser drops off a message and the
               device picks it up. Use the same one you chose during setup.
             </span>
-          </label>
+          </div>
 
           {#if relayError}<p class="error-text error">{relayError}</p>{/if}
 
@@ -318,6 +328,9 @@
         <button class="btn btn-primary btn-block btn-setup" onclick={() => navigate('flash')}>
           Set up a new device →
         </button>
+        <p class="hint-sm setup-sub">
+          Needs Chrome or Edge on a computer, your Heartwood, and a USB data cable.
+        </p>
         <p class="hint connect-hint">Already have one? Connect to manage it:</p>
       {/if}
       <div class="connect-buttons">
@@ -329,7 +342,7 @@
           {connecting ? 'Connecting...' : 'Connect by USB cable'}
         </button>
         <button class="btn btn-secondary" onclick={openRelayForm} disabled={connecting}>
-          Connect over your network
+          Connect by signer address
         </button>
         {#if attachedPort || smartDevice}
           <button class="btn btn-secondary" onclick={() => navigate('flash')} disabled={connecting}>
@@ -343,9 +356,9 @@
       <details class="disclosure more-ways">
         <summary>Other ways to connect</summary>
         <button class="btn btn-secondary more-ways-btn" onclick={() => showHttpForm = true} disabled={connecting}>
-          Connect to a bridge
+          Connect to local bridge
         </button>
-        <p class="hint-sm more-ways-note">For a device run through a bridge on your network (advanced).</p>
+        <p class="hint-sm more-ways-note">For a bridge daemon running on your LAN (advanced).</p>
       </details>
     {:else}
       <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectHttp() }}>
@@ -418,9 +431,8 @@
     padding: 0.85rem 1.5rem;
   }
 
-  .connect-hint {
-    margin: 1.5rem 0 0.6rem;
-  }
+  .setup-sub { margin-top: 0.7rem; text-align: center; }
+  .connect-hint { margin: 1.5rem 0 0.6rem; }
 
   /* WiFi (relay) connect: a roomy, labelled form that explains itself. */
   .finish-setup {

@@ -262,6 +262,9 @@
         <button class="btn btn-secondary" onclick={goBack}>Back</button>
         <button class="btn btn-primary" onclick={goNext} disabled={!canAdvance('board', data)}>Next</button>
       </div>
+      {#if !canAdvance('board', data)}
+        <p class="hint-sm next-help">Choose a board to continue.</p>
+      {/if}
 
     {:else if step === 'network'}
       {#snippet wipeOption()}
@@ -478,7 +481,7 @@
             project) on a computer that stays on, with the signer plugged into it. The daemon holds the cable
             and couriers signing requests to and from your relays. The signer itself never
             touches the network. Once it's running, open Sapwood from the bridge's address (or use
-            “Other ways to connect › Connect to a bridge”) to manage the signer through it.
+            “Other ways to connect › Connect to local bridge”) to manage the signer through it.
           </p>
           <p class="hint-sm">
             Nothing to do right now. Finishing setup below works over this cable, and local
@@ -624,6 +627,7 @@
   .stage .pct { color: var(--text-muted); }
 
   .actions { display: flex; gap: 0.75rem; margin-top: 1.75rem; }
+  .next-help { margin-top: 0.55rem; text-align: right; }
 
   .log-details { margin-top: 1.25rem; }
   .log { margin-top: 0.5rem; max-height: 200px; overflow: auto; background: #030303; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; font-size: 0.68rem; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; }

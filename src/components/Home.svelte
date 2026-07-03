@@ -224,7 +224,7 @@
             </button>
           {/each}
         {:else}
-          <button class="btn btn-primary" onclick={() => disconnect()}>Disconnect and connect over your network</button>
+          <button class="btn btn-primary" onclick={() => disconnect()}>Disconnect and connect by signer address</button>
         {/if}
       </div>
       {#if wifiErr}<p class="warn-text">{wifiErr}</p>{/if}
@@ -232,7 +232,7 @@
       <details class="disclosure">
         <summary>Why this happens</summary>
         <p class="hint-sm">A WiFi signer on older firmware ignores the cable while serving WiFi,
-          so manage it over the network instead (choose <strong>“Connect over your network”</strong>
+          so manage it over the network instead (choose <strong>“Connect by signer address”</strong>
           after disconnecting, then enter the <code>npub1…</code> shown on its screen). Otherwise,
           check the cable carries data, not just power.</p>
         <p class="hint-sm">On older firmware and need the cable? Press <strong>RESET</strong> on
