@@ -437,8 +437,11 @@
           {#if operator.mnemonic}
             <p class="op-title">✍ Write down these 12 words</p>
             <p class="op-desc">
-              They're the master key to manage this signer from anywhere later. Keep them safe and
-              private, like the keys to your house. You don't need them for the next steps.
+              They're your <strong>operator key</strong>. Your signer was just told to accept
+              WiFi management (approving apps, revoking them, checking status) only from the
+              holder of this key, so keep the words private. They restore the key in any
+              browser; it also stays saved in this one, under <strong>Identity › Operator
+              key</strong> in the console. You don't need it for the next steps.
               Heads up: in a moment your signer shows <strong>a different 12 words on its own
               screen</strong>. That's its recovery phrase, a separate thing. Label this one
               <strong>“operator”</strong> so you don't mix them up.
@@ -446,10 +449,20 @@
             <pre class="op-phrase">{operator.mnemonic}</pre>
           {:else}
             <p class="op-title">⚿ Your operator key</p>
-            <p class="op-desc">Keep this safe. It's how you manage this signer remotely later.</p>
+            <p class="op-desc">
+              This browser already held an operator key, so your signer was flashed to trust
+              it. The signer accepts WiFi management (approving apps, revoking them, checking
+              status) only from the holder of this key; over USB the cable itself is the
+              authority. Nothing to write down now: view, copy or back it up any time under
+              <strong>Identity › Operator key</strong> in the console.
+            </p>
           {/if}
           <details class="disclosure op-advanced">
-            <summary>Advanced: connect bray to this signer</summary>
+            <summary>Advanced: manage this signer from other tools</summary>
+            <p class="hint-sm">
+              Any tool that signs with the operator secret can manage this signer over relays,
+              same as this console. For bray, set this in its environment:
+            </p>
             <div class="uri-box"><code>NOSTR_SECRET_KEY={operator.skHex}</code></div>
             <button class="btn btn-secondary btn-sm" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy'}</button>
           </details>
