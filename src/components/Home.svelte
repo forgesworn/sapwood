@@ -159,11 +159,25 @@
       await connectRelay(d.pubHex, d.relays, d.label)
     } catch (e) {
       wifiErr = e instanceof Error ? e.message
-        : 'Could not reach it over WiFi yet — give it ~10s to join the network, then retry.'
+        : 'Could not reach it over the network yet — give it ~10s to join, then retry.'
     } finally {
       wifiBusy = false
     }
   }
+
+  // Transport is plumbing: when the cable goes silent and exactly one signer is
+  // known on the network, hop to it automatically — once per silent episode.
+  // The buttons below remain as the manual retry if the hop fails.
+  let autoHopTried = $state(false)
+  $effect(() => {
+    if (!(device.mode === 'serial' && device.usbSilent)) {
+      autoHopTried = false
+      return
+    }
+    if (autoHopTried || wifiBusy || knownWifi.length !== 1) return
+    autoHopTried = true
+    void manageOverWifi(knownWifi[0])
+  })
 </script>
 
 <div class="home">
@@ -206,11 +220,11 @@
         {#if knownWifi.length}
           {#each knownWifi as d (d.pubHex)}
             <button class="btn btn-primary" disabled={wifiBusy} onclick={() => manageOverWifi(d)}>
-              {wifiBusy ? 'Connecting…' : `Manage “${d.label}” over WiFi`}
+              {wifiBusy ? 'Connecting…' : `Reach “${d.label}” over your network`}
             </button>
           {/each}
         {:else}
-          <button class="btn btn-primary" onclick={() => disconnect()}>Disconnect and connect over WiFi</button>
+          <button class="btn btn-primary" onclick={() => disconnect()}>Disconnect and connect over your network</button>
         {/if}
       </div>
       {#if wifiErr}<p class="warn-text">{wifiErr}</p>{/if}

@@ -82,6 +82,9 @@ describe('networkError', () => {
   it('is null for fully valid data', () => {
     expect(networkError(valid())).toBeNull()
   })
+  it('always validates in USB-only mode — no WiFi or relays needed', () => {
+    expect(networkError(valid({ netMode: 'usb', ssid: '', password: '', relaysText: '' }))).toBeNull()
+  })
 })
 
 describe('canAdvance', () => {
@@ -95,6 +98,10 @@ describe('canAdvance', () => {
   it('requires valid network data to leave the network step', () => {
     expect(canAdvance('network', valid({ ssid: '' }))).toBe(false)
     expect(canAdvance('network', valid())).toBe(true)
+  })
+  it('lets a USB-only signer leave the network step with nothing entered', () => {
+    expect(canAdvance('network', valid({ netMode: 'usb', ssid: '', relaysText: '' }))).toBe(true)
+    expect(canAdvance('review', valid({ netMode: 'usb', ssid: '', relaysText: '' }))).toBe(true)
   })
   it('requires both board and network at review', () => {
     expect(canAdvance('review', valid({ boardId: '' }))).toBe(false)

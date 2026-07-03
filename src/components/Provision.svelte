@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters, connectRelay } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
@@ -14,11 +14,9 @@
   import { nip19 } from 'nostr-tools'
   import PasswordReveal from './PasswordReveal.svelte'
 
-  // The just-provisioned wifi device, if any — drives the "Manage over WiFi"
-  // handoff. Only set when this device was flashed in wifi mode (lastRelays present).
+  // The just-provisioned wifi device, if any — only set when this device was
+  // flashed in wifi mode (lastRelays present); drives the network-reachable note.
   let handoff = $state<{ hex: string; relays: string[] } | null>(null)
-  let handoffConnecting = $state(false)
-  let handoffError = $state('')
 
   /** Remember a just-provisioned master so it's connectable over the relay later. */
   function rememberProvisioned(npub: string, deviceLabel: string) {
@@ -35,20 +33,6 @@
       // Only offer the WiFi handoff for devices flashed in wifi mode.
       handoff = relays ? { hex, relays } : null
     } catch { /* non-fatal */ }
-  }
-
-  async function handleManageWifi() {
-    if (!handoff) return
-    handoffConnecting = true
-    handoffError = ''
-    try {
-      await connectRelay(handoff.hex, handoff.relays, label)
-      // device.mode is now 'relay'; the Masters/Clients tabs work over the relay.
-    } catch (e) {
-      handoffError = e instanceof Error ? e.message : 'Could not reach the device yet — give it ~10s to reboot and join wifi, then retry.'
-    } finally {
-      handoffConnecting = false
-    }
   }
 
   let mode = $state<ProvisionMode>('tree-mnemonic')
@@ -164,7 +148,6 @@
     secret = ''
     passphrase = ''
     handoff = null
-    handoffError = ''
   }
 </script>
 
@@ -180,20 +163,12 @@
       </div>
     {/if}
     {#if handoff}
-      <div class="card card--live handoff">
-        <p class="handoff-hint">
-          This is now a wifi signer — it manages over the relay, not USB. Give it ~10s to reboot
-          and join wifi, then:
-        </p>
-        {#if device.mode === 'relay'}
-          <p class="success-text handoff-ok">Connected over WiFi — open the Identity or Apps tab.</p>
-        {:else}
-          <button class="btn btn-primary manage-wifi" onclick={handleManageWifi} disabled={handoffConnecting}>
-            {handoffConnecting ? 'Connecting…' : 'Manage over WiFi'}
-          </button>
-        {/if}
-        {#if handoffError}<p class="error-text handoff-error">{handoffError}</p>{/if}
-      </div>
+      <!-- No "hop to WiFi" ceremony: current firmware answers the cable in every
+           mode, and the front page's one-tap connect now remembers this signer. -->
+      <p class="hint handoff-hint">
+        This signer is on your network — keep managing it here over the cable, or from any
+        browser via <strong>Connect to “{label}”</strong> on the front page.
+      </p>
     {/if}
     <button class="btn btn-secondary" onclick={handleCancel}>Add another</button>
   {:else if device.mode !== 'serial'}
@@ -340,9 +315,5 @@
   .security-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
 
   .provisioned-npub { margin: 0.75rem 0; }
-  .handoff { margin: 0.75rem 0; }
-  .handoff-hint { font-size: 0.78rem; color: var(--text-dim); margin: 0 0 0.6rem; line-height: 1.4; }
-  .handoff-ok { margin: 0; }
-  .handoff-error { margin: 0.5rem 0 0; }
-  .manage-wifi { margin-top: 0.25rem; }
+  .handoff-hint { margin: 0.75rem 0 1rem; font-size: 0.82rem; }
 </style>

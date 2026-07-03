@@ -18,9 +18,19 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
 /** Steps the user actively walks (shown in the "step X of Y" indicator). */
 export const USER_STEPS: readonly WizardStep[] = ['welcome', 'board', 'network', 'review'] as const
 
+/** How the signer will live on a network.
+ *  - `wifi` (the standard setup): the signer joins your WiFi and serves NIP-46
+ *    over relays itself — manageable from anywhere, no extra software.
+ *  - `usb` (the hardened tier): the radio stays off, so the key-holding chip
+ *    runs no network stack at all. It signs over the cable; remote apps reach
+ *    it only through a bridge daemon on the computer it is plugged into. */
+export type NetMode = 'wifi' | 'usb'
+
 export interface WizardData {
   /** BoardSpec.id of the chosen board. */
   boardId: string
+  /** WiFi-standalone (default) or USB-only hardened. */
+  netMode: NetMode
   ssid: string
   /** WPA2 passphrase; empty means an open network. */
   password: string
@@ -33,6 +43,7 @@ export interface WizardData {
 export function initialData(overrides: Partial<WizardData> = {}): WizardData {
   return {
     boardId: '',
+    netMode: 'wifi',
     ssid: '',
     password: '',
     relaysText: 'wss://relay.trotters.cc',
@@ -75,8 +86,11 @@ export function passwordError(password: string): string | null {
   return null
 }
 
-/** First problem with the whole network step, or null when it is ready. */
+/** First problem with the whole network step, or null when it is ready.
+ *  A USB-only signer needs no WiFi and no relays (the bridge daemon carries
+ *  its own relay config), so that mode always validates. */
 export function networkError(d: WizardData): string | null {
+  if (d.netMode === 'usb') return null
   return ssidError(d.ssid) ?? passwordError(d.password) ?? relayError(d.relaysText)
 }
 

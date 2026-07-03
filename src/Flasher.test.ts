@@ -49,9 +49,9 @@ describe('Flasher — happy path', () => {
     // Pick the first board → Next
     await fireEvent.click(screen.getByText('Heltec WiFi LoRa 32 V4'))
     await fireEvent.click(screen.getByText('Next'))
-    expect(screen.getByText('Which Wi-Fi should it use?')).toBeTruthy()
+    expect(screen.getByText('How will it connect?')).toBeTruthy()
 
-    // Fill wifi (ssid is the first input, password the second)
+    // Wi-Fi is the default mode; fill it in (ssid first input, password second)
     const inputs = container.querySelectorAll('input')
     await fireEvent.input(inputs[0], { target: { value: 'home-wifi' } })
     await fireEvent.input(inputs[1], { target: { value: 'hunter2hunter2' } })
@@ -105,5 +105,31 @@ describe('Flasher — happy path', () => {
     const inputs = container.querySelectorAll('input')
     await fireEvent.input(inputs[0], { target: { value: 'home-wifi' } })
     expect((screen.getByText('Next') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('flashes a USB-only (hardened) signer with the radio off and no WiFi details', async () => {
+    render(Flasher)
+    await fireEvent.click(screen.getByText('Start'))
+    await fireEvent.click(screen.getByText('Heltec WiFi LoRa 32 V4'))
+    await fireEvent.click(screen.getByText('Next'))
+
+    // Choose the hardened path — no WiFi fields, and it explains the daemon.
+    await fireEvent.click(screen.getByText(/USB-only/))
+    expect(screen.getByText('What USB-only means')).toBeTruthy()
+    expect(screen.getByText(/heartwood bridge\s*daemon/)).toBeTruthy()
+    expect((screen.getByText('Next') as HTMLButtonElement).disabled).toBe(false)
+
+    await fireEvent.click(screen.getByText('Next'))
+    expect(screen.getByText(/USB-only — radio off/)).toBeTruthy()
+    await fireEvent.click(screen.getByText('Flash'))
+    expect(await screen.findByText('Your signer is flashed')).toBeTruthy()
+
+    const [, cfg] = mockFlash.mock.calls[0]
+    expect(cfg.mode).toBe('usb')
+    expect(cfg.ssid).toBe('')
+    expect(cfg.relays).toEqual([])
+    expect(cfg.op_mgmt).toMatch(/^[0-9a-f]{64}$/)
+    // The done screen carries the bridge-daemon guidance.
+    expect(screen.getByText(/To let Nostr apps reach this signer remotely/)).toBeTruthy()
   })
 })

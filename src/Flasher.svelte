@@ -66,17 +66,21 @@
   }
 
   async function startFlash() {
-    const relays = parseRelays(data.relaysText)
+    const wifi = data.netMode === 'wifi'
+    const relays = wifi ? parseRelays(data.relaysText) : []
     const op = getOrCreateOperator()
     const cfg: NetConfig = {
-      ssid: data.ssid.trim(),
-      password: data.password,
+      ssid: wifi ? data.ssid.trim() : '',
+      password: wifi ? data.password : '',
       relays,
-      mode: 'wifi',
+      mode: data.netMode,
       op_mgmt: op.pubHex,
     }
     // Remember relays so the admin console can default this device's relay.
-    try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(relays)) } catch { /* ignore */ }
+    // A USB-only signer has none — it is reached over the cable (or its bridge).
+    if (wifi) {
+      try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(relays)) } catch { /* ignore */ }
+    }
 
     step = 'flashing'
     pct = 0
@@ -141,8 +145,9 @@
     {:else if step === 'welcome'}
       <h2>Set up your Heartwood</h2>
       <p class="lede">
-        This installs the signing software on your device and joins it to your Wi-Fi, so you can
-        manage it from your phone afterwards. You'll need the device and a USB cable. It takes about a minute.
+        This installs the signing software on your device and sets up how it connects — usually
+        your Wi-Fi, so you can manage it from your phone afterwards. You'll need the device and a
+        USB cable. It takes about a minute.
       </p>
       {#if !webSerial}
         <div class="card card--danger">
@@ -186,37 +191,84 @@
       </div>
 
     {:else if step === 'network'}
-      <h2>Which Wi-Fi should it use?</h2>
-      <p class="lede">The device joins this network on its own once it's set up.</p>
-      <label class="field">
-        <span class="field-label">Wi-Fi name</span>
-        <input class="field-input" bind:value={data.ssid} placeholder="your network" autocomplete="off" />
-      </label>
-      <label class="field">
-        <span class="field-label">Wi-Fi password</span>
-        <div class="pw-wrap">
-          <input class="field-input" type={showWifiPw ? 'text' : 'password'} bind:value={data.password} autocomplete="off" />
-          <PasswordReveal bind:shown={showWifiPw} />
-        </div>
-      </label>
+      <h2>How will it connect?</h2>
+      <div class="mode-cards">
+        <button
+          class="mode-card"
+          class:selected={data.netMode === 'wifi'}
+          onclick={() => (data.netMode = 'wifi')}
+          aria-pressed={data.netMode === 'wifi'}
+        >
+          <span class="mode-name">Join my Wi-Fi <span class="mode-tag">recommended</span></span>
+          <span class="mode-desc">The signer sits on your network and works from anywhere —
+            manage it from your phone. No extra software.</span>
+        </button>
+        <button
+          class="mode-card"
+          class:selected={data.netMode === 'usb'}
+          onclick={() => (data.netMode = 'usb')}
+          aria-pressed={data.netMode === 'usb'}
+        >
+          <span class="mode-name">USB-only <span class="mode-tag mode-tag--amber">hardened</span></span>
+          <span class="mode-desc">The radio stays off — the key-holding chip never touches a
+            network. Needs a bridge daemon for apps to reach it remotely.</span>
+        </button>
+      </div>
 
-      <details class="disclosure advanced" bind:open={showAdvanced}>
-        <summary>Advanced</summary>
+      {#if data.netMode === 'wifi'}
+        <p class="lede">The device joins this network on its own once it's set up.</p>
         <label class="field">
-          <span class="field-label">Relays (one per line)</span>
-          <textarea class="field-input" bind:value={data.relaysText} rows="2"></textarea>
+          <span class="field-label">Wi-Fi name</span>
+          <input class="field-input" bind:value={data.ssid} placeholder="your network" autocomplete="off" />
         </label>
-        <label class="erase-field">
-          <input type="checkbox" bind:checked={data.fullErase} />
-          <span>
-            <strong>Wipe the device first.</strong> Clears any identity already on it for a clean start.
-            <em>This destroys all keys on the device.</em>
-          </span>
+        <label class="field">
+          <span class="field-label">Wi-Fi password</span>
+          <div class="pw-wrap">
+            <input class="field-input" type={showWifiPw ? 'text' : 'password'} bind:value={data.password} autocomplete="off" />
+            <PasswordReveal bind:shown={showWifiPw} />
+          </div>
         </label>
-      </details>
 
-      {#if netError && (data.ssid || data.password)}
-        <div class="card card--warn"><p class="warn-text">{netError}</p></div>
+        <details class="disclosure advanced" bind:open={showAdvanced}>
+          <summary>Advanced</summary>
+          <label class="field">
+            <span class="field-label">Relays (one per line)</span>
+            <textarea class="field-input" bind:value={data.relaysText} rows="2"></textarea>
+          </label>
+          <label class="erase-field">
+            <input type="checkbox" bind:checked={data.fullErase} />
+            <span>
+              <strong>Wipe the device first.</strong> Clears any identity already on it for a clean start.
+              <em>This destroys all keys on the device.</em>
+            </span>
+          </label>
+        </details>
+
+        {#if netError && (data.ssid || data.password)}
+          <div class="card card--warn"><p class="warn-text">{netError}</p></div>
+        {/if}
+      {:else}
+        <div class="card card--warn usb-only-card">
+          <p class="usb-only-title">What USB-only means</p>
+          <ul class="usb-only-list">
+            <li>It signs over the cable, and you manage it here whenever it's plugged in.</li>
+            <li>For Nostr apps to reach it remotely, you run the <strong>heartwood bridge
+              daemon</strong> on a computer that stays on with the signer plugged in — it couriers
+              signing requests between your relays and the cable. We'll show what it needs after
+              the flash.</li>
+            <li>You can switch to Wi-Fi later under Advanced › Device › Network.</li>
+          </ul>
+        </div>
+        <details class="disclosure advanced" bind:open={showAdvanced}>
+          <summary>Advanced</summary>
+          <label class="erase-field">
+            <input type="checkbox" bind:checked={data.fullErase} />
+            <span>
+              <strong>Wipe the device first.</strong> Clears any identity already on it for a clean start.
+              <em>This destroys all keys on the device.</em>
+            </span>
+          </label>
+        </details>
       {/if}
       <div class="actions">
         <button class="btn btn-secondary" onclick={goBack}>Back</button>
@@ -227,8 +279,12 @@
       <h2>Ready to flash</h2>
       <ul class="summary">
         <li><span>Device</span><strong>{board?.label ?? '—'}</strong></li>
-        <li><span>Wi-Fi</span><strong>{data.ssid}</strong></li>
-        <li><span>Relays</span><strong>{parseRelays(data.relaysText).join(', ') || '—'}</strong></li>
+        {#if data.netMode === 'wifi'}
+          <li><span>Wi-Fi</span><strong>{data.ssid}</strong></li>
+          <li><span>Relays</span><strong>{parseRelays(data.relaysText).join(', ') || '—'}</strong></li>
+        {:else}
+          <li><span>Network</span><strong>USB-only — radio off (hardened)</strong></li>
+        {/if}
         {#if data.fullErase}<li><span>Wipe first</span><strong class="danger">Yes — erases existing keys</strong></li>{/if}
       </ul>
       <p class="hint-sm">
@@ -283,7 +339,11 @@
         </p>
       </div>
       <p class="lede">
-        It's joining <strong>{data.ssid}</strong>.
+        {#if data.netMode === 'wifi'}
+          It's joining <strong>{data.ssid}</strong>.
+        {:else}
+          It's a USB-only signer — its radio is off, and it signs over the cable.
+        {/if}
         {#if data.fullErase}
           It boots ready for a fresh identity.
         {:else}
@@ -312,6 +372,23 @@
             <div class="uri-box"><code>NOSTR_SECRET_KEY={operator.skHex}</code></div>
             <button class="btn btn-secondary btn-sm" onclick={copyOperator}>{copied ? 'Copied ✓' : 'Copy'}</button>
           </details>
+        </div>
+      {/if}
+
+      {#if data.netMode === 'usb'}
+        <div class="card card--warn bridge-todo">
+          <p class="bridge-todo-title">To let Nostr apps reach this signer remotely</p>
+          <p class="hint-sm">
+            Run the <strong>heartwood bridge daemon</strong> (from the heartwood-esp32 project) on
+            a computer that stays on, with the signer plugged into it. The daemon holds the cable
+            and couriers signing requests to and from your relays — the signer itself never
+            touches the network. Once it's running, open Sapwood from the bridge's address (or use
+            “Other ways to connect › Connect to a bridge”) to manage the signer through it.
+          </p>
+          <p class="hint-sm">
+            Nothing to do right now — finishing setup below works over this cable, and local
+            signing needs no daemon at all.
+          </p>
         </div>
       {/if}
 
@@ -380,6 +457,36 @@
   .board-card:hover { background: var(--surface-hover); }
   .board-card.selected { border-color: var(--green); background: #06120e; }
   .board-tick { color: var(--green); font-size: 1.1rem; }
+
+  .mode-cards { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.25rem; }
+  .mode-card {
+    display: flex; flex-direction: column; gap: 0.3rem; text-align: left;
+    background: var(--surface); border: 1px solid var(--border-bright); color: var(--text);
+    padding: 0.9rem 1.1rem; border-radius: 6px; font-family: inherit; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .mode-card:hover { background: var(--surface-hover); }
+  .mode-card.selected { border-color: var(--green); background: #06120e; }
+  .mode-name { font-size: 0.95rem; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 0.5rem; }
+  .mode-tag {
+    font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+    color: var(--green); border: 1px solid var(--green-dim); border-radius: 3px; padding: 0.1rem 0.4rem;
+  }
+  .mode-tag--amber { color: var(--amber); border-color: #5a4a20; }
+  .mode-desc { font-size: 0.8rem; color: var(--text-dim); line-height: 1.5; }
+
+  .usb-only-card { margin-bottom: 1rem; }
+  .usb-only-title { font-size: 0.9rem; font-weight: 600; color: var(--amber); margin: 0 0 0.5rem; }
+  .usb-only-list { margin: 0; padding-left: 1.2rem; font-size: 0.82rem; color: var(--text-dim); line-height: 1.6; }
+  .usb-only-list li { margin-bottom: 0.4rem; }
+  .usb-only-list li:last-child { margin-bottom: 0; }
+  .usb-only-list strong { color: var(--text); }
+
+  .bridge-todo { margin: 1.25rem 0; }
+  .bridge-todo-title { font-size: 0.9rem; font-weight: 600; color: var(--amber); margin: 0 0 0.5rem; }
+  .bridge-todo .hint-sm { margin-bottom: 0.5rem; }
+  .bridge-todo .hint-sm:last-child { margin-bottom: 0; }
+  .bridge-todo strong { color: var(--text); }
 
   .advanced { margin: 0.5rem 0 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
   .erase-field { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin-top: 0.5rem; }

@@ -3,7 +3,7 @@
   import type { NetConfig } from '../lib/frame'
   import PasswordReveal from './PasswordReveal.svelte'
 
-  let mode = $state<'usb' | 'wifi'>('usb')
+  let mode = $state<'usb' | 'wifi'>('wifi')
   let ssid = $state('')
   let password = $state('')
   let showPw = $state(false)
@@ -42,7 +42,10 @@
 
 <div class="connectivity">
   <h2 class="section-title">Network</h2>
-  <p class="hint">USB-bridged keeps the radio off (high assurance); WiFi-standalone manages over a relay.</p>
+  <p class="hint"><strong>WiFi-standalone</strong> is the standard setup — the signer sits on your
+    network and works from anywhere. <strong>USB-only (radio off)</strong> is the hardened tier:
+    no network stack runs on the key-holding chip, and Nostr apps reach it through the bridge
+    daemon on the computer it's plugged into.</p>
 
   {#if device.connected && !canConfigure}
     <p class="hint">Network settings are changed over USB. Plug the signer into this computer, connect, and come back here.</p>
@@ -52,10 +55,16 @@
     <label class="field">
       <span class="field-label">Mode</span>
       <select class="field-input" bind:value={mode} disabled={!canConfigure}>
-        <option value="usb">USB-bridged (radio off)</option>
-        <option value="wifi">WiFi-standalone</option>
+        <option value="wifi">WiFi-standalone — standard</option>
+        <option value="usb">USB-only, radio off — hardened</option>
       </select>
     </label>
+
+    {#if mode === 'usb'}
+      <p class="hint-sm">Remote signing in this mode needs the heartwood bridge daemon running on
+        an always-on computer with the signer plugged in. Local management here over the cable
+        needs nothing extra.</p>
+    {/if}
 
     {#if mode === 'wifi'}
       <label class="field">

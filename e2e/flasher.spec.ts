@@ -12,7 +12,7 @@ test('walks the whole wizard and flashes end-to-end', async ({ page }) => {
   await page.getByRole('button', { name: /Heltec WiFi LoRa 32 V4/ }).click()
   await page.getByRole('button', { name: 'Next' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Which Wi-Fi should it use?' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'How will it connect?' })).toBeVisible()
   const inputs = page.locator('.field input')
   await inputs.nth(0).fill('home-wifi')
   await inputs.nth(1).fill('hunter2hunter2')

@@ -64,14 +64,19 @@ Secrets never leave the ESP32. The serial protocol only carries:
 
 All destructive operations (factory reset, OTA, provisioning) require physical button confirmation on the device. A compromised SPA cannot extract keys or perform destructive actions without physical access to the button.
 
+### Network tiers
+
+- **WiFi-standalone (standard)** -- the signer joins the user's WiFi and serves NIP-46 over relays itself. Convenient, manageable from anywhere, no extra software. This is what the guided flasher produces by default.
+- **USB-only, radio off (hardened)** -- no network stack runs on the key-holding chip at all; its remote attack surface is zero. Remote signing requires the heartwood bridge daemon on an always-on host with the signer plugged in. Presented as the advanced option in the flasher and the Device > Network panel.
+
+Regardless of tier, identity creation, firmware updates, factory reset and PIN changes always require the USB cable -- deliberate physical-presence gates.
+
 ### Future: Web Bluetooth (portable mode only)
 
 BLE connectivity planned for portable mode (child key only, short range). Additional requirements before shipping BLE:
 1. Rate limiting on management frame types in firmware
 2. BLE pairing requires button press to accept
 3. CSP headers on static hosting
-
-WiFi is never enabled on the ESP32 -- TCP/IP stack is too large an attack surface for a key-holding device.
 
 ## Conventions
 

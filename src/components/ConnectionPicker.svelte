@@ -21,6 +21,29 @@
   let relayUrlInput = $state('wss://relay.trotters.cc')
   let relayError = $state('')
 
+  // --- Smart connect ---
+  // The signer you used last: one tap reconnects over its relay — no transport
+  // to choose. The cable and the full network form stay one click away.
+  // (listKnownDevices is most-recent-first; localStorage isn't reactive, so
+  // read once at mount.)
+  const smartDevice: KnownDevice | null = listKnownDevices().find((d) => d.relays.length) ?? null
+  let smartError = $state('')
+
+  async function handleSmartConnect() {
+    if (!smartDevice) return
+    smartError = ''
+    connecting = true
+    try {
+      await connectRelay(smartDevice.pubHex, smartDevice.relays, smartDevice.label)
+    } catch (e) {
+      smartError = e instanceof Error
+        ? e.message
+        : 'Could not reach it over the network — is it powered on?'
+    } finally {
+      connecting = false
+    }
+  }
+
   // --- Just-flashed handoff ---
   // Set by the flasher on success: this is a brand-new device, still plugged in.
   // Lead with one obvious "connect and finish" action instead of the full picker.
@@ -246,10 +269,20 @@
         </button>
       </div>
     {:else if !showHttpForm}
-      <button class="btn btn-primary btn-block btn-setup" onclick={() => navigate('flash')}>
-        Set up a new device →
-      </button>
-      <p class="hint connect-hint">Already have one? Connect to manage it:</p>
+      {#if smartDevice}
+        <!-- A remembered signer: reconnecting is the one thing you're most
+             likely here to do, so it's the single primary action. -->
+        <button class="btn btn-primary btn-block btn-setup" onclick={handleSmartConnect} disabled={connecting}>
+          {connecting ? 'Connecting…' : `Connect to “${smartDevice.label}” →`}
+        </button>
+        {#if smartError}<p class="warn-text notice">{smartError}</p>{/if}
+        <p class="hint connect-hint">Using a cable, another signer, or setting up a new one:</p>
+      {:else}
+        <button class="btn btn-primary btn-block btn-setup" onclick={() => navigate('flash')}>
+          Set up a new device →
+        </button>
+        <p class="hint connect-hint">Already have one? Connect to manage it:</p>
+      {/if}
       <div class="connect-buttons">
         <button
           class="btn btn-secondary"
@@ -261,6 +294,11 @@
         <button class="btn btn-secondary" onclick={openRelayForm} disabled={connecting}>
           Connect over your network
         </button>
+        {#if smartDevice}
+          <button class="btn btn-secondary" onclick={() => navigate('flash')} disabled={connecting}>
+            Set up a new device
+          </button>
+        {/if}
       </div>
       {#if !('serial' in navigator)}
         <p class="warn-text notice">Connecting by USB cable needs Chrome or Edge.</p>
