@@ -250,6 +250,23 @@ describe('reconnect is user-gesture safe', () => {
     // await (closing the old port), or Chrome rejects it as gesture-less.
     expect(order).toEqual(['requestPort', 'close-old'])
   })
+
+  it('connects to a provided already-granted port without the chooser', async () => {
+    const granted = {
+      readable: { getReader: () => ({ read: () => new Promise(() => {}), releaseLock() {}, async cancel() {} }) },
+      writable: {},
+      getInfo: () => ({ usbVendorId: 0x303a, usbProductId: 0x1001 }),
+    } as unknown as SerialPort
+
+    const requestPort = vi.fn(async () => granted)
+    vi.stubGlobal('navigator', { serial: { requestPort, getPorts: async () => [] } })
+
+    const t = new SerialTransport()
+    await t.connect(115200, granted)
+
+    // The smart-connect path: no user gesture needed, no port chooser shown.
+    expect(requestPort).not.toHaveBeenCalled()
+  })
 })
 
 describe('write pacing for large frames', () => {

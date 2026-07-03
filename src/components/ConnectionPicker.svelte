@@ -1,6 +1,7 @@
 <script lang="ts">
   import { device, connectSerial, connectHttp, connectRelay, disconnect, HttpTransport } from '../lib/device.svelte.js'
   import { listKnownDevices, type KnownDevice } from '../lib/known-devices.js'
+  import { findAttachedGrantedPort } from '../lib/serial-ports.js'
   import { probeBridge } from '../lib/bridge-probe.js'
   import { navigate } from '../lib/route.svelte.js'
   import { nip05, nip19 } from 'nostr-tools'
@@ -22,19 +23,49 @@
   let relayError = $state('')
 
   // --- Smart connect ---
-  // The signer you used last: one tap reconnects over its relay — no transport
-  // to choose. The cable and the full network form stay one click away.
+  // One button that works out how to reach your signer: a signer physically on
+  // the USB cable wins (a previously-granted port that reports attached —
+  // connects silently, no chooser); otherwise the signer you used last, over
+  // its relay. The explicit cable/network buttons stay one click away.
   // (listKnownDevices is most-recent-first; localStorage isn't reactive, so
   // read once at mount.)
   const smartDevice: KnownDevice | null = listKnownDevices().find((d) => d.relays.length) ?? null
+  let attachedPort = $state<SerialPort | null>(null)
   let smartError = $state('')
 
+  // Track the cable live: re-check when a granted device is plugged/unplugged.
+  $effect(() => {
+    if (!('serial' in navigator)) return
+    const refresh = () => { void findAttachedGrantedPort().then((p) => (attachedPort = p)) }
+    refresh()
+    navigator.serial.addEventListener('connect', refresh)
+    navigator.serial.addEventListener('disconnect', refresh)
+    return () => {
+      navigator.serial.removeEventListener('connect', refresh)
+      navigator.serial.removeEventListener('disconnect', refresh)
+    }
+  })
+
   async function handleSmartConnect() {
-    if (!smartDevice) return
     smartError = ''
     connecting = true
     try {
-      await connectRelay(smartDevice.pubHex, smartDevice.relays, smartDevice.label)
+      // Cable first — it's the faster, quieter path and needs no relay.
+      if (attachedPort) {
+        try {
+          await connectSerial(115200, attachedPort)
+          return
+        } catch {
+          // Cable didn't answer (stale grant, busy port) — fall through to the
+          // relay if we know one; the explicit buttons remain either way.
+          attachedPort = null
+        }
+      }
+      if (smartDevice) {
+        await connectRelay(smartDevice.pubHex, smartDevice.relays, smartDevice.label)
+      } else {
+        smartError = 'The cable did not answer. Unplug the signer, plug it back in, then try “Connect by USB cable”.'
+      }
     } catch (e) {
       smartError = e instanceof Error
         ? e.message
@@ -269,12 +300,18 @@
         </button>
       </div>
     {:else if !showHttpForm}
-      {#if smartDevice}
-        <!-- A remembered signer: reconnecting is the one thing you're most
-             likely here to do, so it's the single primary action. -->
+      {#if attachedPort || smartDevice}
+        <!-- Reconnecting is the one thing you're most likely here to do, so it's
+             the single primary action — over the cable when one is detected,
+             else over the last-used signer's relay. -->
         <button class="btn btn-primary btn-block btn-setup" onclick={handleSmartConnect} disabled={connecting}>
-          {connecting ? 'Connecting…' : `Connect to “${smartDevice.label}” →`}
+          {connecting ? 'Connecting…'
+            : attachedPort ? 'Connect to my signer →'
+            : `Connect to “${smartDevice!.label}” →`}
         </button>
+        {#if attachedPort}
+          <p class="hint-sm smart-sub">Found a signer on the USB cable — this connects straight to it.</p>
+        {/if}
         {#if smartError}<p class="warn-text notice">{smartError}</p>{/if}
         <p class="hint connect-hint">Using a cable, another signer, or setting up a new one:</p>
       {:else}
@@ -294,7 +331,7 @@
         <button class="btn btn-secondary" onclick={openRelayForm} disabled={connecting}>
           Connect over your network
         </button>
-        {#if smartDevice}
+        {#if attachedPort || smartDevice}
           <button class="btn btn-secondary" onclick={() => navigate('flash')} disabled={connecting}>
             Set up a new device
           </button>

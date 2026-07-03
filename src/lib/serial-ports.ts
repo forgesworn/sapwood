@@ -6,6 +6,22 @@
 // use") until the device is physically unplugged. Proactively closing any open
 // granted ports before opening a new one breaks that lock without a replug.
 
+/**
+ * A previously-granted port whose device is physically attached right now, or
+ * null. Uses `SerialPort.connected` (Chrome 117+); we only trust an explicit
+ * `true` — older browsers without the property simply report nothing attached,
+ * and the user still has the explicit "Connect by USB cable" button.
+ */
+export async function findAttachedGrantedPort(): Promise<SerialPort | null> {
+  if (typeof navigator === 'undefined' || !('serial' in navigator)) return null
+  try {
+    const ports = await navigator.serial.getPorts()
+    return ports.find((p) => (p as SerialPort & { connected?: boolean }).connected === true) ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Close every already-open Web Serial port this tab has been granted. */
 export async function releaseGrantedPorts(): Promise<void> {
   if (typeof navigator === 'undefined' || !('serial' in navigator)) return

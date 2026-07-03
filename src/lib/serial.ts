@@ -65,14 +65,16 @@ export class SerialTransport {
     }
   }
 
-  /** Request a serial port from the user and connect. */
-  async connect(baudRate = 115200): Promise<void> {
+  /** Connect to a serial port — asking the user to pick one, or using a
+   *  specific already-granted port (e.g. detected on the cable) when given. */
+  async connect(baudRate = 115200, existingPort?: SerialPort): Promise<void> {
     try {
       // requestPort FIRST. Any teardown of a previous session must happen AFTER
       // this — its awaits would otherwise consume the click's user gesture and
       // Chrome would reject requestPort. This is also what lets the error
       // banner's "Reconnect" work in a single click while still "connected".
-      const port = await navigator.serial.requestPort({
+      // (A provided port needs no gesture, so it skips the chooser entirely.)
+      const port = existingPort ?? await navigator.serial.requestPort({
         filters: [
           // ESP32-S3 USB-Serial-JTAG
           { usbVendorId: 0x303a, usbProductId: 0x1001 },

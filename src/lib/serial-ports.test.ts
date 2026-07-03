@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { releaseGrantedPorts } from './serial-ports'
+import { releaseGrantedPorts, findAttachedGrantedPort } from './serial-ports'
 
 function stubSerial(getPorts: () => Promise<unknown[]>) {
   Object.defineProperty(navigator, 'serial', { value: { getPorts }, configurable: true })
@@ -36,5 +36,26 @@ describe('releaseGrantedPorts', () => {
   it('swallows a getPorts() failure', async () => {
     stubSerial(async () => { throw new Error('denied') })
     await expect(releaseGrantedPorts()).resolves.toBeUndefined()
+  })
+})
+
+describe('findAttachedGrantedPort', () => {
+  it('returns the granted port whose device is physically attached', async () => {
+    const unplugged = { connected: false }
+    const plugged = { connected: true }
+    stubSerial(async () => [unplugged, plugged])
+    expect(await findAttachedGrantedPort()).toBe(plugged)
+  })
+
+  it('trusts only an explicit connected: true (older browsers report nothing)', async () => {
+    const legacy = {} // no `connected` property pre-Chrome 117
+    stubSerial(async () => [legacy])
+    expect(await findAttachedGrantedPort()).toBeNull()
+  })
+
+  it('is null when Web Serial is unavailable or getPorts fails', async () => {
+    expect(await findAttachedGrantedPort()).toBeNull()
+    stubSerial(async () => { throw new Error('denied') })
+    expect(await findAttachedGrantedPort()).toBeNull()
   })
 })

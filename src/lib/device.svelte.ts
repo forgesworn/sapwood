@@ -170,8 +170,8 @@ function addLog(line: string) {
 
 // --- Actions ---
 
-export async function connectSerial(baudRate = 115200) {
-  await serialTransport.connect(baudRate)
+export async function connectSerial(baudRate = 115200, port?: SerialPort) {
+  await serialTransport.connect(baudRate, port)
 }
 
 /** Uint8Array → base64, chunked so String.fromCharCode never overflows argv. */
