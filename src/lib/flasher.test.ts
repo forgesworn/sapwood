@@ -1,4 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('@noble/curves/ed25519.js', () => ({
+  ed25519: {
+    verify: vi.fn((signature: Uint8Array) => signature.some((b) => b !== 0)),
+  },
+}))
+
+import { ed25519 } from '@noble/curves/ed25519.js'
 import {
   flashDevice,
   flashTetheredImage,
@@ -21,6 +29,26 @@ const CFG: NetConfig = {
 }
 
 const BOARD = BOARDS[0] // heltec-v4, config @ 0x410000
+const DUMMY_APP = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+const DUMMY_APP_SHA = '5f78c33274e43fa9de5659265c1d917e25c03722dcb0b8d27db8d5feaa813953'
+const ZERO_180K_SHA = 'ec5a689d3fdf19351fc26dadaae55e6968fe42c9d18d760dd35f74981bd20115'
+const ONE_BYTE_SHA = '4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a'
+const SIGNED_MANIFEST = {
+  version: 'test',
+  boards: Object.fromEntries(
+    [...BOARDS, ...TETHERED_BOARDS].map((b) => [
+      b.id,
+      { app: 'app.bin', sha256: DUMMY_APP_SHA, signature: '11'.repeat(64) },
+    ]),
+  ),
+}
+
+function manifestForSha(boardId: string, sha256: string) {
+  return {
+    version: 'test',
+    boards: { [boardId]: { app: 'app.bin', sha256, signature: '11'.repeat(64) } },
+  }
+}
 
 interface Harness {
   backend: FlasherBackend
@@ -68,11 +96,12 @@ function makeHarness(opts: {
   const backend: FlasherBackend = {
     hasWebSerial: () => opts.hasWebSerial ?? true,
     requestPort: vi.fn(async () => { calls.requestPort++; return { fake: 'port' } }),
-    fetchBin: vi.fn(async (url: string) => { fetched.push(url); return new Uint8Array([0xde, 0xad, 0xbe, 0xef]) }),
-    // Default: manifest lists no boards, so the integrity check is skipped and
-    // the existing tests exercise the flash path unchanged. Tests that assert on
-    // the check override this to declare a per-board sha256.
-    fetchManifest: vi.fn(async () => ({ version: 'test', boards: {} })),
+    fetchBin: vi.fn(async (url: string) => {
+      fetched.push(url)
+      if (url.endsWith('/app.bin')) return DUMMY_APP
+      return new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+    }),
+    fetchManifest: vi.fn(async () => SIGNED_MANIFEST),
     openSession: vi.fn(async () => { calls.openSession++; return session }),
   }
 
@@ -161,6 +190,7 @@ describe('flashDevice — progress mapping (byte-weighted)', () => {
         : 300 // partition-table.bin
       return new Uint8Array(n)
     })
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockResolvedValue(manifestForSha(BOARD.id, ZERO_180K_SHA))
   }
 
   it('keeps the bar low after the tiny bootloader + partition table finish', async () => {
@@ -235,6 +265,7 @@ describe('flashDevice — ordering and chip detection', () => {
     const h = makeHarness()
     ;(h.backend.requestPort as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('port'); return {} })
     ;(h.backend.fetchBin as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('fetch'); return new Uint8Array([1]) })
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockResolvedValue(manifestForSha(BOARD.id, ONE_BYTE_SHA))
     await flashDevice(BOARD, CFG, {}, h.backend)
     expect(order[0]).toBe('port')
     expect(order.indexOf('port')).toBeLessThan(order.indexOf('fetch'))
@@ -268,8 +299,6 @@ describe('flashDevice — cleanup', () => {
 })
 
 describe('flashDevice — firmware integrity (guards a stale/cached app.bin)', () => {
-  // The dummy payload makeHarness's fetchBin returns for every URL, incl. app.bin.
-  const DUMMY = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
   async function sha256hex(bytes: Uint8Array): Promise<string> {
     const buf = new ArrayBuffer(bytes.byteLength)
     new Uint8Array(buf).set(bytes)
@@ -289,27 +318,52 @@ describe('flashDevice — firmware integrity (guards a stale/cached app.bin)', (
     expect(h.session.writeFlash).not.toHaveBeenCalled()
   })
 
-  it('flashes when the app SHA matches the manifest', async () => {
+  it('flashes when the app SHA and release signature match the manifest', async () => {
+    const h = makeHarness()
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+    expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects — before opening the device — when the release signature does not match', async () => {
     const h = makeHarness()
     ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockResolvedValue({
       version: 'x',
-      boards: { [BOARD.id]: { app: 'app.bin', sha256: await sha256hex(DUMMY) } },
+      boards: {
+        [BOARD.id]: {
+          app: 'app.bin',
+          sha256: await sha256hex(DUMMY_APP),
+          signature: '00'.repeat(64),
+        },
+      },
     })
-    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
-    expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).rejects.toThrow(/release signature failed/i)
+    expect(h.backend.openSession).not.toHaveBeenCalled()
+    expect(h.session.writeFlash).not.toHaveBeenCalled()
   })
 
-  it('skips the check and still flashes when the manifest omits the board', async () => {
-    const h = makeHarness() // default fetchManifest → empty boards
-    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
-    expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+  it('rejects when the manifest omits the selected board', async () => {
+    const h = makeHarness()
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockResolvedValue({ version: 'x', boards: {} })
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).rejects.toThrow(/no SHA-256/i)
+    expect(h.backend.openSession).not.toHaveBeenCalled()
   })
 
-  it('skips the check (best-effort) when the manifest fetch fails', async () => {
+  it('rejects when the manifest fetch fails', async () => {
     const h = makeHarness()
     ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('offline'))
-    await expect(flashDevice(BOARD, CFG, {}, h.backend)).resolves.toBeUndefined()
+    await expect(flashDevice(BOARD, CFG, {}, h.backend)).rejects.toThrow(/manifest unavailable.*offline/i)
+    expect(h.backend.openSession).not.toHaveBeenCalled()
+  })
+
+  it('accepts the C6 image signed with the firmware board id esp32c6', async () => {
+    const c6 = BOARDS.find((b) => b.id === 'c6')!
+    const h = makeHarness()
+    const verify = vi.mocked(ed25519.verify)
+    verify.mockClear()
+    await expect(flashDevice(c6, CFG, {}, h.backend)).resolves.toBeUndefined()
     expect(h.session.writeFlash).toHaveBeenCalledTimes(1)
+    const msg = verify.mock.calls.at(-1)?.[1] as Uint8Array
+    expect(new TextDecoder().decode(msg)).toContain('heartwood-ota-v1\0esp32c6\0')
   })
 })
 

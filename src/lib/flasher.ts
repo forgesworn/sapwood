@@ -18,6 +18,7 @@
 // exercised without hardware. The esptool-js coupling lives in ONE place below.
 
 import { ESPLoader, Transport } from 'esptool-js'
+import { ed25519 } from '@noble/curves/ed25519.js'
 import type { NetConfig } from './frame'
 import { buildConfigBlob } from './flash-config'
 import { releaseGrantedPorts } from './serial-ports'
@@ -137,15 +138,53 @@ export interface FlasherBackend {
 }
 
 // The served firmware manifest (public/firmware/version.json, written by
-// heartwood-esp32's sync-firmware). Only the per-board app SHA-256 is used here.
+// heartwood-esp32's sync-firmware). The per-board app SHA-256 guards freshness
+// and corruption; the Ed25519 release signature authenticates the image against
+// the pinned Heartwood release key below before any bytes are flashed.
 export interface FirmwareManifest {
   version?: string
   builtAt?: string
-  boards?: Record<string, { app?: string; sha256?: string; bytes?: number; ota?: boolean }>
+  boards?: Record<string, { app?: string; sha256?: string; bytes?: number; ota?: boolean; signature?: string }>
 }
 
 /** Absolute path to the served firmware manifest. */
 const MANIFEST_URL = '/firmware/version.json'
+const OTA_RELEASE_PUBKEY_HEX = '3cdfa635d0a058119b412999f061870e7e0a6d41df5deffadb0c1ff4a9d339b7'
+const OTA_SIGNING_DOMAIN = new TextEncoder().encode('heartwood-ota-v1')
+const OTA_RELEASE_PUBKEY = hexToBytes(OTA_RELEASE_PUBKEY_HEX, 'OTA release public key', 32)
+
+function hexToBytes(hex: string, label: string, expectedLength?: number): Uint8Array {
+  if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) {
+    throw new Error(`${label} is not valid hex.`)
+  }
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  if (expectedLength !== undefined && bytes.length !== expectedLength) {
+    throw new Error(`${label} must be ${expectedLength} bytes, got ${bytes.length}.`)
+  }
+  return bytes
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function otaSigningBoardId(boardId: string): string {
+  // The UI calls the Waveshare board "c6"; firmware signs with board::BOARD.
+  return boardId === 'c6' ? 'esp32c6' : boardId
+}
+
+function otaSigningMessage(boardId: string, digest: Uint8Array): Uint8Array {
+  const board = new TextEncoder().encode(otaSigningBoardId(boardId))
+  const msg = new Uint8Array(OTA_SIGNING_DOMAIN.length + 1 + board.length + 1 + digest.length)
+  let off = 0
+  msg.set(OTA_SIGNING_DOMAIN, off); off += OTA_SIGNING_DOMAIN.length
+  msg[off++] = 0
+  msg.set(board, off); off += board.length
+  msg[off++] = 0
+  msg.set(digest, off)
+  return msg
+}
 
 // Firmware images are fetched `no-store`: the browser otherwise heuristically
 // disk-caches the large app.bin, so a re-flash after an update silently writes
@@ -164,42 +203,54 @@ async function fetchManifest(): Promise<FirmwareManifest> {
 }
 
 /** SHA-256 of `data` as lowercase hex. */
-async function sha256Hex(data: Uint8Array): Promise<string> {
+async function sha256Bytes(data: Uint8Array): Promise<Uint8Array> {
   // Copy into a fresh ArrayBuffer so digest() gets a concrete BufferSource
   // (a Uint8Array may be a view over a larger/offset buffer).
   const buf = new ArrayBuffer(data.byteLength)
   new Uint8Array(buf).set(data)
   const digest = await crypto.subtle.digest('SHA-256', buf)
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+  return new Uint8Array(digest)
 }
 
 /**
- * Fail loudly if the fetched app image doesn't match the manifest's SHA-256 —
- * the guardrail against a stale/corrupt download silently flashing the wrong
- * firmware. version.json is fetched `no-store`, so its sha is authoritative.
- * Best-effort: if the manifest is unavailable or doesn't list this board, log and
- * proceed (the `no-store` fetch already refreshed the bytes; this is defence in
- * depth, not a hard gate on a manifest hiccup).
+ * Fail loudly if the fetched app image doesn't match the manifest's SHA-256 or
+ * if the release signature doesn't verify with the pinned public key. This is a
+ * hard gate: an unavailable/stale manifest, missing signature, wrong board id or
+ * tampered image aborts before the esptool session opens.
  */
 async function verifyAppIntegrity(
-  manifest: FirmwareManifest | null,
+  manifest: FirmwareManifest,
   boardId: string,
   appData: Uint8Array,
   log: (s: string) => void,
 ): Promise<void> {
-  const expected = manifest?.boards?.[boardId]?.sha256
+  const meta = manifest.boards?.[boardId]
+  const expected = meta?.sha256
   if (!expected) {
-    log(`No manifest SHA for ${boardId} — skipping firmware integrity check.`)
-    return
+    throw new Error(`Firmware manifest has no SHA-256 for ${boardId}; refusing to flash unsigned bytes.`)
   }
-  const actual = await sha256Hex(appData)
+  const digest = await sha256Bytes(appData)
+  const actual = bytesToHex(digest)
   if (actual !== expected) {
     throw new Error(
       `Firmware integrity check failed for ${boardId}: expected ${expected.slice(0, 16)}…, got ${actual.slice(0, 16)}…. ` +
         'This usually means a stale cached download — hard-refresh (Cmd/Ctrl+Shift+R) and flash again.',
     )
   }
-  log(`Firmware verified (sha256 ${actual.slice(0, 16)}…).`)
+  if (!meta?.signature) {
+    throw new Error(`Firmware manifest has no release signature for ${boardId}; refusing to flash unsigned firmware.`)
+  }
+  const signature = hexToBytes(meta.signature, 'Firmware release signature', 64)
+  let ok = false
+  try {
+    ok = ed25519.verify(signature, otaSigningMessage(boardId, digest), OTA_RELEASE_PUBKEY)
+  } catch {
+    ok = false
+  }
+  if (!ok) {
+    throw new Error(`Firmware release signature failed for ${boardId}; refusing to flash this image.`)
+  }
+  log(`Firmware verified (sha256 ${actual.slice(0, 16)}…, signed for ${otaSigningBoardId(boardId)}).`)
 }
 
 /** The production backend: esptool-js over Web Serial. Coupling isolated here. */
@@ -286,16 +337,11 @@ export async function flashDevice(
   )
   const labels = fwRegions.map((r) => r.label)
 
-  // 2a. Verify the app image against the manifest before touching the device — a
-  //     stale (browser-cached) app.bin would otherwise flash silently. The
-  //     manifest fetch is best-effort; a SHA mismatch aborts before we open the
-  //     serial session, so a bad download never reaches the flash.
-  let manifest: FirmwareManifest | null = null
-  try {
-    manifest = await backend.fetchManifest()
-  } catch (e) {
-    log(`Firmware manifest unavailable (${e instanceof Error ? e.message : e}) — skipping integrity check.`)
-  }
+  // 2a. Verify the app image against the signed manifest before touching the
+  //     device. A stale/corrupt/tampered app.bin must never reach flash.
+  const manifest = await backend.fetchManifest().catch((e) => {
+    throw new Error(`Firmware manifest unavailable: ${e instanceof Error ? e.message : e}`)
+  })
   await verifyAppIntegrity(manifest, board.id, regions[fwRegions.findIndex((r) => r.file === 'app.bin')].data, log)
 
   // 3. Build the config blob and append it at the config-partition offset.
@@ -385,12 +431,9 @@ export async function flashTetheredImage(
 
   log(`Fetching firmware for ${board.label}…`)
   const data = await backend.fetchBin(`${board.assets}/app.bin`)
-  let manifest: FirmwareManifest | null = null
-  try {
-    manifest = await backend.fetchManifest()
-  } catch (e) {
-    log(`Firmware manifest unavailable (${e instanceof Error ? e.message : e}) — skipping integrity check.`)
-  }
+  const manifest = await backend.fetchManifest().catch((e) => {
+    throw new Error(`Firmware manifest unavailable: ${e instanceof Error ? e.message : e}`)
+  })
   await verifyAppIntegrity(manifest, board.id, data, log)
   const regions: FlashRegion[] = [{ address: 0x0, data }]
 
