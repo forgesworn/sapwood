@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { enableAdminTestSeam } from './helpers.js'
+import { disableWebSerial, enableAdminTestSeam } from './helpers.js'
 
 // A wifi master (the npub field accepts hex; the UI abbreviates it for display).
 const MASTER = { slot: 0, label: 'master', mode: -1, modeLabel: 'WIFI', npub: 'a'.repeat(64) }
@@ -54,6 +54,21 @@ test('connect-an-app flow opens and gates on a name', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Messages only/ })).toBeVisible()
 })
 
+test('phone handoff QR is hidden until explicitly revealed', async ({ page }) => {
+  await enableAdminTestSeam(page)
+  await page.goto('/#/')
+  await page.evaluate(() => localStorage.setItem('heartwood.lastRelays', JSON.stringify(['wss://relay.trotters.cc'])))
+  await fakeConnect(page)
+
+  await expect(page.getByText('Manage from your phone')).toBeVisible()
+  await expect(page.locator('.handoff .qr')).toHaveCount(0)
+  await expect(page.getByText(/This link carries your operator key/)).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Show pairing QR' }).click()
+  await expect(page.locator('.handoff .qr')).toBeVisible()
+  await expect(page.getByText(/This link carries your operator key/)).toBeVisible()
+})
+
 test('a device with no identity yet leads with guided setup', async ({ page }) => {
   await enableAdminTestSeam(page)
   await page.goto('/#/')
@@ -81,6 +96,14 @@ test('the disconnected console offers plain-language connect options', async ({ 
   // The bridge (advanced) option is tucked behind a disclosure, not flat in the list.
   await expect(page.getByText('Other ways to connect')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Connect to local bridge' })).toBeHidden()
+})
+
+test('without Web Serial, signer-address connect is the primary path', async ({ page }) => {
+  await disableWebSerial(page)
+  await page.goto('/#/')
+  await expect(page.getByRole('button', { name: /Connect by signer address/ }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /Set up a new device/ })).toHaveCount(0)
+  await expect(page.getByText(/USB setup and USB management need Chrome or Edge on a computer/)).toBeVisible()
 })
 
 test.describe('mobile', () => {

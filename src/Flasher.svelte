@@ -107,6 +107,17 @@
     if (line) logLines = [...logLines.slice(-300), line]
   }
 
+  function boardHint(id: string): string {
+    switch (id) {
+      case 'heltec-v4': return 'USB-C, display, RST and PRG buttons'
+      case 'heltec-v3': return 'USB-UART bridge, display, RST and PRG buttons'
+      case 'tdisplay': return 'USB-C, color display, two front buttons'
+      case 'c6': return 'USB-C, small LCD, BOOT and RESET buttons'
+      case 'esp8266': return 'USB-UART tethered board, no onboard WiFi signer mode'
+      default: return 'USB development board'
+    }
+  }
+
   async function copyOperator() {
     if (!operator) return
     const ok = await copyText(operator.skHex)
@@ -236,8 +247,19 @@
             onclick={() => (data.boardId = b.id)}
             aria-pressed={data.boardId === b.id}
           >
-            <span class="board-name">{b.label}
-              {#if detected?.boardIds.includes(b.id)}<span class="detect-tag">on your cable</span>{/if}
+            <span class="board-body">
+              <span class="board-visual" data-board={b.id} aria-hidden="true">
+                <span class="board-screen"></span>
+                <span class="board-usb"></span>
+                <span class="board-btn board-btn--reset"></span>
+                <span class="board-btn board-btn--prog"></span>
+              </span>
+              <span class="board-copy">
+                <span class="board-name">{b.label}
+                  {#if detected?.boardIds.includes(b.id)}<span class="detect-tag">on your cable</span>{/if}
+                </span>
+                <span class="board-sub">{boardHint(b.id)}</span>
+              </span>
             </span>
             <span class="board-tick">{data.boardId === b.id ? '●' : '○'}</span>
           </button>
@@ -248,11 +270,19 @@
              advancing this wizard. -->
         <button class="board-card board-card--tethered" onclick={() => (tethered = true)}>
           <span class="board-body">
-            <span class="board-name">ESP8266 <span class="board-tag">USB-tethered · hardened</span>
-              {#if detected?.boardIds.includes('esp8266')}<span class="detect-tag">on your cable</span>{/if}
+            <span class="board-visual" data-board="esp8266" aria-hidden="true">
+              <span class="board-screen"></span>
+              <span class="board-usb"></span>
+              <span class="board-btn board-btn--reset"></span>
+              <span class="board-btn board-btn--prog"></span>
             </span>
-            <span class="board-sub">No WiFi on the signer. It stays plugged into an always-on
-              computer and the bridge daemon carries its traffic. Its own guided setup.</span>
+            <span class="board-copy">
+              <span class="board-name">ESP8266 <span class="board-tag">USB-tethered · hardened</span>
+                {#if detected?.boardIds.includes('esp8266')}<span class="detect-tag">on your cable</span>{/if}
+              </span>
+              <span class="board-sub">{boardHint('esp8266')}. No WiFi on the signer. It stays plugged into an always-on
+                computer and the bridge daemon carries its traffic. Its own guided setup.</span>
+            </span>
           </span>
           <span class="board-tick">→</span>
         </button>
@@ -565,8 +595,39 @@
   }
 
   .board-card--tethered { align-items: flex-start; }
-  .board-body { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+  .board-body { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
+  .board-copy { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
   .board-card--tethered .board-name { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .board-visual {
+    width: 4rem; height: 2.65rem; flex-shrink: 0; position: relative;
+    border: 1px solid #37523f; border-radius: 0.35rem; background: #08130d;
+    box-shadow: inset 0 0 0 1px #0d2819;
+  }
+  .board-visual::before {
+    content: ""; position: absolute; inset: 0.28rem; border: 1px solid #102d1c;
+    border-radius: 0.2rem; opacity: 0.8;
+  }
+  .board-screen {
+    position: absolute; left: 0.55rem; top: 0.48rem; width: 1.65rem; height: 1rem;
+    border: 1px solid var(--green-dim); border-radius: 0.12rem; background: #041009;
+  }
+  .board-usb {
+    position: absolute; right: -0.15rem; top: 0.88rem; width: 0.34rem; height: 0.85rem;
+    border: 1px solid #777; border-radius: 0.08rem; background: #141414;
+  }
+  .board-btn {
+    position: absolute; bottom: 0.45rem; width: 0.42rem; height: 0.42rem;
+    border-radius: 50%; border: 1px solid #777; background: #202020;
+  }
+  .board-btn--reset { right: 1.15rem; }
+  .board-btn--prog { right: 0.55rem; border-color: var(--amber); }
+  .board-visual[data-board="tdisplay"] .board-screen { width: 2.25rem; height: 1.35rem; }
+  .board-visual[data-board="tdisplay"] .board-btn--reset { left: 0.55rem; right: auto; }
+  .board-visual[data-board="tdisplay"] .board-btn--prog { left: 1.25rem; right: auto; }
+  .board-visual[data-board="c6"] { border-radius: 0.5rem; }
+  .board-visual[data-board="c6"] .board-screen { left: 0.7rem; width: 1.35rem; height: 1.35rem; border-radius: 0.18rem; }
+  .board-visual[data-board="esp8266"] .board-screen { display: none; }
+  .board-visual[data-board="esp8266"] { width: 3.6rem; background: #111; border-color: #51401f; }
   .board-tag {
     font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
     color: var(--amber); border: 1px solid #5a4a20; border-radius: 3px; padding: 0.1rem 0.4rem;

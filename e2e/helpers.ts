@@ -10,7 +10,16 @@ export async function installFakeFlasher(page: Page): Promise<void> {
     ;(window as unknown as { __sapwoodFlashBackend: unknown }).__sapwoodFlashBackend = {
       hasWebSerial: () => true,
       requestPort: async () => ({}),
-      fetchBin: async () => new Uint8Array([1, 2, 3, 4]),
+      fetchBin: async (url: string) => {
+        const res = await fetch(url, { cache: 'no-store' })
+        if (!res.ok) throw new Error(`fetch ${url} failed: ${res.status}`)
+        return new Uint8Array(await res.arrayBuffer())
+      },
+      fetchManifest: async () => {
+        const res = await fetch('/firmware/version.json', { cache: 'no-store' })
+        if (!res.ok) throw new Error(`fetch manifest failed: ${res.status}`)
+        return res.json()
+      },
       openSession: async () => ({
         detectChip: async () => 'ESP32-S3 (fake)',
         eraseFlash: async () => {},

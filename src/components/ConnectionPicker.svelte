@@ -6,6 +6,8 @@
   import { navigate } from '../lib/route.svelte.js'
   import { nip05, nip19 } from 'nostr-tools'
 
+  const canUseUsb = $derived(typeof navigator !== 'undefined' && 'serial' in navigator)
+
   let showHttpForm = $state(false)
   let httpAddress = $state(HttpTransport.savedAddress() ?? '')
   let connecting = $state(false)
@@ -35,7 +37,7 @@
 
   // Track the cable live: re-check when a granted device is plugged/unplugged.
   $effect(() => {
-    if (!('serial' in navigator)) return
+    if (!canUseUsb) return
     const refresh = () => { void findAttachedGrantedPort().then((p) => (attachedPort = p)) }
     refresh()
     navigator.serial.addEventListener('connect', refresh)
@@ -295,11 +297,11 @@
         <button
           class="btn btn-primary btn-block finish-btn"
           onclick={handleConnectSerial}
-          disabled={connecting || !('serial' in navigator)}
+          disabled={connecting || !canUseUsb}
         >
           {connecting ? 'Connecting…' : 'Connect to my new signer →'}
         </button>
-        {#if !('serial' in navigator)}
+        {#if !canUseUsb}
           <p class="warn-text notice">This needs Chrome or Edge on a computer: it talks over the USB cable.</p>
         {/if}
         <button class="btn btn-ghost finish-other" onclick={clearJustFlashed}>
@@ -325,33 +327,50 @@
         {#if smartError}<p class="warn-text notice">{smartError}</p>{/if}
         <p class="hint connect-hint">Using a cable, another signer, or setting up a new one:</p>
       {:else}
-        <button class="btn btn-primary btn-block btn-setup" onclick={() => navigate('flash')}>
-          Set up a new device →
-        </button>
-        <p class="hint-sm setup-sub">
-          Needs Chrome or Edge on a computer, your Heartwood, and a USB data cable.
-        </p>
-        <p class="hint connect-hint">Already have one? Connect to manage it:</p>
+        {#if canUseUsb}
+          <button class="btn btn-primary btn-block btn-setup" onclick={() => navigate('flash')}>
+            Set up a new device →
+          </button>
+          <p class="hint-sm setup-sub">
+            Needs Chrome or Edge on a computer, your Heartwood, and a USB data cable.
+          </p>
+          <p class="hint connect-hint">Already have one? Connect to manage it:</p>
+        {:else}
+          <button class="btn btn-primary btn-block btn-setup" onclick={openRelayForm}>
+            Connect by signer address →
+          </button>
+          <p class="hint-sm setup-sub">
+            This browser cannot talk to USB devices. Manage an existing WiFi signer by address,
+            or set up a new one from Chrome or Edge on a computer.
+          </p>
+          <p class="hint connect-hint">Other options:</p>
+        {/if}
       {/if}
       <div class="connect-buttons">
-        <button
-          class="btn btn-secondary"
-          onclick={handleConnectSerial}
-          disabled={connecting || !('serial' in navigator)}
-        >
-          {connecting ? 'Connecting...' : 'Connect by USB cable'}
-        </button>
-        <button class="btn btn-secondary" onclick={openRelayForm} disabled={connecting}>
-          Connect by signer address
-        </button>
-        {#if attachedPort || smartDevice}
+        {#if canUseUsb}
+          <button
+            class="btn btn-secondary"
+            onclick={handleConnectSerial}
+            disabled={connecting}
+          >
+            {connecting ? 'Connecting...' : 'Connect by USB cable'}
+          </button>
+          <button class="btn btn-secondary" onclick={openRelayForm} disabled={connecting}>
+            Connect by signer address
+          </button>
+        {:else}
+          <button class="btn btn-secondary" onclick={() => navigate('flash')} disabled={connecting}>
+            Setup instructions
+          </button>
+        {/if}
+        {#if canUseUsb && (attachedPort || smartDevice)}
           <button class="btn btn-secondary" onclick={() => navigate('flash')} disabled={connecting}>
             Set up a new device
           </button>
         {/if}
       </div>
-      {#if !('serial' in navigator)}
-        <p class="warn-text notice">Connecting by USB cable needs Chrome or Edge.</p>
+      {#if !canUseUsb}
+        <p class="warn-text notice">USB setup and USB management need Chrome or Edge on a computer.</p>
       {/if}
       <details class="disclosure more-ways">
         <summary>Other ways to connect</summary>
