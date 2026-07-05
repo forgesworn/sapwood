@@ -18,6 +18,7 @@
   import {
     getOperatorMnemonic, getOrCreateOperator, isOperatorBackedUp, markOperatorBackedUp,
   } from '../lib/op-mgmt.js'
+  import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
   import ConnectApp from './ConnectApp.svelte'
   import FirstIdentity from './FirstIdentity.svelte'
   import PhoneHandoff from './PhoneHandoff.svelte'
@@ -182,7 +183,11 @@
     wifiBusy = true
     wifiErr = ''
     try {
-      await connectRelay(d.pubHex, d.relays, d.label)
+      // Cast a wider net on a flaky link: the signer's remembered relays plus the
+      // standard defaults, so a single slow or dead relay isn't the only path and
+      // we still share one with a signer (re)configured with the defaults.
+      const relays = [...new Set([...d.relays, ...DEFAULT_SIGNER_RELAYS])]
+      await connectRelay(d.pubHex, relays, d.label)
     } catch (e) {
       wifiErr = e instanceof Error ? e.message
         : 'Could not reach it over the network yet: give it ~10s to join, then retry.'
