@@ -92,3 +92,15 @@ rail and makes the on-device prompts self-explanatory.
 - On-device sign prompts state what to press; an unheld prompt does not read as an
   error.
 - `npm test` + `npm run build` green; firmware `cargo build` green.
+
+### Shipped (2026-07-05)
+
+- **heartwood-esp32 v0.10.4** tagged; release CI built every board, ed25519-signed
+  each image with the CI seed, and published the release. The reflowed sign screen
+  was visually verified host-side via `ui-preview` (SIGN AS {label}? + the explicit
+  "Hold the button to sign" line clears the countdown bar on 128x64 and the portrait
+  panels). Only a physical flash-and-tap remains as a nicety, not a gate.
+- **sapwood**: `npm run sync:firmware v0.10.4` pulled the signed images in; committed
+  as `chore: sync signed firmware v0.10.4`. CI (check + unit + e2e) green after
+  fixing a stale guided-setup e2e locator; both deploys (GitHub Pages + Hetzner)
+  succeeded. `sapwood.forgesworn.dev` and the Pages mirror now serve v0.10.4.
