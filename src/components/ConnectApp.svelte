@@ -189,13 +189,15 @@
         <h3 class="flow-title">Connection ready</h3>
       </div>
       {#if created.bunker_uri}
-        <p class="hint">Scan this with the app, or copy the link below and paste it in. It works once.</p>
+        <p class="hint">Scan this with the app, or copy the link and paste it in to finish pairing.</p>
         <div class="qr">{@html qr}</div>
         <div class="uri-box copy-uri">
           <code>{created.bunker_uri}</code>
         </div>
         <button class="btn btn-secondary copy-link" class:copied onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link'}</button>
-        <p class="warn-text">This link carries the connection secret. Anyone who has it can sign as this app.</p>
+        <p class="hint-sm">Treat this link like a password: it lets this one app connect and sign within
+          the permissions you set, nothing else on your signer. You can copy it again from the app's
+          card below until it connects.</p>
       {:else}
         <p class="warn-text">
           Created, but this device has no relay set, so there is no link to scan yet. Set a relay

@@ -7,7 +7,7 @@
   import {
     device, refreshSlots, httpTransport,
     mgmtCreateClient, mgmtApproveSigning, mgmtRevokeClient, mgmtUpdateClient,
-    mgmtCanApproveSigning,
+    mgmtCanApproveSigning, mgmtClientUri,
   } from '../lib/device.svelte.js'
   import KindPermissions from './KindPermissions.svelte'
   import ApprovalQueue from './ApprovalQueue.svelte'
@@ -157,8 +157,8 @@
       return
     }
     uriForSlot = slot.slot_index
-    try { uriValue = await httpTransport.getSlotUri(device.selectedSlot, slot.slot_index) }
-    catch { uriValue = ''; device.error = 'Could not fetch the connection link.' }
+    try { uriValue = await mgmtClientUri(slot.slot_index) }
+    catch (e) { uriValue = ''; device.error = e instanceof Error ? e.message : 'Could not fetch the connection link.' }
   }
 
   function handleIdentityChange(e: Event) {
@@ -352,11 +352,9 @@
               >
                 {slot.auto_approve ? 'AUTO' : 'MANUAL'}
               </button>
-              {#if overBridge}
-                <button class="btn btn-secondary btn-sm" onclick={() => toggleUri(slot)}>
-                  {uriForSlot === slot.slot_index ? 'Hide link' : 'Link'}
-                </button>
-              {/if}
+              <button class="btn btn-secondary btn-sm" onclick={() => toggleUri(slot)}>
+                {uriForSlot === slot.slot_index ? 'Hide link' : 'Link'}
+              </button>
               <ConfirmButton
                 label="Disconnect"
                 question="Disconnect “{slot.label || `app ${slot.slot_index}`}”?"

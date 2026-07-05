@@ -43,6 +43,10 @@ export const device = $state({
   portInfo: '',
   masters: [] as MasterInfo[],
   slots: [] as ConnectSlot[],
+  /** Bunker links captured at create time, keyed by slot index. Over WiFi the
+   *  firmware never re-issues a link, so this in-memory copy is the only way to
+   *  re-hand it to an app that hasn't connected yet this session. */
+  slotUris: {} as Record<number, string>,
   pendingClients: [] as PendingClient[],
   approvals: [] as Record<string, unknown>[],
   selectedSlot: 0,
@@ -461,6 +465,7 @@ export async function relayUpdateClient(
 
 export async function disconnect() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  device.slotUris = {} // session-only links; don't carry them to the next signer
   if (device.mode === 'serial') {
     await serialTransport.disconnect()
   } else if (device.mode === 'http') {
@@ -744,9 +749,29 @@ export async function mgmtCreateClient(
   label: string,
   approveSigning: boolean,
 ): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }> {
-  if (device.mode === 'relay') return relayCreateClient(label, approveSigning)
-  if (device.mode === 'serial') return serialCreateClient(label)
-  throw new Error('not connected')
+  let res: { bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }
+  if (device.mode === 'relay') res = await relayCreateClient(label, approveSigning)
+  else if (device.mode === 'serial') res = await serialCreateClient(label)
+  else throw new Error('not connected')
+  // Stash the link so it can be re-copied from the app's card until it connects.
+  if (res.bunker_uri && res.slot_index >= 0) device.slotUris[res.slot_index] = res.bunker_uri
+  return res
+}
+
+/**
+ * Re-fetch a slot's bunker link. Over USB the firmware re-issues it on demand;
+ * the bridge can too. Over WiFi there is no re-issue path, so fall back to the
+ * link captured when the connection was created this session. Throws with plain
+ * guidance when no link can be produced (e.g. after a reload on WiFi).
+ */
+export async function mgmtClientUri(slotIndex: number): Promise<string> {
+  try {
+    if (device.mode === 'serial') return await serialGetUri(slotIndex)
+    if (device.mode === 'http') return await httpTransport.getSlotUri(device.selectedSlot, slotIndex)
+  } catch { /* fall through to the cached copy */ }
+  const cached = device.slotUris[slotIndex]
+  if (cached) return cached
+  throw new Error('This connection link is only shown once. Recreate the connection to get a new one.')
 }
 
 export async function mgmtRevokeClient(slotIndex: number): Promise<void> {

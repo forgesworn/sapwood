@@ -8,8 +8,9 @@
   import {
     device, refreshSlots, refreshMasters, disconnect, connectSerial, connectRelay,
     mgmtRevokeClient, mgmtApproveSigning, mgmtUpdateClient, mgmtCanApproveSigning,
-    getFirmwareVersion,
+    mgmtClientUri, getFirmwareVersion,
   } from '../lib/device.svelte.js'
+  import { copyText } from '../lib/clipboard.js'
   import {
     npubShort, npubToHex, getDeviceLabel, setDeviceLabel,
     listKnownDevices, type KnownDevice,
@@ -93,6 +94,21 @@
     try { await mgmtUpdateClient(slotIndex, { allowed_kinds: kinds ?? [] }) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Update failed' }
     finally { updatingSlot = null }
+  }
+
+  // Re-hand an app its connection link before it has connected. Over USB the
+  // firmware re-issues it; over WiFi it comes from this session's cache.
+  let copiedSlot = $state<number | null>(null)
+  async function copyAppLink(slotIndex: number) {
+    try {
+      const uri = await mgmtClientUri(slotIndex)
+      if (await copyText(uri)) {
+        copiedSlot = slotIndex
+        setTimeout(() => { if (copiedSlot === slotIndex) copiedSlot = null }, 1800)
+      }
+    } catch (e) {
+      device.error = e instanceof Error ? e.message : 'Could not fetch the connection link.'
+    }
   }
 
   // --- Operator-key backup nudge ---
@@ -405,6 +421,11 @@
               </span>
             </div>
             <div class="app-actions">
+              {#if !slot.current_pubkey}
+                <button class="btn btn-secondary btn-sm" onclick={() => copyAppLink(slot.slot_index)}>
+                  {copiedSlot === slot.slot_index ? 'Link copied ✓' : 'Copy link'}
+                </button>
+              {/if}
               {#if slot.current_pubkey && !slot.signing_approved && canApprove}
                 <button class="btn btn-secondary btn-sm allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot.slot_index)}>
                   {busySlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
