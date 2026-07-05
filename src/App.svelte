@@ -70,6 +70,13 @@
     {/if}
   </header>
 
+  {#if device.awaitingButton}
+    <div class="pairing-banner" role="status" aria-live="polite">
+      <span class="pairing-dot"></span>
+      <p>{device.awaitingButton}</p>
+    </div>
+  {/if}
+
   {#if pendingPin.link}
     <div class="import-confirm" role="alertdialog" aria-labelledby="pin-title">
       <h2 id="pin-title">Unlock this pairing link</h2>
@@ -197,6 +204,21 @@
     line-height: 1; cursor: pointer; padding: 0 0.25rem; flex-shrink: 0;
   }
   .import-dismiss:hover { color: var(--text); }
+
+  /* Physical-action prompt (e.g. the one-time USB pairing hold). Amber, with a
+     pulsing dot, so it reads as "the signer is waiting on you right now". */
+  .pairing-banner {
+    display: flex; align-items: center; gap: 0.7rem;
+    background: #16100244; border: 1px solid var(--amber, #d9a441); border-radius: 6px;
+    padding: 0.8rem 1rem; margin-bottom: 1rem;
+  }
+  .pairing-banner p { margin: 0; font-size: 0.9rem; color: var(--text); line-height: 1.5; }
+  .pairing-dot {
+    flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--amber, #d9a441); animation: pairing-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pairing-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .pairing-dot { animation: none; } }
 
   .import-confirm {
     background: #140b06; border: 1px solid var(--red, #ef4444); border-radius: 6px;

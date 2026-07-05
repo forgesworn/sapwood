@@ -53,6 +53,9 @@ export const device = $state({
   selectedSlot: 0,
   logs: [] as string[],
   error: null as string | null,
+  /** When set, the signer is waiting on a physical button hold and this is the
+   *  instruction to show (e.g. the one-time USB pairing). Cleared when done. */
+  awaitingButton: null as string | null,
   bridgeInfo: null as Record<string, unknown> | null,
   relayStatus: null as RelayStatus | null,
   /** Relay: the relays this signer is reachable on (set on a relay connect). A
@@ -698,15 +701,32 @@ export async function ensureBridgeAuth(): Promise<void> {
   const code = ack.payload[0]
   if (code === 0x00) { device.bridgeAuthed = true; return }
   if (code === 0x02) {
-    // No secret on device — set ours (requires a PRG press) then retry.
-    const resp = await serialTransport.sendAndReceive(buildSetBridgeSecret(secret), [FrameType.ACK, FrameType.NACK], 35_000)
-    if (resp.type !== FrameType.ACK) throw new Error('Pairing rejected on the device')
-    const ack2 = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], SERIAL_RTT_MS)
-    if (ack2.payload[0] !== 0x00) throw new Error('Bridge auth failed after pairing')
-    device.bridgeAuthed = true
+    // No secret on the device yet: this browser pairs itself so only it can
+    // manage the signer over USB. Gated by a physical button hold (Web Serial
+    // access alone must not be enough), so tell the operator to hold it — this
+    // is the one-time pairing they otherwise meet as a silent, mystifying wait.
+    device.awaitingButton = 'First time on this browser: hold the button on your signer for 2 seconds to pair it. The signer shows “Set bridge secret?” with a countdown.'
+    try {
+      const resp = await serialTransport.sendAndReceive(buildSetBridgeSecret(secret), [FrameType.ACK, FrameType.NACK], 35_000)
+      if (resp.type !== FrameType.ACK) {
+        throw new Error('Pairing was not approved on the signer. Hold its button for a full 2 seconds when it shows “Set bridge secret?”, then try again.')
+      }
+      const ack2 = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], SERIAL_RTT_MS)
+      if (ack2.payload[0] !== 0x00) throw new Error('Pairing did not complete. Try the action again.')
+      device.bridgeAuthed = true
+    } catch (e) {
+      // The generic serial timeout tells people to press RESET — wrong here: the
+      // signer is waiting for the pairing hold, not a reboot. Rewrite it.
+      if (e instanceof Error && /No response from the device/i.test(e.message)) {
+        throw new Error('The signer is waiting for you to pair. Hold its button for 2 seconds when it shows “Set bridge secret?”, then try again.')
+      }
+      throw e
+    } finally {
+      device.awaitingButton = null
+    }
     return
   }
-  throw new Error('Device is paired to a different bridge secret (factory-reset to re-pair).')
+  throw new Error('This signer is paired to a different browser. To manage it here, factory-reset the signer under Advanced › Device, then pair again.')
 }
 
 // Which relays to embed in a bunker link built over USB. The firmware puts in
