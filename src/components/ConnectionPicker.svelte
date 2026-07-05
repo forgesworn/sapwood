@@ -158,19 +158,22 @@
   }
 
   // If Sapwood is loaded from the bridge itself (e.g. http://bitcoin5.local:3100/),
-  // auto-connect to the same origin. When loaded from GitHub Pages or localhost dev,
-  // the probe 404s and we fall through to the manual USB / bridge-address picker.
+  // auto-connect to the same origin. A co-hosted bridge lives on the LAN, never on
+  // a public HTTPS site, so only LAN-ish / http origins are probed. A static host
+  // (GitHub Pages, sapwood.forgesworn.dev) and localhost dev are skipped outright,
+  // sparing them two dead /api/info 404s on every load that only clutter the
+  // console — and mislead anyone debugging a connection there.
   $effect(() => {
     if (device.connected || connecting) return
-    const origin = window.location.origin
+    const { origin, protocol, hostname } = window.location
     if (!origin.startsWith('http')) return
+    const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+    const isLan = hostname.endsWith('.local')
+      || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname)
+    if (isLoopback) return
+    if (protocol === 'https:' && !isLan) return
     void (async () => {
       try {
-        // Skip auto-connect on localhost dev servers.
-        if (origin.includes('localhost')) return
-        // Only auto-connect when this origin actually serves a bridge API. A
-        // static host (GitHub Pages, sapwood.forgesworn.dev) answers unknown
-        // paths with the SPA's index.html — which must not be taken for a bridge.
         if (!(await probeBridge(origin))) return
         connecting = true
         try { await connectHttp(origin) } catch { /* emitted via listener */ }
