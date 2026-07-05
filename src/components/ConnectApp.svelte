@@ -6,10 +6,13 @@
   // and client-presets.ts (both pure + unit-tested); this holds the reactive UI.
   import { encodeQR } from '@paulmillr/qr'
   import {
-    device, mgmtCreateClient, mgmtUpdateClient, mgmtCanApproveSigning,
+    device, mgmtCreateClient, mgmtUpdateClient, mgmtCanApproveSigning, mgmtNostrconnect,
   } from '../lib/device.svelte.js'
   import { COMMON_KINDS } from '../lib/kinds.js'
   import { nameError, canCreate, type ConnectStep } from '../lib/connect-flow.js'
+  import {
+    parseNostrConnectURI, isValidNostrConnect, permsToAllowedKinds, sharesRelay,
+  } from '../lib/nostrconnect.js'
   import {
     PERMISSION_PRESETS, resolveKinds, isRestricted, type PresetId,
   } from '../lib/client-presets.js'
@@ -22,7 +25,7 @@
   let { ondone }: Props = $props()
 
   let open = $state(false)
-  let step = $state<ConnectStep>('name')
+  let step = $state<ConnectStep | 'nc-paste' | 'nc-done'>('name')
   let name = $state('')
   let presetId = $state<PresetId>('everything')
   let customKinds = $state<number[]>([])
@@ -37,6 +40,16 @@
   const overUsb = $derived(device.mode === 'serial')
   const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
 
+  // nostrconnect (client-initiated): the app hands US a link. Relay-only — the
+  // signer must be on the relay to publish the connect reply.
+  const canNostrconnect = $derived(device.mode === 'relay')
+  let ncUri = $state('')
+  let ncPairing = $state(false)
+  let ncError = $state<string | null>(null)
+  let ncPaired = $state<{ appName: string } | null>(null)
+  const ncReq = $derived(isValidNostrConnect(ncUri) ? parseNostrConnectURI(ncUri.trim()) : null)
+  const ncRelayOk = $derived(!!ncReq && sharesRelay(ncReq.relays, device.relays))
+
   function reset() {
     step = 'name'
     name = ''
@@ -45,6 +58,9 @@
     error = null
     permNote = null
     created = null
+    ncUri = ''
+    ncError = null
+    ncPaired = null
   }
 
   function start() {
@@ -104,6 +120,27 @@
     }
   }
 
+  async function pairNostrconnect() {
+    if (!ncReq) return
+    ncPairing = true
+    ncError = null
+    try {
+      await mgmtNostrconnect({
+        clientPubkey: ncReq.clientPubkey,
+        secret: ncReq.secret,
+        label: ncReq.appName,
+        approveSigning: mgmtCanApproveSigning(),
+        allowedKinds: permsToAllowedKinds(ncReq.perms),
+      })
+      ncPaired = { appName: ncReq.appName }
+      step = 'nc-done'
+    } catch (e) {
+      ncError = e instanceof Error ? e.message : 'Could not pair the app.'
+    } finally {
+      ncPairing = false
+    }
+  }
+
   function finish() {
     open = false
     reset()
@@ -140,6 +177,11 @@
           Continue
         </button>
       </div>
+      {#if canNostrconnect}
+        <button class="nc-entry" onclick={() => { ncError = null; step = 'nc-paste' }}>
+          Have a connect link from the app? Paste it →
+        </button>
+      {/if}
 
     {:else if step === 'permissions'}
       <h3 class="flow-title">What can “{name.trim()}” do?</h3>
@@ -209,6 +251,52 @@
       <div class="flow-actions">
         <button class="btn btn-primary" onclick={finish}>Done</button>
       </div>
+
+    {:else if step === 'nc-paste'}
+      <h3 class="flow-title">Paste the app's connect link</h3>
+      <p class="hint">Some apps offer a <code>nostrconnect://</code> link or QR to connect a signer.
+        Paste it here and your signer pairs with it, no link to copy back.</p>
+      <textarea
+        class="field-input nc-input"
+        bind:value={ncUri}
+        rows="3"
+        placeholder="nostrconnect://..."
+        autocomplete="off"
+        spellcheck="false"
+      ></textarea>
+      {#if ncUri.trim() && !ncReq}
+        <p class="error-text">That does not look like a valid nostrconnect link.</p>
+      {/if}
+      {#if ncReq}
+        <div class="nc-summary" class:bad={!ncRelayOk}>
+          <p class="nc-app">{ncReq.appName}{#if ncReq.appUrl} · <span class="nc-url">{ncReq.appUrl}</span>{/if}</p>
+          {#if ncRelayOk}
+            <p class="hint-sm">Pairs on <code>{ncReq.relays[0]}</code>. Your signer will send the connection reply there.</p>
+          {:else}
+            <p class="warn-text">This app listens on a different relay to your signer, so the pairing
+              can't reach it. Point the app at your signer's relay ({device.relays[0] ?? 'your relay'}),
+              or add the app's relay under Device › Network first.</p>
+          {/if}
+        </div>
+      {/if}
+      {#if ncError}<p class="error-text">{ncError}</p>{/if}
+      <div class="flow-actions">
+        <button class="btn btn-ghost" onclick={() => { step = 'name'; ncError = null }} disabled={ncPairing}>Back</button>
+        <button class="btn btn-primary" disabled={!ncReq || !ncRelayOk || ncPairing} onclick={pairNostrconnect}>
+          {ncPairing ? 'Pairing…' : 'Pair this app'}
+        </button>
+      </div>
+
+    {:else if step === 'nc-done' && ncPaired}
+      <div class="result-head">
+        <span class="result-dot"></span>
+        <h3 class="flow-title">Paired “{ncPaired.appName}”</h3>
+      </div>
+      <p class="hint">Your signer sent the connection reply. The app should show as connected now, and
+        appears under your connected apps.</p>
+      <div class="flow-actions">
+        <button class="btn btn-primary" onclick={finish}>Done</button>
+      </div>
     {/if}
   </section>
 {/if}
@@ -249,6 +337,22 @@
      them after other elements so they need a little breathing room above. */
   .flow-note { margin-top: 0.9rem; }
   .inline-secret { color: var(--green); word-break: break-all; user-select: all; }
+
+  /* nostrconnect door + paste summary */
+  .nc-entry {
+    display: block; width: 100%; margin-top: 0.8rem; padding: 0.55rem 0;
+    background: none; border: none; border-top: 1px solid var(--border);
+    color: var(--text-dim); cursor: pointer; font-family: inherit; font-size: 0.82rem; text-align: center;
+  }
+  .nc-entry:hover { color: var(--green); }
+  .nc-input { resize: vertical; }
+  .nc-summary {
+    margin-top: 0.7rem; padding: 0.7rem 0.85rem; border-radius: 6px;
+    border: 1px solid var(--green-dim); background: #08130d;
+  }
+  .nc-summary.bad { border-color: #3a3320; background: #120f06; }
+  .nc-app { font-size: 0.92rem; font-weight: 600; color: #fff; margin: 0 0 0.3rem; }
+  .nc-url { font-weight: 400; color: var(--text-dim); font-size: 0.8rem; word-break: break-all; }
 
   .presets { display: flex; flex-direction: column; gap: 0.5rem; }
   .preset {

@@ -54,6 +54,9 @@ export const device = $state({
   error: null as string | null,
   bridgeInfo: null as Record<string, unknown> | null,
   relayStatus: null as RelayStatus | null,
+  /** Relay: the relays this signer is reachable on (set on a relay connect). A
+   *  nostrconnect app can only pair when it shares one of these. */
+  relays: [] as string[],
   /** Relay: the operator pubkey Sapwood signs management with (must match the device's baked op_mgmt). */
   operatorPub: '',
   /** USB-direct: true once the bridge session is authenticated (client mgmt allowed). */
@@ -357,6 +360,7 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   device.error = null
   device.masters = []
   device.slots = []
+  device.relays = relays
   device.relayStatus = null
   rememberDevice(devicePubHex, relays, label)
 
@@ -478,6 +482,7 @@ export async function disconnect() {
     device.portInfo = ''
     device.masters = []
     device.slots = []
+    device.relays = []
     device.relayStatus = null
   }
 }
@@ -756,6 +761,34 @@ export async function mgmtCreateClient(
   // Stash the link so it can be re-copied from the app's card until it connects.
   if (res.bunker_uri && res.slot_index >= 0) device.slotUris[res.slot_index] = res.bunker_uri
   return res
+}
+
+/**
+ * Pair a nostrconnect app: bind a slot to the app's pubkey and have the signer
+ * publish the connect ACK on its relay. Relay-only — the signer must be on the
+ * relay to publish, and the app must share that relay (checked in the UI). The
+ * device has no clock, so we hand it our current time for the ACK's created_at.
+ */
+export async function mgmtNostrconnect(params: {
+  clientPubkey: string
+  secret: string
+  label: string
+  approveSigning: boolean
+  allowedKinds: number[]
+}): Promise<{ slot_index: number }> {
+  if (device.mode !== 'relay' || !relayTransport) {
+    throw new Error('Pairing a nostrconnect app needs the signer connected over WiFi, so it can publish the connect reply. Connect over WiFi and try again.')
+  }
+  const res = await relayTransport.request('nostrconnect', {
+    client_pubkey: params.clientPubkey,
+    secret: params.secret,
+    created_at: Math.floor(Date.now() / 1000),
+    label: params.label,
+    approve_signing: params.approveSigning,
+    allowed_kinds: params.allowedKinds,
+  })
+  await relayRefresh()
+  return { slot_index: Number(res.slot_index ?? -1) }
 }
 
 /**
