@@ -29,11 +29,15 @@ export type NetMode = 'wifi' | 'usb'
 /** Default relays for a new WiFi signer, drawn from the set the wider
  *  forgesworn/pallasite ecosystem publishes to. Deliberately a small subset:
  *  each listed relay is a live TLS websocket the ESP32 keeps open, so the
- *  default stays light and the editor offers the rest one tap away. */
+ *  default stays light and the editor offers the rest one tap away.
+ *  relay.primal.net is included so a bunker link this signer hands out always
+ *  names a relay the Primal client reaches, sparing a "no relays specified for
+ *  this bunker" failure when someone logs in with Primal. */
 export const DEFAULT_SIGNER_RELAYS: readonly string[] = [
   'wss://relay.trotters.cc',
   'wss://nos.lol',
   'wss://relay.damus.io',
+  'wss://relay.primal.net',
 ]
 
 /** The full ecosystem set (pallasite's DEFAULT_RELAYS), offered as one-tap
@@ -41,7 +45,6 @@ export const DEFAULT_SIGNER_RELAYS: readonly string[] = [
 export const SUGGESTED_SIGNER_RELAYS: readonly string[] = [
   ...DEFAULT_SIGNER_RELAYS,
   'wss://relay.nostr.band',
-  'wss://relay.primal.net',
   'wss://relay.ditto.pub',
 ]
 
