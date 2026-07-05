@@ -104,3 +104,24 @@ rail and makes the on-device prompts self-explanatory.
   as `chore: sync signed firmware v0.10.4`. CI (check + unit + e2e) green after
   fixing a stale guided-setup e2e locator; both deploys (GitHub Pages + Hetzner)
   succeeded. `sapwood.forgesworn.dev` and the Pages mirror now serve v0.10.4.
+
+### Connect-an-app follow-ups (2026-07-05, from the live walkthrough)
+
+- **Password-manager leak fixed**: the restore fields were `type=password`, so Chrome
+  autofilled a saved WiFi credential (SSID → name, WiFi password → nsec) and offered
+  to save the nsec to the OS store. Secrets now use `-webkit-text-security` on text
+  inputs + manager opt-outs. (`fix: keep the browser password manager out…`)
+- **Re-copyable link + calmer wording**: the bunker link was shown once then lost.
+  Cached at create (`device.slotUris`) + `mgmtClientUri` (USB re-issues, bridge
+  re-fetches, WiFi from cache); "Copy link" on a waiting app's card. Reworded the
+  scary "anyone who has it can sign as this app" note.
+- **nostrconnect pairing (v0.10.5)**: client-initiated NIP-46. Firmware gained a
+  `nostrconnect` relay method (bind slot to the app's pubkey + publish the connect
+  ACK via `sign_and_publish`; operator supplies `created_at` as the chip has no
+  clock). SPA parses the `nostrconnect://` URI (`src/lib/nostrconnect.ts`, mirrors
+  signet-lite), checks the app shares the signer's relay (a WiFi signer can't dial
+  the app's own relay — approach A), and pairs. `cargo check` passed locally; CI
+  built + signed + released v0.10.5; live on `sapwood.forgesworn.dev`.
+  - Note: the v0.10.5 release merge also swept in pre-existing accurate doc edits
+    to heartwood `CLAUDE.md`/`README.md` that were sitting uncommitted (WiFi-tier
+    corrections) — harmless (docs only), flagged to the user.
