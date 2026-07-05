@@ -93,7 +93,7 @@
     {/if}
   {/if}
 
-  <p class="version">Sapwood app v{__APP_VERSION__} · {__BUILD__}</p>
+  <p class="version">Sapwood app <span class="ver">v{__APP_VERSION__} · {__BUILD__}</span></p>
 </main>
 
 <style>
@@ -105,10 +105,16 @@
 
   .version {
     text-align: center;
-    font-size: 0.7rem;
-    color: var(--text-muted);
+    font-size: 0.78rem;
+    color: var(--text-dim);
     margin: 2rem 0 0;
     letter-spacing: 0.05em;
+  }
+  /* The version + build read clearly — this is how a tester tells builds apart. */
+  .version .ver {
+    color: var(--green);
+    font-weight: 600;
+    letter-spacing: 0.03em;
   }
 
   header {

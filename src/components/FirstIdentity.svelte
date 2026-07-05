@@ -69,6 +69,20 @@
   let handoffConnecting = $state(false)
   let handoffError = $state('')
 
+  // A freshly-provisioned WiFi signer reboots and joins WiFi (~10s); connecting
+  // before it's back just errors, so hold the button and count the wait down so
+  // it reads as "nearly ready", not a dead control.
+  let wifiCountdown = $state(0)
+  $effect(() => {
+    if (step !== 'done' || !handoff || device.mode === 'relay') return
+    wifiCountdown = 10
+    const t = setInterval(() => {
+      wifiCountdown -= 1
+      if (wifiCountdown <= 0) clearInterval(t)
+    }, 1000)
+    return () => clearInterval(t)
+  })
+
   const usesNsecKey = $derived(mode === 'restore-nsec' || mode === 'restore-ncryptsec')
   const keepsNpub = $derived(usesNsecKey && !derive)
 
@@ -496,8 +510,10 @@
       {#if device.mode === 'relay'}
         <p class="success-text">✓ Connected over WiFi. You can connect your apps now.</p>
       {:else}
-        <button class="btn btn-primary" onclick={manageWifi} disabled={handoffConnecting}>
-          {handoffConnecting ? 'Connecting…' : 'Manage over WiFi'}
+        <button class="btn btn-primary" onclick={manageWifi} disabled={handoffConnecting || wifiCountdown > 0}>
+          {#if wifiCountdown > 0}Ready in {wifiCountdown}s…
+          {:else if handoffConnecting}Connecting…
+          {:else}Manage over WiFi{/if}
         </button>
         {#if handoffError}<p class="warn-text">{handoffError}</p>{/if}
       {/if}

@@ -70,7 +70,10 @@ describe('FirstIdentity — create', () => {
     await fireEvent.click(screen.getByRole('checkbox'))
     await fireEvent.click(screen.getByText('Continue'))
 
-    expect(await screen.findByText('Manage over WiFi')).toBeTruthy()
+    // The WiFi handoff is offered, but the connect button is held for ~10s while
+    // the signer reboots and joins WiFi — so it first reads "Ready in Ns…".
+    expect(await screen.findByText(/Ready in \d+s|Manage over WiFi/)).toBeTruthy()
+    expect(screen.getByText(/manage it over the network/)).toBeTruthy()
   })
 
   it('surfaces a generation failure without claiming success', async () => {
