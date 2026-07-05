@@ -16,6 +16,7 @@ import { resolveProfiles, profileDisplayName } from './profiles.js'
 import { RelayTransport } from './relay-transport.js'
 import { getOrCreateOperator } from './op-mgmt.js'
 import { rememberDevice, npubShort } from './known-devices.js'
+import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
 
 // --- Reactive state ---
@@ -701,12 +702,20 @@ export async function ensureBridgeAuth(): Promise<void> {
   throw new Error('Device is paired to a different bridge secret (factory-reset to re-pair).')
 }
 
+// Which relays to embed in a bunker link built over USB. The firmware puts in
+// exactly what the host hands it (there is no read-back of the signer's own
+// config), so an empty list yields a relayless link a remote app can't use.
+// Prefer the relays this browser flashed; fall back to the standard defaults so
+// the link is never relayless. A WiFi signer flashed with defaults is on these;
+// if it was flashed with custom relays, set them under Device > Network (which
+// persists here) so the link names the relays it actually serves on.
 function lastRelays(): string[] {
   try {
     const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-    if (Array.isArray(saved) && saved.length) return saved
-  } catch { /* default */ }
-  return []
+    const list = Array.isArray(saved) ? saved.filter((r): r is string => typeof r === 'string' && !!r) : []
+    if (list.length) return list
+  } catch { /* fall through to defaults */ }
+  return [...DEFAULT_SIGNER_RELAYS]
 }
 
 /** Create a client slot over USB. Returns the bunker URI + secret (shown once). */
