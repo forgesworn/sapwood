@@ -19,6 +19,11 @@
   const overBridge = $derived(device.mode === 'http')
   const overUsb = $derived(device.mode === 'serial')
   const canApprove = $derived(mgmtCanApproveSigning())
+  const hasIdentity = $derived(device.masters.length > 0)
+  // A USB device with no identity is the just-fell-through-from-setup state: an
+  // app needs an identity to connect to, so point at Identity rather than show a
+  // create form that cannot work. Over WiFi/bridge a signer always has one.
+  const noIdentityUsb = $derived(device.connected && device.mode === 'serial' && !hasIdentity)
 
   // --- Create a connection ---
   let creating = $state(false)
@@ -198,7 +203,17 @@
     </div>
   </div>
 
+  {#if noIdentityUsb}
+    <section class="card card--warn no-identity">
+      <h3 class="ni-title">This signer has no identity yet</h3>
+      <p class="hint no-gap">An app connects to an identity, so add one first: open the
+        <strong>Identity</strong> tab and use “Add an identity to this signer”. Then come back here
+        to connect your apps.</p>
+    </section>
+  {/if}
+
   <!-- New connection -->
+  {#if !noIdentityUsb}
   <section class="card card--raised new-connection">
     {#if created}
       <div class="created-head">
@@ -250,6 +265,7 @@
       {#if createError}<p class="error-text">{createError}</p>{/if}
     {/if}
   </section>
+  {/if}
 
   <!-- Bridge approval queue (renders nothing when empty) -->
   <ApprovalQueue />
@@ -287,6 +303,8 @@
   <!-- Connected apps -->
   {#if !device.connected}
     <p class="empty centred">Connect to your signer to see its apps.</p>
+  {:else if noIdentityUsb}
+    <!-- The no-identity notice above already says what to do; don't also claim there's a form here. -->
   {:else if device.slots.length === 0 && device.pendingClients.length === 0 && !created}
     <p class="empty centred">No apps connected yet. Create a connection above and paste the link into your app.</p>
   {:else if device.slots.length > 0}
@@ -440,6 +458,9 @@
   .slot-uri { margin-top: 0.75rem; }
 
   .empty.centred { text-align: center; padding: 2rem 0; }
+
+  .no-identity { padding: 1.3rem 1.4rem; }
+  .ni-title { font-size: 1.1rem; font-weight: 700; color: #cba24a; margin: 0 0 0.5rem; }
 
   @media (max-width: 640px) {
     .head { flex-wrap: wrap; }

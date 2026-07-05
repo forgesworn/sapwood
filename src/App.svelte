@@ -23,7 +23,10 @@
   let advancedTab = $state<'apps' | 'identity' | 'device' | 'logs'>('apps')
 
   function openAdvanced(tab?: 'apps' | 'identity' | 'device' | 'logs') {
-    advancedTab = tab ?? 'apps'
+    // With no identity yet there is nothing for an app to connect to, so land on
+    // Identity (where you add one) rather than the empty Apps tab.
+    const fallback = device.masters.length === 0 ? 'identity' : 'apps'
+    advancedTab = tab ?? fallback
     view = 'advanced'
   }
 
