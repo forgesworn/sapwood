@@ -6,7 +6,7 @@ import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
   buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
-  buildFirmwareInfo,
+  buildFirmwareInfo, buildWifiScan,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
@@ -629,6 +629,59 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
     return { version: info.version, board: typeof info.board === 'string' ? info.board : '' }
   } catch {
     return null // older firmware, or no response — treat as unknown
+  }
+}
+
+/** One access point the signer's own radio can see. */
+export interface WifiNetwork {
+  ssid: string
+  /** Signal strength in dBm (closer to 0 is stronger; roughly -50 great, -80 weak). */
+  rssi: number
+  channel: number
+  /** Short auth label: open | wep | wpa | wpa2 | wpa3 | wpa2/wpa3 | … | unknown. */
+  auth: string
+  /** True when the AP is on the 2.4 GHz band the ESP32 can join (always true today). */
+  band24: boolean
+}
+
+/**
+ * Ask a USB-connected signer to scan for nearby WiFi networks. This proves what
+ * the signer's own radio can actually see — the surest way to pick a 2.4 GHz
+ * SSID it can reach (5 GHz-only, out-of-range or WPA3-only networks simply do
+ * not appear, or appear flagged). Returns:
+ *   - an array (possibly empty) on a successful scan,
+ *   - `null` when the signer can't scan: not on USB, older firmware (NACK), or
+ *     it's busy serving a live relay connection (also NACK) — callers keep the
+ *     manual SSID field in that case.
+ * The device brings its radio up only for the scan and powers it down again; it
+ * never connects. Allow generous time: bringing the radio up plus a full-band
+ * scan is a few seconds, more on a slow laptop.
+ */
+export async function scanWifi(): Promise<WifiNetwork[] | null> {
+  if (device.mode !== 'serial') return null
+  try {
+    const resp = await serialTransport.sendAndReceive(
+      buildWifiScan(),
+      [FrameType.WIFI_SCAN_RESPONSE, FrameType.NACK],
+      20_000,
+    )
+    if (resp.type !== FrameType.WIFI_SCAN_RESPONSE) return null // NACK: can't scan now
+    const raw = JSON.parse(new TextDecoder().decode(resp.payload))
+    if (!Array.isArray(raw)) return null
+    const nets: WifiNetwork[] = raw
+      .filter((n): n is Record<string, unknown> => !!n && typeof n === 'object' && typeof n.ssid === 'string' && !!n.ssid)
+      .map((n) => ({
+        ssid: n.ssid as string,
+        rssi: typeof n.rssi === 'number' ? n.rssi : -100,
+        channel: typeof n.channel === 'number' ? n.channel : 0,
+        auth: typeof n.auth === 'string' ? n.auth : 'unknown',
+        band24: n.band24 !== false,
+      }))
+    // Strongest first (the device already sorts, but don't rely on it).
+    nets.sort((a, b) => b.rssi - a.rssi)
+    return nets
+  } catch {
+    return null // no response — treat as "scan unavailable", keep manual entry
   }
 }
 

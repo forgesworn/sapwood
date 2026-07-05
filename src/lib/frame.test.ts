@@ -10,6 +10,7 @@ import {
   buildProvisionList,
   buildFactoryReset,
   buildSetNetConfig,
+  buildWifiScan,
 } from './frame.js'
 
 describe('crc32', () => {
@@ -189,5 +190,19 @@ describe('network config frame', () => {
     const frame = parseFrame(bytes)
     expect(frame.type).toBe(FrameType.SET_NET_CONFIG)
     expect(JSON.parse(new TextDecoder().decode(frame.payload))).toEqual(cfg)
+  })
+})
+
+describe('wifi scan frame', () => {
+  it('WIFI_SCAN request/response values match Rust 0x55/0x56', () => {
+    expect(FrameType.WIFI_SCAN_REQUEST).toBe(0x55)
+    expect(FrameType.WIFI_SCAN_RESPONSE).toBe(0x56)
+  })
+
+  it('buildWifiScan is an empty-payload 0x55 frame', () => {
+    const bytes = buildWifiScan()
+    const frame = parseFrame(bytes)
+    expect(frame.type).toBe(FrameType.WIFI_SCAN_REQUEST)
+    expect(frame.payload.length).toBe(0)
   })
 })

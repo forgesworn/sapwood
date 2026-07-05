@@ -56,6 +56,8 @@ export const FrameType = {
   CONNSLOT_URI:          0x48,
   CONNSLOT_URI_RESP:     0x49,
   SET_NET_CONFIG:        0x54,
+  WIFI_SCAN_REQUEST:     0x55,
+  WIFI_SCAN_RESPONSE:    0x56,
 } as const
 
 export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType]
@@ -206,6 +208,12 @@ export function buildFirmwareInfo(): Uint8Array {
 /** Build a FACTORY_RESET frame (empty payload, requires button confirm on device). */
 export function buildFactoryReset(): Uint8Array {
   return buildFrame(FrameType.FACTORY_RESET)
+}
+
+/** Build a WIFI_SCAN_REQUEST frame (0x55, empty payload). The device scans nearby
+ *  2.4 GHz access points and replies WIFI_SCAN_RESPONSE (0x56). Read-only. */
+export function buildWifiScan(): Uint8Array {
+  return buildFrame(FrameType.WIFI_SCAN_REQUEST)
 }
 
 /** Build a SET_PIN frame. Payload: 4-8 ASCII digit PIN, or empty to clear. */
