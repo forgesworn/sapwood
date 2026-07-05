@@ -292,7 +292,9 @@
     </p>
     <label class="field">
       <span class="field-label">Name this signer (optional)</span>
-      <input type="text" class="field-input" bind:value={name} placeholder="e.g. My signer" maxlength="32" />
+      <input type="text" class="field-input" bind:value={name} placeholder="e.g. My signer" maxlength="32"
+        autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+        data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
     </label>
     {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
@@ -326,7 +328,9 @@
 
     <label class="field">
       <span class="field-label">Name this signer (optional)</span>
-      <input type="text" class="field-input" bind:value={name} placeholder="e.g. My signer" maxlength="32" />
+      <input type="text" class="field-input" bind:value={name} placeholder="e.g. My signer" maxlength="32"
+        autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+        data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
     </label>
     {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
 
@@ -334,12 +338,15 @@
       <label class="field">
         <span class="field-label">Recovery phrase (12 or 24 words)</span>
         <textarea class="field-input" bind:value={phrase} rows="3" placeholder="12 or 24 words"
-          autocomplete="off" spellcheck="false"></textarea>
+          autocomplete="off" autocapitalize="off" spellcheck="false"
+          data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></textarea>
       </label>
       <label class="field">
         <span class="field-label">Passphrase (optional 25th word)</span>
         <div class="pw-wrap">
-          <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" autocomplete="off" />
+          <input type="text" class="field-input" class:masked={!showPassphrase} bind:value={passphrase} placeholder="Optional"
+            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+            data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
           <PasswordReveal bind:shown={showPassphrase} />
         </div>
       </label>
@@ -347,19 +354,25 @@
       <label class="field">
         <span class="field-label">nsec</span>
         <div class="pw-wrap">
-          <input type={showNsec ? 'text' : 'password'} class="field-input" bind:value={nsecInput} placeholder="nsec1..." autocomplete="off" />
+          <input type="text" class="field-input" class:masked={!showNsec} bind:value={nsecInput} placeholder="nsec1..."
+            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+            data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
           <PasswordReveal bind:shown={showNsec} />
         </div>
       </label>
     {:else}
       <label class="field">
         <span class="field-label">Encrypted key</span>
-        <input type="text" class="field-input" bind:value={ncryptsecInput} placeholder="ncryptsec1..." autocomplete="off" spellcheck="false" />
+        <input type="text" class="field-input" bind:value={ncryptsecInput} placeholder="ncryptsec1..."
+          autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+          data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
       </label>
       <label class="field">
         <span class="field-label">Password</span>
         <div class="pw-wrap">
-          <input type={showPassword ? 'text' : 'password'} class="field-input" bind:value={password} placeholder="The password for this key" autocomplete="off" />
+          <input type="text" class="field-input" class:masked={!showPassword} bind:value={password} placeholder="The password for this key"
+            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+            data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
           <PasswordReveal bind:shown={showPassword} />
         </div>
       </label>
@@ -565,6 +578,13 @@
   .addr-chip.good { color: var(--green); border-color: var(--green-dim); }
 
   .confirm-addr { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.4rem; }
+
+  /* Mask secrets without a type="password" input — a password field here makes
+     the browser's manager autofill a saved WiFi credential and offer to SAVE the
+     nsec to the OS password store. text-security masks in the dots without any of
+     that (this flow is Chrome/Edge-only: it needs Web Serial). The reveal eye
+     drops the class to show the value. */
+  :global(.field-input).masked { -webkit-text-security: disc; }
 
   .confirm-save {
     display: flex; align-items: flex-start; gap: 0.6rem; margin: 0.4rem 0 1.1rem;
