@@ -11,6 +11,7 @@ import {
 } from './frame.js'
 import type { ConnectSlot, MasterInfo } from './types.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
+import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
 import { RelayTransport } from './relay-transport.js'
 import { getOrCreateOperator } from './op-mgmt.js'
@@ -171,6 +172,7 @@ function addLog(line: string) {
 // --- Actions ---
 
 export async function connectSerial(baudRate = 115200, port?: SerialPort) {
+  resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   await serialTransport.connect(baudRate, port)
 }
 
@@ -266,6 +268,16 @@ const idMetaSynced = new Set<string>()
 const idMetaAttempts = new Map<string, number>()
 const ID_META_MAX_ATTEMPTS = 3
 
+/** Clear the auto-sync guard so a fresh connection retries the identity-card
+ *  push from scratch. A provision reboots a WiFi signer and kills the USB drain
+ *  window, so the first push often exhausts its attempts and gives up; without
+ *  this reset, only a full page reload — not a reconnect — would try again, which
+ *  is exactly why a restored signer showed no avatar until it was reconnected. */
+function resetIdMetaSync() {
+  idMetaSynced.clear()
+  idMetaAttempts.clear()
+}
+
 /**
  * Push the identity card to the signer as soon as we know who it is — fired
  * whenever a serial master list lands or a relay status refresh resolves the
@@ -329,6 +341,7 @@ let relayTransport: RelayTransport | null = null
  * `relays` is where it listens. Uses the persisted operator secret to sign.
  */
 export async function connectRelay(devicePubHex: string, relays: string[], label?: string) {
+  resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   const op = getOrCreateOperator()
   const t = new RelayTransport(devicePubHex, relays, op.skHex)
   await t.connect()
@@ -510,6 +523,29 @@ export async function restoreIdentity(label = 'default'): Promise<string> {
   // follow-up read may fail — the npub from the ACK is what we rely on.
   try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
   return npub
+}
+
+/**
+ * Send a browser-derived 32-byte secret to a USB device as a PROVISION frame.
+ * Unlike generateIdentity / restoreIdentity (where the secret is made or entered
+ * on the device and never crosses the cable), this carries a key the owner typed
+ * here — the guided restore-from-nsec / ncryptsec / pasted-phrase paths, and the
+ * same thing Advanced › Provision does. The npub is already known client-side
+ * from derivation, so this only confirms the write. The caller zeroizes `secret`.
+ */
+export async function provisionSecret(secret: Uint8Array, label: string, mode: ProvisionMode): Promise<void> {
+  if (device.mode !== 'serial') throw new Error('Adding a key to the signer needs a USB connection')
+  const resp = await serialTransport.sendAndReceive(
+    buildProvisionFrame(secret, label, mode),
+    [FrameType.ACK, FrameType.NACK],
+    30_000,
+  )
+  if (resp.type !== FrameType.ACK) {
+    throw new Error('The device rejected the key (CRC error or storage write failure). Try again.')
+  }
+  // Best-effort: a WiFi signer reboots straight after a first provision, so this
+  // follow-up read may fail — the caller already holds the npub from derivation.
+  try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
 }
 
 export interface FirmwareInfo {

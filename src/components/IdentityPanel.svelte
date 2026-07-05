@@ -104,9 +104,11 @@
     </section>
   {/if}
 
-  <!-- Add an identity (USB-gated inside) -->
+  <!-- Add an identity (USB-gated inside). Open by default when the signer has
+       none yet, so a device that fell through to the console from setup lands
+       with the one thing it needs already unfolded. -->
   <section>
-    <details class="disclosure">
+    <details class="disclosure" open={device.mode === 'serial' && device.masters.length === 0}>
       <summary>Add an identity to this signer</summary>
       <Provision />
     </details>

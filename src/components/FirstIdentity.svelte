@@ -1,35 +1,62 @@
 <script lang="ts">
   // The guided "give your signer its first identity" flow, shown on Home when a
-  // device is connected over USB but has no identity yet. The DEVICE generates its
-  // own seed from its hardware RNG and shows the 12-word recovery phrase on its
-  // OWN screen — the phrase is never generated or displayed in the browser. We
-  // only ask it to generate and then show the resulting public npub. Power users
-  // with an existing key take the "I already have one" door to Advanced › Identity.
-  import { device, connectRelay, generateIdentity, restoreIdentity, getFirmwareVersion } from '../lib/device.svelte.js'
+  // device is connected over USB but has no identity yet. Two doors:
+  //   Create   — the DEVICE generates its own seed and shows the 12-word phrase
+  //              on its OWN screen; the secret never appears in the browser.
+  //   Restore  — an existing key. Most private: type the 12 words on the device.
+  //              Or paste a phrase / nsec / ncryptsec here; it is derived in the
+  //              browser and sent straight to the device over USB (never stored,
+  //              never networked), exactly as Advanced › Provision does.
+  import { device, connectRelay, generateIdentity, restoreIdentity, provisionSecret, getFirmwareVersion } from '../lib/device.svelte.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { navigate } from '../lib/route.svelte.js'
   import {
     type IdentityStep, nameOk, nameError, provisionLabel, friendlyLabel,
   } from '../lib/first-identity.js'
+  import { resolveRestore, isValidNsec, isValidNcryptsec, isValidPhrase } from '../lib/restore.js'
+  import { zeroize, type ProvisionMode } from '../lib/provision.js'
+  import PasswordReveal from './PasswordReveal.svelte'
   import { nip19 } from 'nostr-tools'
 
   interface Props {
-    /** Jump to the advanced cockpit (for the "I already have a key" path). */
+    /** Jump to the advanced cockpit (the raw panels, for power users). */
     onadvanced?: () => void
     /** Called once the identity is created (so Home can refresh). */
     ondone?: () => void
   }
   let { onadvanced, ondone }: Props = $props()
 
-  let step = $state<IdentityStep>('intro')
-  // 'create' = device makes a fresh seed; 'restore' = owner re-enters an
-  // existing 12-word phrase on the device itself (never typed in the browser).
-  let mode = $state<'create' | 'restore'>('create')
+  // 'create'         — device makes a fresh seed
+  // 'restore-device' — owner re-enters an existing phrase on the device itself
+  // 'restore-*'      — owner pastes a phrase / nsec / ncryptsec here (over USB)
+  type Mode = 'create' | 'restore-device' | 'restore-phrase' | 'restore-nsec' | 'restore-ncryptsec'
+  // The extra steps beyond the on-device flow: pick a restore source, paste the
+  // secret, confirm the derived address before it is sent.
+  type Step = IdentityStep | 'restore-source' | 'paste' | 'confirm'
+
+  let step = $state<Step>('intro')
+  let mode = $state<Mode>('create')
   let name = $state('')
   let saved = $state(false) // owner confirmed they wrote down the on-screen phrase
   let npub = $state('')
-  let status = $state<'idle' | 'generating' | 'restoring' | 'error'>('idle')
+  let status = $state<'idle' | 'generating' | 'restoring' | 'deriving' | 'sending' | 'error'>('idle')
   let error = $state('')
+
+  // Paste-restore inputs. Cleared the moment the secret reaches the device.
+  let phrase = $state('')
+  let passphrase = $state('')
+  let showPassphrase = $state(false)
+  let nsecInput = $state('')
+  let showNsec = $state(false)
+  let ncryptsecInput = $state('')
+  let password = $state('')
+  let showPassword = $state(false)
+  // nsec / ncryptsec only: keep the key's own npub (bunker) vs derive a new tree (tree-nsec).
+  let derive = $state(false)
+
+  // Held between derive-and-preview and send; zeroized after send or on cancel.
+  let pendingSecret: Uint8Array | null = null
+  let pendingMode: ProvisionMode | null = null
 
   // The connected board (from FIRMWARE_INFO), so the on-device entry
   // instructions match its buttons. The T-Display has two buttons and a
@@ -42,21 +69,30 @@
   let handoffConnecting = $state(false)
   let handoffError = $state('')
 
-  function startCreate() {
-    mode = 'create'
-    name = ''
-    saved = false
-    error = ''
-    step = 'naming'
+  const usesNsecKey = $derived(mode === 'restore-nsec' || mode === 'restore-ncryptsec')
+  const keepsNpub = $derived(usesNsecKey && !derive)
+
+  // Whether the pasted material is well-formed enough to derive from.
+  const pasteValid = $derived(
+    mode === 'restore-phrase' ? isValidPhrase(phrase)
+    : mode === 'restore-nsec' ? isValidNsec(nsecInput)
+    : mode === 'restore-ncryptsec' ? (isValidNcryptsec(ncryptsecInput) && password.length > 0)
+    : false,
+  )
+
+  function resetInputs() {
+    name = ''; saved = false; error = ''; npub = ''
+    phrase = ''; passphrase = ''; nsecInput = ''; ncryptsecInput = ''; password = ''
+    derive = false; status = 'idle'
   }
 
-  function startRestore() {
-    mode = 'restore'
-    name = ''
-    saved = false
-    error = ''
-    step = 'naming'
-  }
+  function startCreate() { mode = 'create'; resetInputs(); step = 'naming' }
+  function startRestore() { resetInputs(); step = 'restore-source' }
+
+  function pickWordsDevice() { mode = 'restore-device'; resetInputs(); step = 'naming' }
+  function pickWordsPaste() { mode = 'restore-phrase'; resetInputs(); step = 'paste' }
+  function pickNsec() { mode = 'restore-nsec'; resetInputs(); step = 'paste' }
+  function pickNcryptsec() { mode = 'restore-ncryptsec'; resetInputs(); step = 'paste' }
 
   /** Remember this device + decide whether a WiFi handoff applies. */
   function rememberProvisioned() {
@@ -113,6 +149,63 @@
     }
   }
 
+  /** Derive the key from the pasted material and show its address for confirmation. */
+  async function deriveAndPreview() {
+    if (!nameOk(name) || !pasteValid) return
+    status = 'deriving'
+    error = ''
+    try {
+      const resolved = await resolveRestore(
+        mode === 'restore-phrase' ? { kind: 'phrase', phrase, passphrase }
+        : mode === 'restore-nsec' ? { kind: 'nsec', nsec: nsecInput, derive }
+        : { kind: 'ncryptsec', ncryptsec: ncryptsecInput, password, derive },
+      )
+      pendingSecret = resolved.result.secret
+      pendingMode = resolved.mode
+      npub = resolved.result.npub
+      status = 'idle'
+      step = 'confirm'
+    } catch (e) {
+      status = 'error'
+      error = friendlyRestoreError(e)
+    }
+  }
+
+  /** A specific, calm message for the common paste failures. */
+  function friendlyRestoreError(e: unknown): string {
+    if (mode === 'restore-ncryptsec') return 'That password did not unlock this key. Check it and try again.'
+    if (mode === 'restore-nsec') return 'That does not look like a valid nsec. Check it and try again.'
+    return e instanceof Error && e.message ? e.message : 'Could not read that recovery phrase.'
+  }
+
+  /** Send the confirmed secret to the device over USB, then finish. */
+  async function sendPaste() {
+    if (!pendingSecret || !pendingMode) return
+    status = 'sending'
+    error = ''
+    try {
+      await provisionSecret(pendingSecret, provisionLabel(name), pendingMode)
+      rememberProvisioned()
+      // The key is on the device now — wipe the raw material from the form.
+      phrase = ''; passphrase = ''; nsecInput = ''; ncryptsecInput = ''; password = ''
+      finish()
+    } catch (e) {
+      status = 'error'
+      error = e instanceof Error ? e.message : 'The device did not accept the key. Try again.'
+      step = 'paste'
+    } finally {
+      if (pendingSecret) { zeroize(pendingSecret); pendingSecret = null }
+      pendingMode = null
+    }
+  }
+
+  function cancelConfirm() {
+    if (pendingSecret) { zeroize(pendingSecret); pendingSecret = null }
+    pendingMode = null
+    status = 'idle'
+    step = 'paste'
+  }
+
   function finish() {
     step = 'done'
     ondone?.()
@@ -138,21 +231,58 @@
     <span class="badge">New signer</span>
     <h2 class="fi-title">Let's give your signer its identity</h2>
     <p class="fi-lede">
-      Your device is connected but doesn't have an identity yet. We'll have the device
-      <strong>create its own recovery phrase and show it on its own screen</strong>. The secret
-      never appears on this computer. Do this once; afterwards you connect apps and manage it
-      from your phone.
+      Your device is connected but doesn't have an identity yet. Create a fresh key, or restore
+      one you already have. Do this once; afterwards you connect apps and manage it from your phone.
     </p>
     <div class="fi-actions">
-      <button class="btn btn-primary" onclick={startCreate}>Create a fresh identity →</button>
-      <button class="btn btn-secondary" onclick={startRestore}>Restore from my 12 words</button>
+      <button class="btn btn-primary" onclick={startCreate}>Create a fresh key →</button>
+      <button class="btn btn-secondary" onclick={startRestore}>Restore a key I already have</button>
     </div>
-    <button class="fi-advanced" onclick={() => onadvanced?.()}>Advanced: use a raw key (nsec/bunker)</button>
+    <button class="fi-advanced" onclick={() => onadvanced?.()}>Open the advanced console</button>
+
+  {:else if step === 'restore-source'}
+    <h2 class="fi-title">Restore a key you already have</h2>
+    <p class="fi-lede">
+      How is your key held? The most private option types your words on the device itself, so no
+      secret ever touches this computer.
+    </p>
+    <div class="source-list">
+      <button class="source" onclick={pickWordsDevice}>
+        <span class="source-body">
+          <span class="source-label">12 or 24 words, typed on the device</span>
+          <span class="source-desc">Most private. Enter your recovery phrase on the signer's own
+            screen with its button. Nothing is typed here.</span>
+        </span>
+        <span class="source-tag good">recommended</span>
+      </button>
+      <button class="source" onclick={pickWordsPaste}>
+        <span class="source-body">
+          <span class="source-label">12 or 24 words, pasted here</span>
+          <span class="source-desc">Faster. Paste your recovery phrase into this browser; it goes to
+            the device over the cable and is never stored.</span>
+        </span>
+      </button>
+      <button class="source" onclick={pickNsec}>
+        <span class="source-body">
+          <span class="source-label">An nsec (nsec1...)</span>
+          <span class="source-desc">Paste a raw private key. Keep its npub, or derive a fresh key from it.</span>
+        </span>
+      </button>
+      <button class="source" onclick={pickNcryptsec}>
+        <span class="source-body">
+          <span class="source-label">An encrypted key (ncryptsec1...)</span>
+          <span class="source-desc">A NIP-49 password-encrypted key. You enter its password to unlock it here.</span>
+        </span>
+      </button>
+    </div>
+    <div class="fi-actions">
+      <button class="btn btn-secondary" onclick={() => (step = 'intro')}>Back</button>
+    </div>
 
   {:else if step === 'naming'}
     <h2 class="fi-title">Name your signer</h2>
     <p class="fi-lede">
-      {#if mode === 'restore'}
+      {#if mode === 'restore-device'}
         Give it a friendly name (optional), then we'll ask the device to take your recovery phrase.
         You'll type your <strong>12 words on the device's screen</strong> using its button, never here.
       {:else}
@@ -171,8 +301,8 @@
         screen; the 12 words appear there when it's ready.</p>
     {/if}
     <div class="fi-actions">
-      <button class="btn btn-secondary" onclick={() => (step = 'intro')} disabled={status === 'generating'}>Back</button>
-      {#if mode === 'restore'}
+      <button class="btn btn-secondary" onclick={() => (step = mode === 'create' ? 'intro' : 'restore-source')} disabled={status === 'generating'}>Back</button>
+      {#if mode === 'restore-device'}
         <button class="btn btn-primary" disabled={!nameOk(name)} onclick={restoreOnDevice}>
           Restore on my device →
         </button>
@@ -181,6 +311,110 @@
           {status === 'generating' ? 'Creating on device…' : 'Create it on my device →'}
         </button>
       {/if}
+    </div>
+
+  {:else if step === 'paste'}
+    <h2 class="fi-title">
+      {#if mode === 'restore-phrase'}Enter your recovery phrase
+      {:else if mode === 'restore-nsec'}Enter your nsec
+      {:else}Enter your encrypted key{/if}
+    </h2>
+    <p class="fi-lede">
+      This is typed into your browser and sent straight to the device over the USB cable. It is
+      never stored, never logged, and never sent over the network.
+    </p>
+
+    <label class="field">
+      <span class="field-label">Name this signer (optional)</span>
+      <input type="text" class="field-input" bind:value={name} placeholder="e.g. My signer" maxlength="32" />
+    </label>
+    {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
+
+    {#if mode === 'restore-phrase'}
+      <label class="field">
+        <span class="field-label">Recovery phrase (12 or 24 words)</span>
+        <textarea class="field-input" bind:value={phrase} rows="3" placeholder="12 or 24 words"
+          autocomplete="off" spellcheck="false"></textarea>
+      </label>
+      <label class="field">
+        <span class="field-label">Passphrase (optional 25th word)</span>
+        <div class="pw-wrap">
+          <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" autocomplete="off" />
+          <PasswordReveal bind:shown={showPassphrase} />
+        </div>
+      </label>
+    {:else if mode === 'restore-nsec'}
+      <label class="field">
+        <span class="field-label">nsec</span>
+        <div class="pw-wrap">
+          <input type={showNsec ? 'text' : 'password'} class="field-input" bind:value={nsecInput} placeholder="nsec1..." autocomplete="off" />
+          <PasswordReveal bind:shown={showNsec} />
+        </div>
+      </label>
+    {:else}
+      <label class="field">
+        <span class="field-label">Encrypted key</span>
+        <input type="text" class="field-input" bind:value={ncryptsecInput} placeholder="ncryptsec1..." autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <div class="pw-wrap">
+          <input type={showPassword ? 'text' : 'password'} class="field-input" bind:value={password} placeholder="The password for this key" autocomplete="off" />
+          <PasswordReveal bind:shown={showPassword} />
+        </div>
+      </label>
+    {/if}
+
+    {#if usesNsecKey}
+      <fieldset class="derive-choice">
+        <legend class="field-label">What should the signer's address be?</legend>
+        <label class="derive-opt" class:on={!derive}>
+          <input type="radio" name="derive" checked={!derive} onchange={() => (derive = false)} />
+          <span class="derive-body">
+            <span class="derive-label"><span class="addr-chip good">Same npub</span> Keep this key's address</span>
+            <span class="derive-desc">The signer becomes this exact key and signs as it. Pick this to
+              make the signer <em>be</em> your existing identity.</span>
+          </span>
+        </label>
+        <label class="derive-opt" class:on={derive}>
+          <input type="radio" name="derive" checked={derive} onchange={() => (derive = true)} />
+          <span class="derive-body">
+            <span class="derive-label"><span class="addr-chip">New npub</span> Derive a fresh key</span>
+            <span class="derive-desc">The device derives a brand-new key from it (a tree root). You get
+              a new, different address.</span>
+          </span>
+        </label>
+      </fieldset>
+    {/if}
+
+    {#if error}<p class="error-text">{error}</p>{/if}
+    <div class="fi-actions">
+      <button class="btn btn-secondary" onclick={() => (step = 'restore-source')} disabled={status === 'deriving'}>Back</button>
+      <button class="btn btn-primary" disabled={!pasteValid || !nameOk(name) || status === 'deriving'} onclick={deriveAndPreview}>
+        {status === 'deriving' ? 'Checking…' : 'Continue →'}
+      </button>
+    </div>
+
+  {:else if step === 'confirm'}
+    <h2 class="fi-title">Check the address</h2>
+    <p class="fi-lede">
+      {#if keepsNpub}
+        This should be the <strong>same npub</strong> as the key you entered. Check it matches before
+        sending it to the signer.
+      {:else}
+        This is the <strong>new address</strong> your signer will have. Check it before sending.
+      {/if}
+    </p>
+    <div class="confirm-addr" class:same={keepsNpub}>
+      <span class="addr-chip" class:good={keepsNpub}>{keepsNpub ? 'Same npub' : 'New npub'}</span>
+      <div class="uri-box"><code>{npub}</code></div>
+    </div>
+    {#if error}<p class="error-text">{error}</p>{/if}
+    <div class="fi-actions">
+      <button class="btn btn-secondary" onclick={cancelConfirm} disabled={status === 'sending'}>Back</button>
+      <button class="btn btn-primary" onclick={sendPaste} disabled={status === 'sending'}>
+        {status === 'sending' ? 'Sending to device…' : 'Send to my signer →'}
+      </button>
     </div>
 
   {:else if step === 'writedown'}
@@ -255,7 +489,8 @@
         {#if handoffError}<p class="warn-text">{handoffError}</p>{/if}
       {/if}
     {:else}
-      <p class="fi-lede">It's ready. You can connect your first app now.</p>
+      <p class="fi-lede">It's ready. Your name and picture sync to the signer automatically. You can
+        connect your first app now.</p>
       <div class="fi-actions">
         <button class="btn btn-primary" onclick={() => ondone?.()}>Continue</button>
       </div>
@@ -290,13 +525,46 @@
   }
   .fi-advanced:hover { color: var(--text-dim); text-decoration: underline; }
 
-  .fi-gestures {
-    margin: 0 0 1.2rem; padding: 0.8rem 1rem 0.8rem 2.2rem;
-    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
-    font-size: 0.88rem; color: var(--text-dim); line-height: 1.7;
+  /* Restore source picker */
+  .source-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.4rem; }
+  .source {
+    display: flex; align-items: flex-start; gap: 0.75rem; text-align: left; width: 100%;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.85rem 1rem; cursor: pointer; font-family: inherit;
+    transition: border-color 0.12s, background 0.12s;
   }
-  .fi-gestures li { margin: 0; }
-  .fi-gestures strong { color: var(--green); }
+  .source:hover { border-color: var(--green-dim); background: #08130d; }
+  .source-body { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; min-width: 0; }
+  .source-label { font-size: 0.95rem; font-weight: 600; color: #fff; }
+  .source-desc { font-size: 0.8rem; color: var(--text-dim); line-height: 1.45; }
+  .source-tag {
+    flex-shrink: 0; font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+    border-radius: 3px; padding: 0.12rem 0.4rem; align-self: center;
+  }
+  .source-tag.good { color: var(--green); border: 1px solid var(--green-dim); background: #08130d; }
+
+  /* Derive choice (nsec / ncryptsec) */
+  .derive-choice { border: none; margin: 0.2rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .derive-choice legend { padding: 0; margin-bottom: 0.5rem; }
+  .derive-opt {
+    display: flex; align-items: flex-start; gap: 0.6rem; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.7rem 0.85rem;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .derive-opt.on { border-color: var(--green-dim); background: #08130d; }
+  .derive-opt input { margin-top: 0.2rem; accent-color: var(--green); flex-shrink: 0; }
+  .derive-body { display: flex; flex-direction: column; gap: 0.25rem; }
+  .derive-label { font-size: 0.9rem; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 0.45rem; }
+  .derive-desc { font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; }
+  .derive-desc em { color: var(--green-dim); font-style: normal; }
+
+  .addr-chip {
+    font-size: 0.6rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
+    color: #cba24a; border: 1px solid #5a4a20; border-radius: 3px; padding: 0.1rem 0.4rem; flex-shrink: 0;
+  }
+  .addr-chip.good { color: var(--green); border-color: var(--green-dim); }
+
+  .confirm-addr { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.4rem; }
 
   .confirm-save {
     display: flex; align-items: flex-start; gap: 0.6rem; margin: 0.4rem 0 1.1rem;
@@ -305,6 +573,14 @@
   .confirm-save input { margin-top: 0.2rem; accent-color: var(--green); width: 1.1rem; height: 1.1rem; flex-shrink: 0; }
 
   .uri-box { margin: 0 0 0.4rem; }
+
+  .fi-gestures {
+    margin: 0 0 1.2rem; padding: 0.8rem 1rem 0.8rem 2.2rem;
+    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
+    font-size: 0.88rem; color: var(--text-dim); line-height: 1.7;
+  }
+  .fi-gestures li { margin: 0; }
+  .fi-gestures strong { color: var(--green); }
 
   .done-head { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.5rem; }
   .done-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: var(--green-glow); flex-shrink: 0; }
