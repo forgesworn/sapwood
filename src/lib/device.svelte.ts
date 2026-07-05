@@ -342,6 +342,13 @@ export async function connectHttp(address: string) {
 
 let relayTransport: RelayTransport | null = null
 
+// The signer's relay loop is single-threaded: a sign_event awaiting the physical
+// button parks it for up to APPROVAL_TIMEOUT_SECS (30s, see firmware
+// nip46_handler.rs) during which no other request is answered. Management writes
+// must outwait that window, or a create/update issued while a signature is
+// pending reports a spurious "timeout" (and a create loses its one-shot link).
+const MGMT_WRITE_TIMEOUT_MS = 35_000
+
 /**
  * Connect to a wifi-standalone device over its relay, as the operator.
  * `devicePubHex` is the device MASTER pubkey (the kind-24134 mgmt address);
@@ -433,7 +440,7 @@ export async function relayCreateClient(
   approveSigning = false,
 ): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }> {
   if (!relayTransport) throw new Error('not connected over relay')
-  const res = await relayTransport.request('create_client', { label, approve_signing: approveSigning })
+  const res = await relayTransport.request('create_client', { label, approve_signing: approveSigning }, MGMT_WRITE_TIMEOUT_MS)
   await relayRefresh()
   return {
     bunker_uri: String(res.bunker_uri ?? ''),
@@ -446,14 +453,14 @@ export async function relayCreateClient(
 /** Grant a slot signing authority over the relay (operator-authorised). */
 export async function relayApproveSigning(slotIndex: number): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
-  await relayTransport.request('approve_signing', { slot_index: slotIndex })
+  await relayTransport.request('approve_signing', { slot_index: slotIndex }, MGMT_WRITE_TIMEOUT_MS)
   await relayRefresh()
 }
 
 /** Revoke a client slot over the relay (operator-authorised). */
 export async function relayRevokeClient(slotIndex: number): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
-  await relayTransport.request('revoke_client', { slot_index: slotIndex })
+  await relayTransport.request('revoke_client', { slot_index: slotIndex }, MGMT_WRITE_TIMEOUT_MS)
   await relayRefresh()
 }
 
@@ -463,7 +470,7 @@ export async function relayUpdateClient(
   changes: { label?: string; allowed_kinds?: number[]; auto_approve?: boolean },
 ): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
-  await relayTransport.request('update_client', { slot_index: slotIndex, ...changes })
+  await relayTransport.request('update_client', { slot_index: slotIndex, ...changes }, MGMT_WRITE_TIMEOUT_MS)
   await relayRefresh()
 }
 
