@@ -17,6 +17,7 @@
     PERMISSION_PRESETS, resolveKinds, isRestricted, type PresetId,
   } from '../lib/client-presets.js'
   import { copyText } from '../lib/clipboard.js'
+  import { bunkerHasRelay } from '../lib/bunker.js'
 
   interface Props {
     /** Called after the operator finishes (dismisses the result). */
@@ -230,7 +231,7 @@
         <span class="result-dot"></span>
         <h3 class="flow-title">Connection ready</h3>
       </div>
-      {#if created.bunker_uri}
+      {#if created.bunker_uri && bunkerHasRelay(created.bunker_uri)}
         <p class="hint">Scan this with the app, or copy the link and paste it in to finish pairing.</p>
         <div class="qr">{@html qr}</div>
         <div class="uri-box copy-uri">
@@ -242,8 +243,9 @@
           card below until it connects.</p>
       {:else}
         <p class="warn-text">
-          Created, but this device has no relay set, so there is no link to scan yet. Set a relay
-          (Advanced › Connectivity), then reopen the connection. The secret is
+          Created, but the link names no relay, so a remote app like Primal cannot reach the signer
+          (it reports “no relays specified”). Set the signer's relays under Advanced › Device › Network,
+          then reopen the connection. The secret is
           <code class="inline-secret">{created.secret}</code>.
         </p>
       {/if}

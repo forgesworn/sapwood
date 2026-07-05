@@ -15,6 +15,7 @@
   import type { ConnectSlot } from '../lib/types.js'
   import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
   import { copyText } from '../lib/clipboard.js'
+  import { bunkerHasRelay } from '../lib/bunker.js'
 
   const overBridge = $derived(device.mode === 'http')
   const overUsb = $derived(device.mode === 'serial')
@@ -260,7 +261,7 @@
         <span class="created-title">Connection ready{created.signing_approved ? ', signing allowed' : ''}</span>
         <button class="btn-link" onclick={dismissCreated}>Dismiss</button>
       </div>
-      {#if created.bunker_uri}
+      {#if created.bunker_uri && bunkerHasRelay(created.bunker_uri)}
         <p class="hint">Paste this link into the app (or scan it there). It carries the connection secret, shown once.</p>
         <div class="uri-box">
           <code>{created.bunker_uri}</code>
@@ -269,8 +270,9 @@
           </button>
         </div>
       {:else}
-        <p class="warn-text">Created, but this signer has no relay set, so there is no link yet.
-          Set a relay under Device › Network, then reopen the connection.
+        <p class="warn-text">Created, but the link names no relay, so a remote app like Primal cannot
+          reach the signer (it reports “no relays specified”). Set the signer's relays under
+          Device › Network, then reopen the connection.
           {#if created.secret}The secret is <code class="inline-secret">{created.secret}</code>.{/if}</p>
       {/if}
       {#if created.signing_approved === false}
@@ -405,12 +407,17 @@
             </div>
           </div>
 
-          {#if uriForSlot === slot.slot_index && uriValue}
+          {#if uriForSlot === slot.slot_index && uriValue && bunkerHasRelay(uriValue)}
             <div class="uri-box slot-uri">
               <code>{uriValue}</code>
               <button class="btn btn-secondary btn-sm" onclick={() => copy(uriValue, `slot-${slot.slot_index}`)}>
                 {copied === `slot-${slot.slot_index}` ? 'Copied ✓' : 'Copy'}
               </button>
+            </div>
+          {:else if uriForSlot === slot.slot_index && uriValue}
+            <div class="link-gone">
+              <p class="warn-text no-gap">This link names no relay, so a remote app cannot reach the
+                signer. Set the signer's relays under Device › Network, then reopen the connection.</p>
             </div>
           {:else if uriForSlot === slot.slot_index && uriError}
             <div class="link-gone">
