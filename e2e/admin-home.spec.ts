@@ -64,7 +64,13 @@ test('phone handoff QR is hidden until explicitly revealed', async ({ page }) =>
   await expect(page.locator('.handoff .qr')).toHaveCount(0)
   await expect(page.getByText(/This link carries your operator key/)).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Show pairing QR' }).click()
+  // Pairing leads with a PIN step — no QR (and no bare-secret warning) yet.
+  await page.getByRole('button', { name: 'Pair a device' }).click()
+  await expect(page.getByText(/PIN or passphrase/)).toBeVisible()
+  await expect(page.locator('.handoff .qr')).toHaveCount(0)
+
+  // A protected QR needs a PIN; the plain fallback shows the operator-key warning.
+  await page.getByRole('button', { name: /Show without a PIN/ }).click()
   await expect(page.locator('.handoff .qr')).toBeVisible()
   await expect(page.getByText(/This link carries your operator key/)).toBeVisible()
 })

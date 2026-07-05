@@ -5,7 +5,7 @@ import { nip19 } from 'nostr-tools'
 // import flow touches so these stay unit tests.
 vi.mock('./device.svelte.js', () => ({ connectRelay: vi.fn(async () => {}) }))
 
-import { parseImportLink, parseImportOp, buildHandoffLink, consumeImportLink, confirmPendingImport, dismissPendingImport, pendingImport, importNotice } from './import-link.svelte'
+import { parseImportLink, parseImportOp, buildHandoffLink, buildProtectedHandoffLink, encryptOperator, submitPin, dismissPin, pendingPin, consumeImportLink, confirmPendingImport, dismissPendingImport, pendingImport, importNotice } from './import-link.svelte'
 import { peekOperatorPubHex, pubHexFromSecret } from './op-mgmt'
 
 const HEX = 'a1b2c3d4e5f6'.repeat(5) + 'abcd' // 64 hex chars
@@ -127,5 +127,66 @@ describe('consumeImportLink — overwrite guard', () => {
     expect(confirmPendingImport()).toBe(true)
     expect(pendingImport.link).toBeNull()
     expect(peekOperatorPubHex()).toBe(pubHexFromSecret(HEX2))
+  })
+})
+
+describe('consumeImportLink — PIN-protected (eop)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    pendingImport.link = null
+    pendingPin.link = null
+    importNotice.shown = false
+    location.hash = ''
+  })
+
+  it('a protected link round-trips through build/parse as an eop', () => {
+    const eop = encryptOperator(HEX, '1234')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://a.cc'])
+    const link = parseImportLink(url.slice(url.indexOf('#')))
+    expect(link).toEqual({ eop, deviceHex: DEV, relays: ['wss://a.cc'] })
+    expect(link?.op).toBeUndefined() // no plaintext secret in the link
+  })
+
+  it('parks for the PIN, imports nothing until the right PIN is given', () => {
+    const eop = encryptOperator(HEX, '1234')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://a.cc'])
+    location.hash = url.slice(url.indexOf('#'))
+
+    expect(consumeImportLink()).toBe(true)
+    expect(pendingPin.link?.eop).toBe(eop)
+    expect(peekOperatorPubHex()).toBeNull() // nothing imported yet
+    expect(location.hash).toBe('#/')
+
+    expect(submitPin('1234').ok).toBe(true)
+    expect(pendingPin.link).toBeNull()
+    expect(peekOperatorPubHex()).toBe(pubHexFromSecret(HEX))
+    expect(importNotice.shown).toBe(true)
+  })
+
+  it('rejects a wrong PIN and keeps the link parked for a retry', () => {
+    const eop = encryptOperator(HEX, 'right')
+    const url = buildProtectedHandoffLink('https://x.dev', eop)
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+
+    const res = submitPin('wrong')
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/PIN/)
+    expect(peekOperatorPubHex()).toBeNull()
+    expect(pendingPin.link?.eop).toBe(eop) // still parked
+
+    expect(submitPin('right').ok).toBe(true)
+    expect(peekOperatorPubHex()).toBe(pubHexFromSecret(HEX))
+  })
+
+  it('dismissing a parked PIN link imports nothing', () => {
+    const eop = encryptOperator(HEX, '1234')
+    const url = buildProtectedHandoffLink('https://x.dev', eop)
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+
+    dismissPin()
+    expect(pendingPin.link).toBeNull()
+    expect(peekOperatorPubHex()).toBeNull()
   })
 })

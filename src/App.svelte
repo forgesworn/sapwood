@@ -4,7 +4,10 @@
   import Home from './components/Home.svelte'
   import Cockpit from './components/Cockpit.svelte'
   import { device } from './lib/device.svelte.js'
-  import { importNotice, pendingImport, confirmPendingImport, dismissPendingImport } from './lib/import-link.svelte.js'
+  import {
+    importNotice, pendingImport, confirmPendingImport, dismissPendingImport,
+    pendingPin, submitPin, dismissPin,
+  } from './lib/import-link.svelte.js'
   import { nip19 } from 'nostr-tools'
 
   // Short, recognisable npub for the overwrite confirmation (first/last chars).
@@ -21,6 +24,21 @@
   let view = $state<'home' | 'advanced'>('home')
   // Which console section to land on — Home's nudges deep-link (e.g. firmware → device).
   let advancedTab = $state<'apps' | 'identity' | 'device' | 'logs'>('apps')
+
+  // Receiving side of a PIN-protected handoff link: collect the PIN, decrypt.
+  let pinInput = $state('')
+  let pinError = $state('')
+  function unlockPin() {
+    const res = submitPin(pinInput)
+    if (!res.ok) { pinError = res.error ?? 'Wrong PIN'; return }
+    pinInput = ''
+    pinError = ''
+  }
+  function cancelPin() {
+    dismissPin()
+    pinInput = ''
+    pinError = ''
+  }
 
   function openAdvanced(tab?: 'apps' | 'identity' | 'device' | 'logs') {
     // With no identity yet there is nothing for an app to connect to, so land on
@@ -51,6 +69,31 @@
       {/if}
     {/if}
   </header>
+
+  {#if pendingPin.link}
+    <div class="import-confirm" role="alertdialog" aria-labelledby="pin-title">
+      <h2 id="pin-title">Unlock this pairing link</h2>
+      <p>This link is protected. Enter the PIN shown on the other device to connect to your signer.</p>
+      <input
+        type="text"
+        class="field-input"
+        bind:value={pinInput}
+        placeholder="PIN or passphrase"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        data-1p-ignore
+        data-lpignore="true"
+        onkeydown={(e) => { if (e.key === 'Enter') unlockPin() }}
+      />
+      {#if pinError}<p class="error-text">{pinError}</p>{/if}
+      <div class="import-confirm-actions">
+        <button class="btn btn-secondary" onclick={cancelPin}>Cancel</button>
+        <button class="btn btn-primary" onclick={unlockPin}>Unlock</button>
+      </div>
+    </div>
+  {/if}
 
   {#if pendingImport.link}
     <div class="import-confirm" role="alertdialog" aria-labelledby="import-confirm-title">
