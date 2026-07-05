@@ -39,9 +39,13 @@
   let approvingSlot = $state<number | null>(null)
   let revokingSlot = $state<number | null>(null)
 
-  // Per-app link reveal (bridge only — the bridge can re-issue a slot's URI).
+  // Per-app link reveal. USB/bridge re-issue the URI on demand; over WiFi the
+  // signer emits a slot's secret only once, so after a reload there is nothing
+  // to re-show — uriError carries that, and a fresh link can be minted in place.
   let uriForSlot = $state<number | null>(null)
   let uriValue = $state('')
+  let uriError = $state<string | null>(null)
+  let replacingSlot = $state<number | null>(null)
 
   // Advanced raw bunker URI (bridge multi-instance mode only).
   const selectedBunkerUri = $derived(
@@ -154,11 +158,46 @@
     if (uriForSlot === slot.slot_index) {
       uriForSlot = null
       uriValue = ''
+      uriError = null
       return
     }
     uriForSlot = slot.slot_index
+    uriValue = ''
+    uriError = null
     try { uriValue = await mgmtClientUri(slot.slot_index) }
-    catch (e) { uriValue = ''; device.error = e instanceof Error ? e.message : 'Could not fetch the connection link.' }
+    catch {
+      // Over WiFi a reload leaves no link to re-show. Say so on the card rather
+      // than flashing a global error, and let the operator mint a fresh one.
+      uriError = slot.current_pubkey
+        ? 'This app has already connected, so its pairing link is spent. Disconnect it first if you need to pair again.'
+        : 'This link was shown once and cannot be re-issued over WiFi. Create a fresh one to finish pairing.'
+    }
+  }
+
+  // Mint a replacement pairing link for a slot whose one-time link is gone
+  // (WiFi, post-reload). Preserves the name, permissions and signing setting,
+  // then removes the stale pending slot. The fresh link surfaces in the
+  // "Connection ready" box above, ready to copy into the app.
+  async function replaceLink(slot: ConnectSlot) {
+    replacingSlot = slot.slot_index
+    uriError = null
+    try {
+      const label = slot.label || `app ${slot.slot_index}`
+      const res = await mgmtCreateClient(label, canApprove && (slot.signing_approved ?? false))
+      if (slot.allowed_kinds.length) {
+        try { await mgmtUpdateClient(res.slot_index, { allowed_kinds: slot.allowed_kinds }) }
+        catch { /* the link still works; the kind limit just needs re-applying below */ }
+      }
+      // Best-effort: drop the stale pending slot so it doesn't linger.
+      try { await mgmtRevokeClient(slot.slot_index) } catch { /* leave the orphan */ }
+      created = { bunker_uri: res.bunker_uri, secret: res.secret, signing_approved: res.signing_approved }
+      uriForSlot = null
+      await refreshSlots()
+    } catch (e) {
+      uriError = e instanceof Error ? e.message : 'Could not create a fresh link.'
+    } finally {
+      replacingSlot = null
+    }
   }
 
   function handleIdentityChange(e: Event) {
@@ -373,6 +412,15 @@
                 {copied === `slot-${slot.slot_index}` ? 'Copied ✓' : 'Copy'}
               </button>
             </div>
+          {:else if uriForSlot === slot.slot_index && uriError}
+            <div class="link-gone">
+              <p class="warn-text no-gap">{uriError}</p>
+              {#if !slot.current_pubkey}
+                <button class="btn btn-secondary btn-sm" disabled={replacingSlot === slot.slot_index} onclick={() => replaceLink(slot)}>
+                  {replacingSlot === slot.slot_index ? 'Creating…' : 'Replace with a fresh link'}
+                </button>
+              {/if}
+            </div>
           {/if}
 
           <KindPermissions
@@ -454,6 +502,7 @@
   .allow:hover:not(:disabled) { background: #002a12; border-color: var(--green); }
 
   .slot-uri { margin-top: 0.75rem; }
+  .link-gone { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; }
 
   .empty.centred { text-align: center; padding: 2rem 0; }
 
