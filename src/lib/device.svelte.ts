@@ -687,14 +687,14 @@ export async function ensureBridgeAuth(): Promise<void> {
   if (device.mode !== 'serial') return
   if (device.bridgeAuthed) return
   const secret = bridgeSecret()
-  const ack = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], 6_000)
+  const ack = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], SERIAL_RTT_MS)
   const code = ack.payload[0]
   if (code === 0x00) { device.bridgeAuthed = true; return }
   if (code === 0x02) {
     // No secret on device — set ours (requires a PRG press) then retry.
     const resp = await serialTransport.sendAndReceive(buildSetBridgeSecret(secret), [FrameType.ACK, FrameType.NACK], 35_000)
     if (resp.type !== FrameType.ACK) throw new Error('Pairing rejected on the device')
-    const ack2 = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], 6_000)
+    const ack2 = await serialTransport.sendAndReceive(buildSessionAuth(secret), [FrameType.SESSION_ACK], SERIAL_RTT_MS)
     if (ack2.payload[0] !== 0x00) throw new Error('Bridge auth failed after pairing')
     device.bridgeAuthed = true
     return
@@ -709,6 +709,14 @@ export async function ensureBridgeAuth(): Promise<void> {
 // the link is never relayless. A WiFi signer flashed with defaults is on these;
 // if it was flashed with custom relays, set them under Device > Network (which
 // persists here) so the link names the relays it actually serves on.
+// USB round-trip budget for a management request that expects a reply. Set
+// generously: on a slow or busy laptop the signer answers promptly but the
+// browser is late to read the serial reply and run reactivity, so a tight
+// timeout fires on a device that in fact replied. Physical-button operations
+// (provisioning, net config, PIN, bridge secret) keep their own longer,
+// human-paced timeouts — those wait on a person, not the cable.
+const SERIAL_RTT_MS = 30_000
+
 function lastRelays(): string[] {
   try {
     const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
@@ -724,7 +732,7 @@ export async function serialCreateClient(
 ): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number }> {
   await ensureBridgeAuth()
   const ms = device.selectedSlot
-  const resp = await serialTransport.sendAndReceive(buildConnSlotCreate(ms, label), [FrameType.CONNSLOT_CREATE_RESP, FrameType.NACK], 15_000)
+  const resp = await serialTransport.sendAndReceive(buildConnSlotCreate(ms, label), [FrameType.CONNSLOT_CREATE_RESP, FrameType.NACK], SERIAL_RTT_MS)
   if (resp.type !== FrameType.CONNSLOT_CREATE_RESP) throw new Error('Create rejected (slots full?)')
   const info = JSON.parse(new TextDecoder().decode(resp.payload)) as { slot_index: number; secret: string }
   const bunker_uri = await serialGetUri(info.slot_index).catch(() => '')
@@ -735,7 +743,7 @@ export async function serialCreateClient(
 /** Revoke a client slot over USB. */
 export async function serialRevokeClient(slotIndex: number): Promise<void> {
   await ensureBridgeAuth()
-  const resp = await serialTransport.sendAndReceive(buildConnSlotRevoke(device.selectedSlot, slotIndex), [FrameType.CONNSLOT_REVOKE_RESP, FrameType.NACK], 10_000)
+  const resp = await serialTransport.sendAndReceive(buildConnSlotRevoke(device.selectedSlot, slotIndex), [FrameType.CONNSLOT_REVOKE_RESP, FrameType.NACK], SERIAL_RTT_MS)
   if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) throw new Error('Revoke rejected')
   await refreshSlots()
 }
@@ -751,7 +759,7 @@ export async function serialUpdateClient(slotIndex: number, changes: { label?: s
 /** Fetch the bunker URI for a slot over USB (relays from the last wifi flash). */
 export async function serialGetUri(slotIndex: number): Promise<string> {
   await ensureBridgeAuth()
-  const resp = await serialTransport.sendAndReceive(buildConnSlotUri(device.selectedSlot, slotIndex, lastRelays()), [FrameType.CONNSLOT_URI_RESP, FrameType.NACK], 10_000)
+  const resp = await serialTransport.sendAndReceive(buildConnSlotUri(device.selectedSlot, slotIndex, lastRelays()), [FrameType.CONNSLOT_URI_RESP, FrameType.NACK], SERIAL_RTT_MS)
   if (resp.type !== FrameType.CONNSLOT_URI_RESP) throw new Error('URI fetch failed')
   return new TextDecoder().decode(resp.payload)
 }
