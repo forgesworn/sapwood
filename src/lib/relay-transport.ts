@@ -97,7 +97,11 @@ export class RelayTransport {
   request(
     method: string,
     params: Record<string, unknown> = {},
-    timeoutMs = 20_000,
+    // Generous by default: the round-trip crosses the operator's network, a
+    // relay, and the signer's own link. A slow or flaky client connection
+    // (rough WiFi, a busy laptop) needs headroom or a status read that would
+    // have arrived reports a false "timeout waiting for device".
+    timeoutMs = 35_000,
   ): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error('transport closed'))
     if (!this.sub) return Promise.reject(new Error('not connected'))

@@ -384,9 +384,14 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   }, 4000)
 }
 
-/** Refresh masters (get_status) and clients (list_clients) over the relay. */
+/** Refresh masters (get_status) and clients (list_clients) over the relay.
+ *  Guarded against overlap: on a slow link a refresh can outlast the 4s poll,
+ *  and piling more requests onto a struggling connection only makes it worse, so
+ *  a tick that finds one already in flight simply skips. */
+let relayRefreshing = false
 async function relayRefresh() {
-  if (!relayTransport) return
+  if (!relayTransport || relayRefreshing) return
+  relayRefreshing = true
   try {
     const raw = await relayTransport.request('get_status')
     const status: RelayStatus = {
@@ -427,6 +432,8 @@ async function relayRefresh() {
     device.error = null
   } catch (e) {
     device.error = e instanceof Error ? e.message : 'Relay request failed'
+  } finally {
+    relayRefreshing = false
   }
 }
 
