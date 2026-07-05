@@ -63,30 +63,42 @@ export class RelayTransport {
     const since = Math.floor(Date.now() / 1000) - 5
     await new Promise<void>((resolve) => {
       let settled = false
-      const done = () => { if (!settled) { settled = true; resolve() } }
+      const done = (via: string) => {
+        if (settled) return
+        settled = true
+        console.log(`[hw] relay: subscription ready (${via}) on ${this.relays.join(', ')}`)
+        resolve()
+      }
       this.sub = this.pool.subscribe(
         this.relays,
         { kinds: [MGMT_KIND], '#p': [this.operatorPub], since },
         {
           onevent: (ev) => this.routeEvent(ev),
-          oneose: done,
+          oneose: () => done('relay acknowledged'),
         },
       )
       // Don't block the UI if a relay never sends EOSE.
-      setTimeout(done, 1500)
+      setTimeout(() => done('grace — no relay EOSE, relay slow or quiet'), 1500)
     })
   }
 
   private routeEvent(ev: { pubkey: string; content: string }): void {
-    if (ev.pubkey !== this.devicePub) return
+    if (ev.pubkey !== this.devicePub) {
+      // Scoped to our operator, so this reply was meant for us — but authored by a
+      // different signer pubkey than we targeted. Usually a stale target (the
+      // signer's identity was restored/changed since we remembered it).
+      console.warn(`[hw] relay: reply from ${ev.pubkey.slice(0, 8)}…, but we target ${this.devicePub.slice(0, 8)}… (wrong signer pubkey?)`)
+      return
+    }
     let resp: MgmtResponse
     try {
       resp = JSON.parse(decrypt(ev.content, this.ck)) as MgmtResponse
     } catch {
-      return // not for us / undecryptable
+      console.warn('[hw] relay: a reply from the signer could not be decrypted (operator-key mismatch?)')
+      return
     }
     const p = this.pending.get(resp.id)
-    if (!p) return
+    if (!p) { console.warn(`[hw] relay: reply id ${resp.id} matched no pending request`); return }
     clearTimeout(p.timer)
     this.pending.delete(resp.id)
     if (resp.error) p.reject(new Error(resp.error))
@@ -119,6 +131,7 @@ export class RelayTransport {
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
+        console.warn(`[hw] relay: ${method} timed out after ${timeoutMs}ms — the signer never replied (offline, wrong relay, or operator-key mismatch)`)
         reject(new Error(`timeout waiting for device (${method})`))
       }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
@@ -126,6 +139,7 @@ export class RelayTransport {
       Promise.any(this.pool.publish(this.relays, event)).catch(() => {
         clearTimeout(timer)
         this.pending.delete(id)
+        console.warn(`[hw] relay: ${method} could not be published to any relay ${JSON.stringify(this.relays)}`)
         reject(new Error('failed to publish to any relay'))
       })
     })

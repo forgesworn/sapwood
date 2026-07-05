@@ -6,7 +6,7 @@
   // key, update old firmware — and offers the phone handoff. The advanced
   // console is one tap away via `onadvanced`.
   import {
-    device, refreshSlots, refreshMasters, disconnect, connectSerial, connectRelay,
+    device, refreshSlots, refreshMasters, disconnect, connectSerial, connectRelay, reconnectRelay,
     mgmtRevokeClient, mgmtApproveSigning, mgmtUpdateClient, mgmtCanApproveSigning,
     mgmtClientUri, getFirmwareVersion,
   } from '../lib/device.svelte.js'
@@ -191,6 +191,15 @@
     }
   }
 
+  // Retry a WiFi connection that reached the relay but not the signer. A timeout
+  // dead-ends in that panel with no way back on to the network, so this re-runs
+  // the same connection (same npub + relays) rather than making people disconnect.
+  let retrying = $state(false)
+  async function retryWifi() {
+    retrying = true
+    try { await reconnectRelay() } finally { retrying = false }
+  }
+
   // Transport is plumbing: when the cable goes silent and exactly one signer is
   // known on the network, hop to it automatically — once per silent episode.
   // The buttons below remain as the manual retry if the hop fails.
@@ -287,13 +296,15 @@
     <!-- The relay answered, the DEVICE never did. -->
     <section class="card card--live wifi-usb">
       <h2 class="state-title">Connected to the relay, but your signer isn't answering</h2>
-      <p class="hint">Sapwood keeps retrying automatically. If the signer has just powered on,
-        give it ~10 seconds. A USB cable always works: plug it into this computer and connect
-        over USB.</p>
+      <p class="hint">If the signer has just powered on, give it ~10 seconds to join WiFi, then
+        Try again. A USB cable always works: plug it into this computer and connect over USB.</p>
 
       <details class="disclosure">
         <summary>Why this happens</summary>
         <ul class="state-causes">
+          <li><strong>Not on WiFi.</strong> The signer must join WiFi and reach a relay. If it was
+            flashed with the wrong password, or a 5 GHz network (the ESP32 is 2.4 GHz only), it
+            never connects. Check the Logs over USB.</li>
           <li><strong>Different relays.</strong> Sapwood and the signer must share a relay:
             Sapwood is asking on <code>{device.portInfo}</code>; check the signer booted onto the
             same one.</li>
@@ -303,7 +314,12 @@
         </ul>
       </details>
 
-      <button class="btn btn-danger btn-sm state-disconnect" onclick={() => disconnect()}>Disconnect</button>
+      <div class="state-actions">
+        <button class="btn btn-primary btn-sm" onclick={retryWifi} disabled={retrying}>
+          {retrying ? 'Retrying…' : 'Try again'}
+        </button>
+        <button class="btn btn-danger btn-sm" onclick={() => disconnect()}>Disconnect</button>
+      </div>
     </section>
 
   {:else if !hasIdentity}
@@ -529,6 +545,7 @@
   .state-causes strong { color: var(--text); }
   .state-causes code { color: var(--green); word-break: break-all; }
   .state-disconnect { margin-top: 1.1rem; }
+  .state-actions { display: flex; gap: 0.6rem; margin-top: 1.1rem; }
   .wifi-usb { padding: 1.4rem; }
 
   /* USB connect: still checking whether the device answers. */

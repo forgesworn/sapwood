@@ -362,6 +362,7 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   const op = getOrCreateOperator()
   const t = new RelayTransport(devicePubHex, relays, op.skHex)
+  console.log(`[hw] relay connect → signer ${devicePubHex.slice(0, 8)}… on [${relays.join(', ')}] as operator ${t.operatorPub.slice(0, 8)}…`)
   await t.connect()
   relayTransport = t
   device.connected = true
@@ -495,6 +496,7 @@ export async function disconnect() {
   } else if (device.mode === 'relay') {
     relayTransport?.close()
     relayTransport = null
+    relayRefreshing = false // let the next connection's first refresh run
     device.connected = false
     device.mode = 'none'
     device.portInfo = ''
@@ -503,6 +505,22 @@ export async function disconnect() {
     device.relays = []
     device.relayStatus = null
   }
+}
+
+/**
+ * Re-attempt the relay connection to the same signer — the "Try again" after a
+ * WiFi management timeout. Reuses the current transport's target (npub + relays)
+ * so nothing needs re-entering, tears the stale transport down first, then
+ * reconnects. Errors surface through device.error like the first attempt.
+ */
+export async function reconnectRelay(): Promise<void> {
+  const t = relayTransport
+  if (!t) return
+  const pubHex = t.devicePub
+  const relays = [...t.relays]
+  const label = device.masters[0]?.label
+  await disconnect()
+  await connectRelay(pubHex, relays, label)
 }
 
 /**
