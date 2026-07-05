@@ -77,6 +77,15 @@
     </div>
   {/if}
 
+  {#if device.wifiJoinError && device.mode === 'serial'}
+    <div class="wifi-error-banner" role="alert">
+      <p><strong>Your signer can't join WiFi.</strong> It keeps failing with: <code>{device.wifiJoinError}</code></p>
+      <p class="wifi-error-hint">Check it's a <strong>2.4 GHz</strong> network (the ESP32 can't use 5 GHz), the
+        password is right, and the security is <strong>WPA2</strong> (not WPA3-only). A phone hotspot on 2.4 GHz
+        is the quickest test. Set it under Device › Network.</p>
+    </div>
+  {/if}
+
   {#if pendingPin.link}
     <div class="import-confirm" role="alertdialog" aria-labelledby="pin-title">
       <h2 id="pin-title">Unlock this pairing link</h2>
@@ -219,6 +228,15 @@
   }
   @keyframes pairing-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
   @media (prefers-reduced-motion: reduce) { .pairing-dot { animation: none; } }
+
+  /* WiFi-join failure lifted out of the log stream — a real error, so red. */
+  .wifi-error-banner {
+    background: #16060688; border: 1px solid var(--red, #ef4444); border-radius: 6px;
+    padding: 0.85rem 1rem; margin-bottom: 1rem;
+  }
+  .wifi-error-banner p { margin: 0; font-size: 0.9rem; color: var(--text); line-height: 1.5; }
+  .wifi-error-banner code { color: var(--red, #ef4444); word-break: break-all; }
+  .wifi-error-hint { margin-top: 0.5rem !important; font-size: 0.82rem !important; color: var(--text-dim); }
 
   .import-confirm {
     background: #140b06; border: 1px solid var(--red, #ef4444); border-radius: 6px;

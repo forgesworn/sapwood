@@ -56,6 +56,9 @@ export const device = $state({
   /** When set, the signer is waiting on a physical button hold and this is the
    *  instruction to show (e.g. the one-time USB pairing). Cleared when done. */
   awaitingButton: null as string | null,
+  /** The signer's last WiFi-join failure reason, lifted out of the log stream so
+   *  it can be surfaced instead of buried. Cleared once WiFi comes up. */
+  wifiJoinError: null as string | null,
   bridgeInfo: null as Record<string, unknown> | null,
   relayStatus: null as RelayStatus | null,
   /** Relay: the relays this signer is reachable on (set on a relay connect). A
@@ -178,12 +181,19 @@ function addLog(line: string) {
   if (device.logs.length > MAX_LOG_LINES) {
     device.logs = device.logs.slice(-MAX_LOG_LINES)
   }
+  // Lift the signer's WiFi-join outcome out of the log stream. The firmware
+  // retries a failed join every 3s (relay.rs), so a bad SSID/password otherwise
+  // just scrolls past unnoticed; surface the reason and clear it once WiFi is up.
+  const failed = line.match(/wifi connect failed:\s*(.+?)(?:;|$)/i)
+  if (failed) device.wifiJoinError = failed[1]!.trim()
+  else if (/wifi up\b/i.test(line)) device.wifiJoinError = null
 }
 
 // --- Actions ---
 
 export async function connectSerial(baudRate = 115200, port?: SerialPort) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
+  device.wifiJoinError = null
   await serialTransport.connect(baudRate, port)
 }
 
@@ -489,6 +499,7 @@ export async function relayUpdateClient(
 export async function disconnect() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   device.slotUris = {} // session-only links; don't carry them to the next signer
+  device.wifiJoinError = null
   if (device.mode === 'serial') {
     await serialTransport.disconnect()
   } else if (device.mode === 'http') {
