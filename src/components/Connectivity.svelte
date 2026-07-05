@@ -1,5 +1,6 @@
 <script lang="ts">
   import { device, configureNetwork } from '../lib/device.svelte.js'
+  import { getOrCreateOperator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
   import { DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS } from '../lib/wizard.js'
   import PasswordReveal from './PasswordReveal.svelte'
@@ -38,6 +39,11 @@
       password,
       relays: mode === 'wifi' ? relays : [],
       mode,
+      // The firmware stores the whole config verbatim, so an omitted op_mgmt
+      // wipes the operator key and disables WiFi management. Always carry this
+      // browser's operator (as the flasher does) so a network edit keeps — or
+      // restores — the ability to manage over the relay.
+      op_mgmt: getOrCreateOperator().pubHex,
     }
     if (mode === 'wifi' && (!cfg.ssid || cfg.relays.length === 0)) {
       status = 'error'
