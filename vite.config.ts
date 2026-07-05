@@ -1,10 +1,19 @@
 import { readFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { defineConfig, type Plugin } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 // App version, surfaced in the UI so a tester can confirm which build they're on
 // (a stale tab runs old JS until a hard reload).
 const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
+
+// The short commit this build was cut from — shown next to the version so
+// "did my change actually deploy?" is answerable at a glance, without bumping
+// the package version every time. Falls back to a marker off a git checkout.
+const BUILD = (() => {
+  try { return execSync('git rev-parse --short HEAD').toString().trim() }
+  catch { return 'local' }
+})()
 
 // Content-Security-Policy for the deployed app. Locks every resource-load vector
 // to our own origin so no third party (fonts, scripts, images, frames) can ever
@@ -43,6 +52,7 @@ function cspPlugin(): Plugin {
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __BUILD__: JSON.stringify(BUILD),
   },
   plugins: [svelte(), cspPlugin()],
   // Relative base so the same build works at GitHub Pages' /sapwood/ subpath

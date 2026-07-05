@@ -93,7 +93,7 @@
     {/if}
   {/if}
 
-  <p class="version">Sapwood app v{__APP_VERSION__}</p>
+  <p class="version">Sapwood app v{__APP_VERSION__} · {__BUILD__}</p>
 </main>
 
 <style>

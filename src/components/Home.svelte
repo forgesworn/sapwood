@@ -96,6 +96,16 @@
     finally { updatingSlot = null }
   }
 
+  // Auto-approve vs ask-each-time. This is also what lets an app read messages:
+  // the signer refuses decrypt for an "ask each time" app (it can't safely
+  // button-gate a stream of decryptions), so a DM-reading app needs this on.
+  async function setAuto(slotIndex: number, auto: boolean) {
+    updatingSlot = slotIndex
+    try { await mgmtUpdateClient(slotIndex, { auto_approve: auto }) }
+    catch (e) { device.error = e instanceof Error ? e.message : 'Update failed' }
+    finally { updatingSlot = null }
+  }
+
   // Re-hand an app its connection link before it has connected. Over USB the
   // firmware re-issues it; over WiFi it comes from this session's cache.
   let copiedSlot = $state<number | null>(null)
@@ -409,14 +419,28 @@
         <div class="card app-card">
           <div class="app-row">
             <div class="app-info">
-              <span class="app-name">{slot.label || `app ${slot.slot_index}`}</span>
+              <span class="app-name">
+                {slot.label || `app ${slot.slot_index}`}
+                {#if slot.current_pubkey}
+                  <span class="app-badge" class:auto={slot.signing_approved && slot.auto_approve}
+                    class:ask={slot.signing_approved && !slot.auto_approve}>
+                    {#if !slot.signing_approved}connected
+                    {:else if slot.auto_approve}automatic
+                    {:else}asks each time{/if}
+                  </span>
+                {:else}
+                  <span class="app-badge waiting">waiting</span>
+                {/if}
+              </span>
               <span class="app-state">
                 {#if !slot.current_pubkey}
-                  waiting to connect
-                {:else if slot.signing_approved}
-                  can sign
+                  Waiting for the app to connect with the link.
+                {:else if !slot.signing_approved}
+                  Connected, but not allowed to sign yet.
+                {:else if slot.auto_approve}
+                  Signs and reads for you without asking.
                 {:else}
-                  connected · not yet allowed to sign
+                  Prompts on the signer for each action. Can't read messages until set to automatic.
                 {/if}
               </span>
             </div>
@@ -429,6 +453,12 @@
               {#if slot.current_pubkey && !slot.signing_approved && canApprove}
                 <button class="btn btn-secondary btn-sm allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot.slot_index)}>
                   {busySlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
+                </button>
+              {/if}
+              {#if slot.current_pubkey && slot.signing_approved && canManageInline}
+                <button class="btn btn-secondary btn-sm" disabled={updatingSlot === slot.slot_index}
+                  onclick={() => setAuto(slot.slot_index, !slot.auto_approve)}>
+                  {updatingSlot === slot.slot_index ? 'Saving…' : slot.auto_approve ? 'Ask each time' : 'Make automatic'}
                 </button>
               {/if}
               <ConfirmButton
@@ -590,7 +620,15 @@
   .app-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   .app-info { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
   .app-name { font-size: 0.98rem; font-weight: 600; color: #fff; }
-  .app-state { font-size: 0.78rem; color: var(--text-muted); }
+  .app-badge {
+    display: inline-block; font-size: 0.58rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
+    border-radius: 3px; padding: 0.08rem 0.4rem; margin-left: 0.5rem; vertical-align: middle;
+    border: 1px solid var(--border-bright); color: var(--text-muted);
+  }
+  .app-badge.auto { color: var(--green); border-color: var(--green-dim); background: #08130d; }
+  .app-badge.ask { color: #cba24a; border-color: #5a4a20; background: #120f06; }
+  .app-badge.waiting { color: var(--text-dim); }
+  .app-state { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
   .app-actions { display: flex; gap: 0.4rem; flex-shrink: 0; align-items: center; }
   .allow { color: var(--green); border-color: var(--green-dim); }
   .allow:hover:not(:disabled) { background: #002a12; border-color: var(--green); }
