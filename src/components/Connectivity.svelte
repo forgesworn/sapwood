@@ -5,11 +5,24 @@
   import PasswordReveal from './PasswordReveal.svelte'
   import RelayEditor from './RelayEditor.svelte'
 
+  // The firmware exposes no read-back for the network config, so the signer's
+  // relays as flashed (persisted by the flasher) are the best local truth. Start
+  // from those, not the hardcoded defaults — otherwise the panel always shows
+  // defaults and a saved edit reads as reverted ("it didn't stick").
+  function savedRelays(): string[] {
+    try {
+      const raw = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
+      const list = Array.isArray(raw) ? raw.filter((r): r is string => typeof r === 'string' && !!r) : []
+      if (list.length) return list
+    } catch { /* fall through to defaults */ }
+    return [...DEFAULT_SIGNER_RELAYS]
+  }
+
   let mode = $state<'usb' | 'wifi'>('wifi')
   let ssid = $state('')
   let password = $state('')
   let showPw = $state(false)
-  let relays = $state<string[]>([...DEFAULT_SIGNER_RELAYS])
+  let relays = $state<string[]>(savedRelays())
   let status = $state<'idle' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
 
@@ -35,6 +48,12 @@
       const ok = await configureNetwork(cfg)
       status = ok ? 'done' : 'error'
       message = ok ? 'Saved. Re-plug power to apply.' : 'Device rejected the config'
+      // Remember the relays we just wrote so the panel reflects them next time
+      // and the USB bunker-URI builder (serialGetUri reads lastRelays) hands out
+      // links that name them.
+      if (ok && mode === 'wifi') {
+        try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(relays)) } catch { /* ignore */ }
+      }
     } catch (e) {
       status = 'error'
       message = e instanceof Error ? e.message : String(e)
@@ -89,6 +108,8 @@
           onchange={(next) => (relays = next)}
         />
       </div>
+      <p class="hint-sm">Saving rewrites the whole network config, so enter the WiFi name and password
+        as well, even to change only the relays. The signer applies it after you re-plug its power.</p>
     {/if}
 
     <button
