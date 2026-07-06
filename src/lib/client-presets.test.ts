@@ -32,11 +32,12 @@ describe('resolveKinds', () => {
     expect(resolveKinds('everything')).toBeNull()
   })
 
-  it('posting allows notes/reactions/reposts/articles but not profile or contacts', () => {
+  it('posting allows social posting and app settings but not profile or contacts', () => {
     const kinds = resolveKinds('posting')!
     expect(kinds).toContain(1) // note
     expect(kinds).toContain(7) // reaction
     expect(kinds).toContain(30023) // article
+    expect(kinds).toContain(30078) // app data / client settings
     expect(kinds).not.toContain(0) // profile
     expect(kinds).not.toContain(3) // contacts
   })

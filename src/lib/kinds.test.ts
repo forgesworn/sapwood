@@ -61,9 +61,9 @@ describe('COMMON_KINDS data integrity', () => {
   })
 
   it('groups every entry under a category the permissions UI renders', () => {
-    // KindPermissions.svelte buckets by these five categories; a kind tagged
+    // KindPermissions.svelte buckets by these categories; a kind tagged
     // with any other category would vanish from that UI.
-    const shown = new Set(['identity', 'social', 'crypto', 'payment', 'relay'])
+    const shown = new Set(['identity', 'social', 'app', 'crypto', 'payment', 'relay'])
     for (const k of COMMON_KINDS) {
       expect(shown.has(k.category), `kind ${k.kind} has unshown category ${k.category}`).toBe(true)
     }

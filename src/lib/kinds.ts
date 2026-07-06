@@ -4,7 +4,7 @@ export interface KindInfo {
   kind: number
   label: string
   risk: 'low' | 'medium' | 'high'
-  category: 'signing' | 'crypto' | 'identity' | 'social' | 'payment' | 'relay'
+  category: 'signing' | 'crypto' | 'identity' | 'social' | 'app' | 'payment' | 'relay'
 }
 
 // Kinds that users are most likely to encounter and want to control.
@@ -20,6 +20,9 @@ export const COMMON_KINDS: KindInfo[] = [
   { kind: 7,     label: 'Reaction',     risk: 'low',    category: 'social' },
   { kind: 5,     label: 'Delete',       risk: 'medium', category: 'social' },
   { kind: 30023, label: 'Article',      risk: 'medium', category: 'social' },
+
+  // App-local state -- common Nostr clients use this for settings/feed sync.
+  { kind: 30078, label: 'App Data',     risk: 'medium', category: 'app' },
 
   // Encrypted messages
   { kind: 4,     label: 'DM (NIP-04)',  risk: 'medium', category: 'crypto' },

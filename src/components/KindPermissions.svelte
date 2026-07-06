@@ -22,6 +22,7 @@
   const categories: { label: string; kinds: KindInfo[] }[] = [
     { label: 'IDENTITY', kinds: COMMON_KINDS.filter(k => k.category === 'identity') },
     { label: 'SOCIAL', kinds: COMMON_KINDS.filter(k => k.category === 'social') },
+    { label: 'APP', kinds: COMMON_KINDS.filter(k => k.category === 'app') },
     { label: 'ENCRYPTED', kinds: COMMON_KINDS.filter(k => k.category === 'crypto') },
     { label: 'PAYMENTS', kinds: COMMON_KINDS.filter(k => k.category === 'payment') },
     { label: 'RELAY', kinds: COMMON_KINDS.filter(k => k.category === 'relay') },

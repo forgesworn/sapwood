@@ -55,7 +55,7 @@ describe('ConnectApp — happy path', () => {
     // Created once, pre-approving signing (relay authority), then restricted to posting kinds.
     expect(mockCreate).toHaveBeenCalledTimes(1)
     expect(mockCreate).toHaveBeenCalledWith('Damus on my phone', true)
-    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [1, 5, 6, 7, 30023] })
+    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [1, 5, 6, 7, 30023, 30078] })
   })
 
   it('applies a kind limit when a restricting preset is chosen', async () => {
