@@ -240,7 +240,7 @@
         <button class="btn btn-secondary copy-link" class:copied onclick={copyLink}>{copied ? 'Link copied ✓' : 'Copy link'}</button>
         <p class="hint-sm">Treat this link like a password: it lets this one app connect and sign within
           the permissions you set, nothing else on your signer. You can copy it again from the app's
-          card below until it connects.</p>
+          card below; the signer remembers each client key that connects with it.</p>
       {:else}
         <p class="warn-text">
           Created, but the link names no relay, so a remote app like Primal cannot reach the signer

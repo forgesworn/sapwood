@@ -60,6 +60,7 @@
     const pubkeys = [
       ...device.pendingClients.map((p) => p.pubkey),
       ...device.slots.map((s) => s.current_pubkey).filter((pk): pk is string => !!pk),
+      ...device.slots.flatMap((s) => s.authorized_pubkeys ?? []),
     ]
     if (pubkeys.length) ensureProfiles(pubkeys)
   })
@@ -167,17 +168,17 @@
     uriError = null
     try { uriValue = await mgmtClientUri(slot.slot_index) }
     catch {
-      // Older WiFi firmware cannot re-show a missed pending link. Say so on the
-      // card rather than flashing a global error, and let the operator mint a fresh one.
+      // Older WiFi firmware may not be able to re-show a link after a reload.
+      // Current firmware can reissue it because the slot secret is reusable.
       uriError = slot.current_pubkey
-        ? 'This app has already connected, so its pairing link is spent. Disconnect it first if you need to pair again.'
+        ? 'This firmware could not reissue the link. Update the signer, or create a fresh connection for this app.'
         : 'This pending link could not be fetched from the signer. Create a fresh one to finish pairing.'
     }
   }
 
-  // Mint a replacement pairing link for a slot whose one-time link is gone
-  // (WiFi, post-reload). Preserves the name, permissions and signing setting,
-  // then removes the stale pending slot. The fresh link surfaces in the
+  // Mint a replacement pairing link for a slot whose link cannot be fetched
+  // (older WiFi firmware, post-reload). Preserves the name, permissions and
+  // signing setting, then removes the stale pending slot. The fresh link surfaces in the
   // "Connection ready" box above, ready to copy into the app.
   async function replaceLink(slot: ConnectSlot) {
     replacingSlot = slot.slot_index
@@ -217,6 +218,13 @@
 
   function shortPubkey(hex: string): string {
     return hex.slice(0, 8) + ' · ' + hex.slice(-8)
+  }
+
+  function connectedKeyCount(slot: ConnectSlot): number {
+    return new Set([
+      ...(slot.current_pubkey ? [slot.current_pubkey] : []),
+      ...(slot.authorized_pubkeys ?? []),
+    ]).size
   }
 
   function timeAgo(iso: string): string {
@@ -369,6 +377,9 @@
               {#if slot.current_pubkey}
                 {@const pname = profileName(slot.current_pubkey)}
                 <span class="app-pk" title="slot {slot.slot_index}">{shortPubkey(slot.current_pubkey)}</span>
+                {#if connectedKeyCount(slot) > 1}
+                  <span class="app-pk">{connectedKeyCount(slot)} client keys remembered</span>
+                {/if}
                 {#if pname}<span class="profile-name">{pname}</span>{/if}
               {:else}
                 <span class="app-pk waiting">waiting for the app to connect</span>
@@ -414,6 +425,7 @@
                 {copied === `slot-${slot.slot_index}` ? 'Copied ✓' : 'Copy'}
               </button>
             </div>
+            <p class="hint-sm slot-uri-note">This link is reusable for this app slot. The signer remembers each client key that connects with it.</p>
           {:else if uriForSlot === slot.slot_index && uriValue}
             <div class="link-gone">
               <p class="warn-text no-gap">This link names no relay, so a remote app cannot reach the
@@ -509,6 +521,7 @@
   .allow:hover:not(:disabled) { background: #002a12; border-color: var(--green); }
 
   .slot-uri { margin-top: 0.75rem; }
+  .slot-uri-note { margin-top: 0.45rem; }
   .link-gone { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; }
 
   .empty.centred { text-align: center; padding: 2rem 0; }

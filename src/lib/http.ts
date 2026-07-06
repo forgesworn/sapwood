@@ -318,6 +318,7 @@ export class HttpTransport {
         label: ((_info as Record<string, unknown>).label as string) ?? pubkey.slice(0, 8),
         secret: '',
         current_pubkey: pubkey,
+        authorized_pubkeys: [pubkey],
         allowed_methods: ((_info as Record<string, unknown>).allowed_methods as string[]) ?? ['sign_event'],
         allowed_kinds: ((_info as Record<string, unknown>).allowedKinds as number[]) ?? ((_info as Record<string, unknown>).allowed_kinds as number[]) ?? [],
         auto_approve: true,

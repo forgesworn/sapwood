@@ -8,6 +8,7 @@ export interface ConnectSlot {
   // secret is redacted in list responses (empty string)
   secret: string
   current_pubkey: string | null
+  authorized_pubkeys?: string[]
   allowed_methods: string[]
   allowed_kinds: number[]
   auto_approve: boolean

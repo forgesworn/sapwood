@@ -255,6 +255,15 @@ describe('identity card auto-sync on serial master list', () => {
               preview: '{"name":"alice"}',
               outcome: 'signed',
             },
+            {
+              seq: 2,
+              method: 'nip04_decrypt',
+              label: 'Primal',
+              client: 'b'.repeat(64),
+              kind: null,
+              preview: 'peer 12345678 - content redacted',
+              outcome: 'ok',
+            },
           ],
         }
       }
@@ -265,6 +274,42 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       expect(device.logs.join('\n')).toContain('sign_event signed: Profile (0) for Primal')
+      expect(device.logs.join('\n')).toContain('nip04_decrypt ok for Primal')
+      expect(device.logs.join('\n')).toContain('peer 12345678 - content redacted')
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('maps remembered client pubkeys from relay slot listings', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') {
+        return {
+          clients: [
+            {
+              slot_index: 0,
+              label: 'Primal',
+              current_pubkey: 'a'.repeat(64),
+              authorized_pubkeys: ['a'.repeat(64), 'b'.repeat(64)],
+              allowed_methods: ['sign_event', 'nip04_decrypt'],
+              allowed_kinds: [30078],
+              auto_approve: true,
+              signing_approved: true,
+            },
+          ],
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      expect(device.slots[0]?.authorized_pubkeys).toEqual(['a'.repeat(64), 'b'.repeat(64)])
     } finally {
       await disconnect()
     }

@@ -455,6 +455,9 @@ async function relayRefresh() {
       label: String(c.label ?? ''),
       secret: '',
       current_pubkey: (c.current_pubkey as string | null) ?? null,
+      authorized_pubkeys: Array.isArray(c.authorized_pubkeys)
+        ? c.authorized_pubkeys.filter((pk): pk is string => typeof pk === 'string')
+        : [],
       allowed_methods: (c.allowed_methods as string[]) ?? [],
       allowed_kinds: (c.allowed_kinds as number[]) ?? [],
       auto_approve: Boolean(c.auto_approve),
@@ -486,14 +489,19 @@ function appendRelayAudit(entries: RelayAuditEntry[]) {
     const seq = Number(entry.seq ?? 0)
     if (!Number.isFinite(seq) || seq <= lastRelayAuditSeq) continue
     lastRelayAuditSeq = Math.max(lastRelayAuditSeq, seq)
-    const kind = Number(entry.kind)
-    const kindText = Number.isFinite(kind) ? kindLabel(kind) : 'event'
+    const method = typeof entry.method === 'string' && entry.method ? entry.method : 'sign_event'
+    const rawKind = entry.kind
+    const kind = typeof rawKind === 'number' || typeof rawKind === 'string' ? Number(rawKind) : NaN
+    const kindText = Number.isFinite(kind) ? `${kindLabel(kind)} ` : ''
     const outcome = typeof entry.outcome === 'string' && entry.outcome ? entry.outcome : 'handled'
     const label = typeof entry.label === 'string' && entry.label ? entry.label : ''
     const client = typeof entry.client === 'string' && entry.client ? entry.client.slice(0, 8) : ''
     const who = label || (client ? `client ${client}` : 'unknown app')
     const preview = typeof entry.preview === 'string' && entry.preview ? ` — ${entry.preview}` : ''
-    addLog(`sign_event ${outcome}: ${kindText} for ${who}${preview}`)
+    const line = kindText
+      ? `${method} ${outcome}: ${kindText}for ${who}${preview}`
+      : `${method} ${outcome} for ${who}${preview}`
+    addLog(line)
   }
 }
 
@@ -979,8 +987,9 @@ export async function mgmtNostrconnect(params: {
 
 /**
  * Re-fetch a slot's bunker link. Over USB/HTTP the signer or bridge re-issues it
- * directly. Over WiFi, use the current-session cache first, then ask updated
- * firmware to re-issue a still-pending slot over authenticated management.
+ * directly. Over WiFi, use the current-session cache first, then ask firmware
+ * to re-issue the slot URI over authenticated management. A slot URI is a
+ * reusable credential; the signer remembers multiple client keys for the slot.
  */
 export async function mgmtClientUri(slotIndex: number): Promise<string> {
   try {
@@ -997,7 +1006,7 @@ export async function mgmtClientUri(slotIndex: number): Promise<string> {
       return uri
     }
   }
-  throw new Error('This connection link is only shown once. Recreate the connection to get a new one.')
+  throw new Error('Could not fetch this connection link from the signer. Refresh the signer or create a fresh connection.')
 }
 
 export async function mgmtRevokeClient(slotIndex: number): Promise<void> {
