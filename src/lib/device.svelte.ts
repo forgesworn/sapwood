@@ -374,6 +374,9 @@ let lastRelayAuditSeq = 0
 // must outwait that window, or a create/update issued while a signature is
 // pending reports a spurious "timeout" (and a create loses its one-shot link).
 const MGMT_WRITE_TIMEOUT_MS = 35_000
+const RELAY_STATUS_TIMEOUT_MS = 75_000
+const RELAY_POLL_MS = 4_000
+let lastRelayRefreshLog = ''
 
 /**
  * Connect to a wifi-standalone device over its relay, as the operator.
@@ -408,7 +411,7 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
       return
     }
     void relayRefresh()
-  }, 4000)
+  }, RELAY_POLL_MS)
 }
 
 /** Refresh masters (get_status) and clients (list_clients) over the relay.
@@ -420,7 +423,7 @@ async function relayRefresh() {
   if (!relayTransport || relayRefreshing) return
   relayRefreshing = true
   try {
-    const raw = await relayTransport.request('get_status')
+    const raw = await relayTransport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
     appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
     const status: RelayStatus = {
       master_count: Number(raw.master_count ?? 0),
@@ -445,7 +448,7 @@ async function relayRefresh() {
     // Knowing the master npub is all we need to dress the signer's screen —
     // over the relay too (firmware ≥0.9.12 accepts set_identity_meta).
     if (device.masters.length > 0) void autoSyncIdentityMeta()
-    const res = await relayTransport.request('list_clients')
+    const res = await relayTransport.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
     const clients = (res.clients as Array<Record<string, unknown>>) ?? []
     device.slots = clients.map((c) => ({
       slot_index: Number(c.slot_index),
@@ -458,11 +461,24 @@ async function relayRefresh() {
       signing_approved: Boolean(c.signing_approved),
     }))
     device.error = null
+    lastRelayRefreshLog = ''
   } catch (e) {
-    device.error = e instanceof Error ? e.message : 'Relay request failed'
+    const message = e instanceof Error ? e.message : 'Relay request failed'
+    device.error = message
+    logRelayRefreshIssue(message)
   } finally {
     relayRefreshing = false
   }
+}
+
+function logRelayRefreshIssue(message: string) {
+  const timedOut = /timeout waiting for device \((get_status|list_clients)\)/i.test(message)
+  const line = timedOut
+    ? `WiFi status read timed out; signer may be busy signing or reconnecting. Signed-event audit will appear after the next successful refresh. (${message})`
+    : `WiFi status refresh failed: ${message}`
+  if (line === lastRelayRefreshLog) return
+  lastRelayRefreshLog = line
+  addLog(line)
 }
 
 function appendRelayAudit(entries: RelayAuditEntry[]) {
@@ -526,6 +542,11 @@ export async function relayUpdateClient(
   await relayRefresh()
 }
 
+export async function refreshRelayAudit(): Promise<void> {
+  if (device.mode !== 'relay') throw new Error('Connect over WiFi to refresh signer audit.')
+  await relayRefresh()
+}
+
 export async function disconnect() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   device.slotUris = {} // session-only links; don't carry them to the next signer
@@ -539,6 +560,7 @@ export async function disconnect() {
     relayTransport = null
     relayRefreshing = false // let the next connection's first refresh run
     lastRelayAuditSeq = 0
+    lastRelayRefreshLog = ''
     device.connected = false
     device.mode = 'none'
     device.portInfo = ''

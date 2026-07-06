@@ -44,7 +44,7 @@ vi.mock('./relay-transport.js', () => ({
   },
 }))
 
-import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, mgmtClientUri, connectRelay, disconnect } from './device.svelte.js'
+import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, mgmtClientUri, connectRelay, disconnect, refreshRelayAudit } from './device.svelte.js'
 import { FrameType } from './frame.js'
 import type { MasterInfo } from './types.js'
 
@@ -265,6 +265,51 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       expect(device.logs.join('\n')).toContain('sign_event signed: Profile (0) for Primal')
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('uses the long relay status timeout when refreshing signing audit', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return {
+          master_count: 1,
+          master_npub_hex: pubHex,
+          mode: 'wifi-standalone',
+          relay: 'wss://r',
+          audit: [],
+        }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    relayRequestMock.mockClear()
+    try {
+      await refreshRelayAudit()
+      expect(relayRequestMock).toHaveBeenCalledWith('get_status', {}, 75_000)
+      expect(relayRequestMock).toHaveBeenCalledWith('list_clients', {}, 75_000)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('logs relay status timeouts so a busy signer is visible', async () => {
+    const { pubHex } = freshMaster()
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') throw new Error('timeout waiting for device (get_status)')
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      expect(device.logs.join('\n')).toContain('WiFi status read timed out; signer may be busy signing or reconnecting.')
+      expect(device.logs.join('\n')).toContain('timeout waiting for device (get_status)')
     } finally {
       await disconnect()
     }

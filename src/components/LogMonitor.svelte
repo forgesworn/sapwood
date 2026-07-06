@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { device } from '../lib/device.svelte.js'
+  import { device, refreshRelayAudit } from '../lib/device.svelte.js'
 
   let autoScroll = $state(true)
+  let refreshing = $state(false)
+  let refreshError = $state<string | null>(null)
   let logEl: HTMLPreElement
 
   $effect(() => {
@@ -19,6 +21,19 @@
 
   function clearLogs() {
     device.logs = []
+    refreshError = null
+  }
+
+  async function refreshLogs() {
+    refreshError = null
+    refreshing = true
+    try {
+      await refreshRelayAudit()
+    } catch (e) {
+      refreshError = e instanceof Error ? e.message : 'Refresh failed'
+    } finally {
+      refreshing = false
+    }
   }
 </script>
 
@@ -27,9 +42,15 @@
     <h2 class="section-title">Device Log</h2>
     <div class="controls">
       <span class="count">{device.logs.length} lines</span>
+      <button class="btn btn-secondary btn-sm" disabled={refreshing || device.mode !== 'relay'} onclick={refreshLogs}>
+        {refreshing ? 'Refreshing...' : 'Refresh'}
+      </button>
       <button class="btn btn-secondary btn-sm" onclick={clearLogs}>Clear</button>
     </div>
   </div>
+  {#if refreshError}
+    <p class="refresh-error">{refreshError}</p>
+  {/if}
 
   <pre class="log" bind:this={logEl} onscroll={handleScroll}>
     {#if device.logs.length === 0}
@@ -53,6 +74,11 @@
   .header-row .section-title { margin: 0; }
   .controls { display: flex; gap: 0.5rem; align-items: center; }
   .count { font-size: 0.7rem; color: #555; }
+  .refresh-error {
+    color: var(--amber);
+    font-size: 0.8rem;
+    margin: 0 0 0.5rem;
+  }
 
   .log {
     background: #0a0a0a;
