@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { COMMON_KINDS, type KindInfo } from '../lib/kinds.js'
+  import { COMMON_KINDS, kindLabel, type KindInfo } from '../lib/kinds.js'
 
   // Three-state permission model per kind (when signing_approved is true):
   //   'auto'   = kind in allowed_kinds → sign immediately (green)
@@ -18,6 +18,10 @@
   let { allowedKinds, unrestricted, signingApproved, updating, onchange }: Props = $props()
 
   let expanded = $state(false)
+  let customKind = $state('')
+  let customError = $state<string | null>(null)
+
+  const commonKindSet = new Set(COMMON_KINDS.map(k => k.kind))
 
   const categories: { label: string; kinds: KindInfo[] }[] = [
     { label: 'IDENTITY', kinds: COMMON_KINDS.filter(k => k.category === 'identity') },
@@ -48,9 +52,35 @@
     }
   }
 
+  function parseKind(value: string): number | null {
+    const trimmed = value.trim()
+    if (!/^\d+$/.test(trimmed)) return null
+    const kind = Number(trimmed)
+    return Number.isSafeInteger(kind) ? kind : null
+  }
+
+  function addCustomKind() {
+    const kind = parseKind(customKind)
+    if (kind === null) {
+      customError = 'Enter a kind number'
+      return
+    }
+    customKind = ''
+    customError = null
+    if (unrestricted) return
+    if (allowedKinds.includes(kind)) return
+    onchange([...allowedKinds, kind].sort((a, b) => a - b))
+  }
+
   function allowAll() {
     onchange(null as unknown as number[])
   }
+
+  const customAllowedKinds = $derived(
+    unrestricted
+      ? []
+      : allowedKinds.filter(k => !commonKindSet.has(k)).sort((a, b) => a - b)
+  )
 
   const promptCount = $derived(
     unrestricted ? 0 : COMMON_KINDS.filter(k => !allowedKinds.includes(k.kind)).length
@@ -102,7 +132,36 @@
             </button>
           {/each}
         {/each}
+        {#each customAllowedKinds as kind}
+          <button
+            class="kind-chip allowed"
+            onclick={() => toggle(kind)}
+            title="{kindLabel(kind)}: auto-sign"
+          >
+            <span class="chip-dot" style="background: var(--green)"></span>
+            {kindLabel(kind)}
+          </button>
+        {/each}
       </div>
+
+      {#if !unrestricted}
+        <div class="custom-kind">
+          <input
+            class="custom-kind-input"
+            value={customKind}
+            placeholder="Kind number"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            aria-label="Kind number"
+            oninput={(e) => { customKind = (e.target as HTMLInputElement).value; customError = null }}
+            onkeydown={(e) => { if (e.key === 'Enter') addCustomKind() }}
+          />
+          <button class="btn btn-secondary btn-sm" disabled={!customKind.trim()} onclick={addCustomKind}>Add kind</button>
+        </div>
+        {#if customError}
+          <div class="custom-kind-error">{customError}</div>
+        {/if}
+      {/if}
 
       <div class="perms-legend">
         <span class="legend-item"><span class="legend-dot" style="background: var(--green)"></span>Auto-sign</span>
@@ -231,6 +290,39 @@
     height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
+  }
+
+  .custom-kind {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    align-items: center;
+  }
+
+  .custom-kind-input {
+    min-width: 8.5rem;
+    max-width: 12rem;
+    flex: 1 1 8.5rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0 0.6rem;
+  }
+
+  .custom-kind-input:focus {
+    outline: none;
+    border-color: #444;
+  }
+
+  .custom-kind-error {
+    margin-top: 0.3rem;
+    color: var(--red);
+    font-size: 0.75rem;
   }
 
   /* Legend */
