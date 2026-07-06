@@ -44,18 +44,18 @@ describe('ConnectApp — happy path', () => {
     expect((screen.getByText('Continue') as HTMLButtonElement).disabled).toBe(false)
     await fireEvent.click(screen.getByText('Continue'))
 
-    // Permissions step, default "everything" → create
-    expect(screen.getByText('Everything')).toBeTruthy()
+    // Permissions step, default "posting only" → create
+    expect(screen.getByText('Posting only')).toBeTruthy()
     await fireEvent.click(screen.getByText('Create connection'))
 
     // Lands on the result with a scannable QR
     expect(await screen.findByText('Connection ready')).toBeTruthy()
     expect(container.querySelector('.qr svg')).toBeTruthy()
 
-    // Created once, pre-approving signing (relay authority); no kind limit applied for "everything"
+    // Created once, pre-approving signing (relay authority), then restricted to posting kinds.
     expect(mockCreate).toHaveBeenCalledTimes(1)
     expect(mockCreate).toHaveBeenCalledWith('Damus on my phone', true)
-    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [1, 5, 6, 7, 30023] })
   })
 
   it('applies a kind limit when a restricting preset is chosen', async () => {

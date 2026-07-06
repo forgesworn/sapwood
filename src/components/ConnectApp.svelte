@@ -28,7 +28,7 @@
   let open = $state(false)
   let step = $state<ConnectStep | 'nc-paste' | 'nc-done'>('name')
   let name = $state('')
-  let presetId = $state<PresetId>('everything')
+  let presetId = $state<PresetId>('posting')
   let customKinds = $state<number[]>([])
   let creating = $state(false)
   let error = $state<string | null>(null)
@@ -54,7 +54,7 @@
   function reset() {
     step = 'name'
     name = ''
-    presetId = 'everything'
+    presetId = 'posting'
     customKinds = []
     error = null
     permNote = null

@@ -167,11 +167,11 @@
     uriError = null
     try { uriValue = await mgmtClientUri(slot.slot_index) }
     catch {
-      // Over WiFi a reload leaves no link to re-show. Say so on the card rather
-      // than flashing a global error, and let the operator mint a fresh one.
+      // Older WiFi firmware cannot re-show a missed pending link. Say so on the
+      // card rather than flashing a global error, and let the operator mint a fresh one.
       uriError = slot.current_pubkey
         ? 'This app has already connected, so its pairing link is spent. Disconnect it first if you need to pair again.'
-        : 'This link was shown once and cannot be re-issued over WiFi. Create a fresh one to finish pairing.'
+        : 'This pending link could not be fetched from the signer. Create a fresh one to finish pairing.'
     }
   }
 

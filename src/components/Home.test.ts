@@ -19,6 +19,7 @@ vi.mock('../lib/device.svelte.js', () => ({
   mgmtApproveSigning: vi.fn().mockResolvedValue(undefined),
   mgmtRevokeClient: vi.fn().mockResolvedValue(undefined),
   mgmtUpdateClient: vi.fn().mockResolvedValue(undefined),
+  mgmtClientUri: vi.fn().mockResolvedValue('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret'),
   mgmtCanApproveSigning: vi.fn(() => true),
   getFirmwareVersion: vi.fn().mockResolvedValue(null),
   // Pulled in transitively by FirstIdentity (rendered only in the no-master case).

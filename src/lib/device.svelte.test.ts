@@ -44,7 +44,7 @@ vi.mock('./relay-transport.js', () => ({
   },
 }))
 
-import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, connectRelay, disconnect } from './device.svelte.js'
+import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, mgmtClientUri, connectRelay, disconnect } from './device.svelte.js'
 import { FrameType } from './frame.js'
 import type { MasterInfo } from './types.js'
 
@@ -232,6 +232,62 @@ describe('identity card auto-sync on serial master list', () => {
       expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48)
     } finally {
       await disconnect() // clears the 4s status poll
+    }
+  })
+
+  it('adds signer audit entries from relay status to the log', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return {
+          master_count: 1,
+          master_npub_hex: pubHex,
+          mode: 'wifi-standalone',
+          relay: 'wss://r',
+          audit: [
+            {
+              seq: 1,
+              method: 'sign_event',
+              label: 'Primal',
+              client: 'a'.repeat(64),
+              kind: 0,
+              preview: '{"name":"alice"}',
+              outcome: 'signed',
+            },
+          ],
+        }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      expect(device.logs.join('\n')).toContain('sign_event signed: Profile (0) for Primal')
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('re-fetches a pending bunker URI over relay management when the session cache is empty', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'client_uri') return { bunker_uri: 'bunker://abc?relay=wss%3A%2F%2Fr&secret=secret' }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtClientUri(3)).resolves.toBe('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
+      expect(relayRequestMock).toHaveBeenCalledWith('client_uri', { slot_index: 3 }, 35_000)
+    } finally {
+      await disconnect()
     }
   })
 

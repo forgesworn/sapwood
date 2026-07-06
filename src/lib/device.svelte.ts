@@ -18,6 +18,7 @@ import { getOrCreateOperator } from './op-mgmt.js'
 import { rememberDevice, npubShort } from './known-devices.js'
 import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
+import { kindLabel } from './kinds.js'
 
 // --- Reactive state ---
 
@@ -29,6 +30,16 @@ export interface RelayStatus {
   slots: number
   mode: string
   relay: string
+}
+
+interface RelayAuditEntry {
+  seq?: unknown
+  method?: unknown
+  label?: unknown
+  client?: unknown
+  kind?: unknown
+  preview?: unknown
+  outcome?: unknown
 }
 
 export interface PendingClient {
@@ -44,9 +55,9 @@ export const device = $state({
   portInfo: '',
   masters: [] as MasterInfo[],
   slots: [] as ConnectSlot[],
-  /** Bunker links captured at create time, keyed by slot index. Over WiFi the
-   *  firmware never re-issues a link, so this in-memory copy is the only way to
-   *  re-hand it to an app that hasn't connected yet this session. */
+  /** Bunker links captured at create time, keyed by slot index. Updated WiFi
+   *  firmware can re-issue pending links over operator management; this cache
+   *  keeps the common same-session copy path instant. */
   slotUris: {} as Record<number, string>,
   pendingClients: [] as PendingClient[],
   approvals: [] as Record<string, unknown>[],
@@ -355,6 +366,7 @@ export async function connectHttp(address: string) {
 // --- Relay transport (wifi-standalone devices, kind 24134) ---
 
 let relayTransport: RelayTransport | null = null
+let lastRelayAuditSeq = 0
 
 // The signer's relay loop is single-threaded: a sign_event awaiting the physical
 // button parks it for up to APPROVAL_TIMEOUT_SECS (30s, see firmware
@@ -384,6 +396,7 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   device.slots = []
   device.relays = relays
   device.relayStatus = null
+  lastRelayAuditSeq = 0
   rememberDevice(devicePubHex, relays, label)
 
   // First load, then poll for live status/clients every 4s while connected.
@@ -408,6 +421,7 @@ async function relayRefresh() {
   relayRefreshing = true
   try {
     const raw = await relayTransport.request('get_status')
+    appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
     const status: RelayStatus = {
       master_count: Number(raw.master_count ?? 0),
       slots: Number(raw.slots ?? 0),
@@ -448,6 +462,22 @@ async function relayRefresh() {
     device.error = e instanceof Error ? e.message : 'Relay request failed'
   } finally {
     relayRefreshing = false
+  }
+}
+
+function appendRelayAudit(entries: RelayAuditEntry[]) {
+  for (const entry of entries) {
+    const seq = Number(entry.seq ?? 0)
+    if (!Number.isFinite(seq) || seq <= lastRelayAuditSeq) continue
+    lastRelayAuditSeq = Math.max(lastRelayAuditSeq, seq)
+    const kind = Number(entry.kind)
+    const kindText = Number.isFinite(kind) ? kindLabel(kind) : 'event'
+    const outcome = typeof entry.outcome === 'string' && entry.outcome ? entry.outcome : 'handled'
+    const label = typeof entry.label === 'string' && entry.label ? entry.label : ''
+    const client = typeof entry.client === 'string' && entry.client ? entry.client.slice(0, 8) : ''
+    const who = label || (client ? `client ${client}` : 'unknown app')
+    const preview = typeof entry.preview === 'string' && entry.preview ? ` — ${entry.preview}` : ''
+    addLog(`sign_event ${outcome}: ${kindText} for ${who}${preview}`)
   }
 }
 
@@ -508,6 +538,7 @@ export async function disconnect() {
     relayTransport?.close()
     relayTransport = null
     relayRefreshing = false // let the next connection's first refresh run
+    lastRelayAuditSeq = 0
     device.connected = false
     device.mode = 'none'
     device.portInfo = ''
@@ -925,10 +956,9 @@ export async function mgmtNostrconnect(params: {
 }
 
 /**
- * Re-fetch a slot's bunker link. Over USB the firmware re-issues it on demand;
- * the bridge can too. Over WiFi there is no re-issue path, so fall back to the
- * link captured when the connection was created this session. Throws with plain
- * guidance when no link can be produced (e.g. after a reload on WiFi).
+ * Re-fetch a slot's bunker link. Over USB/HTTP the signer or bridge re-issues it
+ * directly. Over WiFi, use the current-session cache first, then ask updated
+ * firmware to re-issue a still-pending slot over authenticated management.
  */
 export async function mgmtClientUri(slotIndex: number): Promise<string> {
   try {
@@ -937,6 +967,14 @@ export async function mgmtClientUri(slotIndex: number): Promise<string> {
   } catch { /* fall through to the cached copy */ }
   const cached = device.slotUris[slotIndex]
   if (cached) return cached
+  if (device.mode === 'relay' && relayTransport) {
+    const res = await relayTransport.request('client_uri', { slot_index: slotIndex }, MGMT_WRITE_TIMEOUT_MS)
+    const uri = String(res.bunker_uri ?? '')
+    if (uri) {
+      device.slotUris[slotIndex] = uri
+      return uri
+    }
+  }
   throw new Error('This connection link is only shown once. Recreate the connection to get a new one.')
 }
 

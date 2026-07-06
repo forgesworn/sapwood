@@ -8,7 +8,7 @@
 // Pure data + mapping functions so the logic is exhaustively unit-testable with
 // no UI. Tone: plain, no jargon, no exclamation marks (house voice).
 
-export type PresetId = 'everything' | 'posting' | 'messaging' | 'custom'
+export type PresetId = 'posting' | 'everything' | 'messaging' | 'custom'
 
 export interface PermissionPreset {
   id: PresetId
@@ -24,16 +24,16 @@ export interface PermissionPreset {
 
 export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
   {
-    id: 'everything',
-    label: 'Everything',
-    description: 'Sign anything this app asks for. Best for a personal app you trust, like your main Nostr client.',
-    kinds: null,
-  },
-  {
     id: 'posting',
     label: 'Posting only',
     description: 'Notes, reactions, reposts and articles. Keeps an app to posting, so it cannot touch your profile or contacts.',
     kinds: [1, 5, 6, 7, 30023],
+  },
+  {
+    id: 'everything',
+    label: 'Everything',
+    description: 'Sign anything this app asks for. Use only for a personal app you trust with profile, contacts and relay-list changes.',
+    kinds: null,
   },
   {
     id: 'messaging',

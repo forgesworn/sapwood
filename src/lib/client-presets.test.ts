@@ -6,7 +6,7 @@ import {
 describe('permission presets', () => {
   it('exposes the four expected presets in order', () => {
     expect(PERMISSION_PRESETS.map((p) => p.id)).toEqual([
-      'everything', 'posting', 'messaging', 'custom',
+      'posting', 'everything', 'messaging', 'custom',
     ])
   })
 
@@ -23,7 +23,7 @@ describe('permission presets', () => {
   })
 
   it('presetById falls back to the first preset for an unknown id', () => {
-    expect(presetById('nope' as PresetId).id).toBe('everything')
+    expect(presetById('nope' as PresetId).id).toBe('posting')
   })
 })
 
