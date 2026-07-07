@@ -61,8 +61,9 @@
         <p class="hint-sm">Sapwood is asking on <code class="mono">{device.portInfo}</code>
           with operator key <code class="mono">{device.operatorPub}</code>.</p>
         <div class="restore-callout">
-          <strong>Restoring the matching operator key is the recovery path if this signer was flashed elsewhere.</strong>
-          Paste the recovery phrase in <a href="#operator-key">Operator key</a>, then reconnect over WiFi.
+          <strong>If Primal still signs, WiFi is alive and Sapwood is missing the management key.</strong>
+          Restore the matching recovery phrase in <a href="#operator-key">Operator key</a>, or connect
+          by USB and save Device &gt; Network to make this browser the management operator.
         </div>
         <details class="disclosure">
           <summary>Why this happens</summary>
@@ -72,7 +73,8 @@
               “WiFi-standalone mode — entering relay loop”).</li>
             <li><strong>Operator-key mismatch.</strong> The signer only accepts management signed by the
               operator key set when it was flashed. If this browser's key differs (flashed from a
-              different browser or machine, or storage was cleared), the signer silently ignores it.</li>
+              different browser or machine, or storage was cleared), the signer silently ignores it.
+              USB-saving Network rewrites that key on the signer.</li>
           </ul>
         </details>
       </div>

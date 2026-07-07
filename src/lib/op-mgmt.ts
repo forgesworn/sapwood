@@ -25,7 +25,9 @@
 // raw 32-byte secret with no phrase. Those keep working unchanged (so a device
 // already flashed with one is still manageable); they simply have no phrase to
 // write down until you rotate to a phrase-backed key (`regenerateOperator()`),
-// which mints a new key and needs a re-flash.
+// which mints a new key and needs a re-flash. If both old and new records are
+// present, the legacy secret wins: preserving access to already-flashed signers
+// matters more than surfacing a newer phrase that was never baked into them.
 
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
@@ -82,17 +84,17 @@ export function generateOperatorMnemonic(strength: 128 | 256 = 128): string {
  * Return the persisted operator key, creating + persisting a phrase-backed one
  * if none exists. Synchronous so existing call sites need no change.
  *
- * Precedence: a stored recovery phrase wins; otherwise a legacy raw-hex secret
- * is honoured unchanged; otherwise a new phrase-backed key is minted.
+ * Precedence: a legacy raw-hex secret is honoured unchanged; otherwise a stored
+ * recovery phrase wins; otherwise a new phrase-backed key is minted.
  */
 export function getOrCreateOperator(): Operator {
-  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
-  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
-    return operatorFromMnemonic(mnemonic)
-  }
   const legacy = localStorage.getItem(LS_SK) ?? ''
   if (/^[0-9a-f]{64}$/.test(legacy)) {
     return operatorFromSk(legacy)
+  }
+  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
+  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
+    return operatorFromMnemonic(mnemonic)
   }
   const fresh = generateOperatorMnemonic()
   localStorage.setItem(LS_MNEMONIC, fresh)
@@ -103,6 +105,8 @@ export function getOrCreateOperator(): Operator {
 /** The recovery phrase backing the current operator, or `null` for a legacy
  *  raw-hex key (which has no phrase to write down). */
 export function getOperatorMnemonic(): string | null {
+  const legacy = localStorage.getItem(LS_SK) ?? ''
+  if (/^[0-9a-f]{64}$/.test(legacy)) return null
   const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
   return mnemonic && validateMnemonic(mnemonic, wordlist) ? mnemonic : null
 }
@@ -111,12 +115,12 @@ export function getOperatorMnemonic(): string | null {
  *  Read-only: unlike `getOrCreateOperator` it never mints a key — used to
  *  detect whether an incoming import would overwrite an existing operator. */
 export function peekOperatorPubHex(): string | null {
+  const legacy = localStorage.getItem(LS_SK) ?? ''
+  if (/^[0-9a-f]{64}$/.test(legacy)) return pubFromSk(legacy)
   const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
   if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
     return operatorFromMnemonic(mnemonic).pubHex
   }
-  const legacy = localStorage.getItem(LS_SK) ?? ''
-  if (/^[0-9a-f]{64}$/.test(legacy)) return pubFromSk(legacy)
   return null
 }
 

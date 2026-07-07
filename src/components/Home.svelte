@@ -313,9 +313,11 @@
       <div class="operator-recovery">
         <p class="operator-recovery-title">Most important check: operator key</p>
         <p class="hint-sm">
-          Sapwood is signing management as <code>{currentOperator}</code>. If this signer was flashed
-          from another browser, or this browser storage was cleared, the signer will ignore this key.
-          Restore the operator recovery phrase created when this signer was flashed, then reconnect.
+          Sapwood is signing management as <code>{currentOperator}</code>. If Primal or another bunker
+          app still signs, the signer's WiFi and normal NIP-46 slot are alive; this screen is failing
+          on the separate Sapwood management key. Restore the operator recovery phrase created when
+          this signer was flashed, or connect by USB and save Device > Network to set this browser as
+          the management operator.
         </p>
         <div class="operator-recovery-actions">
           <button class="btn btn-warn btn-sm" onclick={() => onadvanced?.('identity')}>
@@ -338,7 +340,9 @@
             same one.</li>
           <li><strong>Operator-key mismatch.</strong> The signer only accepts management from the
             operator key set when it was flashed. If it was flashed from a different browser or
-            computer, this browser's key differs and the signer ignores it silently.</li>
+            computer, this browser's key differs and the signer ignores it silently. Plug in by USB
+            and save Device > Network if you want to replace the signer's management key with this
+            browser's key.</li>
         </ul>
       </details>
 

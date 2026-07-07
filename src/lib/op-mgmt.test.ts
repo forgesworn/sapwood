@@ -10,6 +10,7 @@ import {
   regenerateOperator,
   importOperatorMnemonic,
   importOperator,
+  peekOperatorPubHex,
 } from './op-mgmt.js'
 
 const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
@@ -64,13 +65,13 @@ describe('getOrCreateOperator', () => {
     expect(localStorage.getItem(LS_MNEMONIC)).toBeNull()
   })
 
-  it('prefers a stored phrase over a legacy raw-hex secret', () => {
+  it('preserves a legacy raw-hex secret when a phrase is also present', () => {
     const phrase = generateOperatorMnemonic()
     localStorage.setItem(LS_MNEMONIC, phrase)
     localStorage.setItem(LS_SK, 'b'.repeat(64))
     const op = getOrCreateOperator()
-    expect(op.mnemonic).toBe(phrase)
-    expect(op.skHex).not.toBe('b'.repeat(64))
+    expect(op.skHex).toBe('b'.repeat(64))
+    expect(op.mnemonic).toBeUndefined()
   })
 })
 
@@ -84,6 +85,20 @@ describe('getOperatorMnemonic', () => {
     localStorage.setItem(LS_SK, 'c'.repeat(64))
     getOrCreateOperator()
     expect(getOperatorMnemonic()).toBeNull()
+  })
+
+  it('returns null when a legacy raw-hex key masks a phrase', () => {
+    localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
+    localStorage.setItem(LS_SK, 'c'.repeat(64))
+    expect(getOperatorMnemonic()).toBeNull()
+  })
+})
+
+describe('peekOperatorPubHex', () => {
+  it('previews the same legacy key getOrCreateOperator will use', () => {
+    localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
+    localStorage.setItem(LS_SK, 'b'.repeat(64))
+    expect(peekOperatorPubHex()).toBe(getOrCreateOperator().pubHex)
   })
 })
 
