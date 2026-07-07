@@ -71,6 +71,36 @@ describe('ConnectApp — happy path', () => {
     expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [4, 1059] })
   })
 
+  it('lets custom permissions include a numeric kind', async () => {
+    const { container } = render(ConnectApp)
+    await fireEvent.click(screen.getByText('Connect an app'))
+    await fireEvent.input(container.querySelector('input')!, { target: { value: 'custom app' } })
+    await fireEvent.click(screen.getByText('Continue'))
+
+    await fireEvent.click(screen.getByText('Let me choose'))
+    await fireEvent.click(screen.getByText('Note'))
+    await fireEvent.input(screen.getByLabelText('Custom kind number'), { target: { value: '999999' } })
+    await fireEvent.click(screen.getByText('Add kind'))
+    await fireEvent.click(screen.getByText('Create connection'))
+
+    await screen.findByText('Connection ready')
+    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [1, 999999] })
+  })
+
+  it('does not let an empty custom preset become unrestricted', async () => {
+    const { container } = render(ConnectApp)
+    await fireEvent.click(screen.getByText('Connect an app'))
+    await fireEvent.input(container.querySelector('input')!, { target: { value: 'empty custom app' } })
+    await fireEvent.click(screen.getByText('Continue'))
+
+    await fireEvent.click(screen.getByText('Let me choose'))
+    await fireEvent.click(screen.getByText('Create connection'))
+
+    expect(screen.getByText('Choose at least one kind, or choose Everything.')).toBeTruthy()
+    expect(mockCreate).not.toHaveBeenCalled()
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
   it('surfaces a creation failure without advancing', async () => {
     mockCreate.mockRejectedValueOnce(new Error('slots full'))
     const { container } = render(ConnectApp)

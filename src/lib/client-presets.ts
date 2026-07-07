@@ -56,7 +56,9 @@ export function presetById(id: PresetId): PermissionPreset {
 /**
  * Resolve the `allowed_kinds` to apply for a preset selection. `customKinds` is
  * used only for the 'custom' preset. Returns null for unrestricted (everything),
- * matching the device's "empty list = all kinds auto-sign" convention.
+ * matching the device's "empty list = all kinds auto-sign" convention. UI
+ * callers must reject an empty custom selection before calling this; otherwise
+ * an empty hand-picked list is indistinguishable from "Everything" on device.
  */
 export function resolveKinds(id: PresetId, customKinds: number[] = []): number[] | null {
   if (id === 'everything') return null

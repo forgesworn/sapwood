@@ -8,7 +8,7 @@
   import {
     device, mgmtCreateClient, mgmtUpdateClient, mgmtCanApproveSigning, mgmtNostrconnect,
   } from '../lib/device.svelte.js'
-  import { COMMON_KINDS } from '../lib/kinds.js'
+  import { COMMON_KINDS, kindLabel } from '../lib/kinds.js'
   import { nameError, canCreate, type ConnectStep } from '../lib/connect-flow.js'
   import {
     parseNostrConnectURI, isValidNostrConnect, permsToAllowedKinds, sharesRelay,
@@ -30,6 +30,8 @@
   let name = $state('')
   let presetId = $state<PresetId>('posting')
   let customKinds = $state<number[]>([])
+  let customKindInput = $state('')
+  let customKindError = $state<string | null>(null)
   let creating = $state(false)
   let error = $state<string | null>(null)
   let permNote = $state<string | null>(null)
@@ -40,6 +42,8 @@
 
   const overUsb = $derived(device.mode === 'serial')
   const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
+  const commonKindSet = new Set(COMMON_KINDS.map((k) => k.kind))
+  const customExtraKinds = $derived(customKinds.filter((k) => !commonKindSet.has(k)).sort((a, b) => a - b))
 
   // nostrconnect (client-initiated): the app hands US a link. Relay-only — the
   // signer must be on the relay to publish the connect reply.
@@ -56,6 +60,8 @@
     name = ''
     presetId = 'posting'
     customKinds = []
+    customKindInput = ''
+    customKindError = null
     error = null
     permNote = null
     created = null
@@ -77,11 +83,35 @@
   function toggleKind(kind: number) {
     customKinds = customKinds.includes(kind)
       ? customKinds.filter((k) => k !== kind)
-      : [...customKinds, kind]
+      : [...customKinds, kind].sort((a, b) => a - b)
+  }
+
+  function parseKind(value: string): number | null {
+    const trimmed = value.trim()
+    if (!/^\d+$/.test(trimmed)) return null
+    const kind = Number(trimmed)
+    return Number.isSafeInteger(kind) ? kind : null
+  }
+
+  function addCustomKind() {
+    const kind = parseKind(customKindInput)
+    if (kind === null) {
+      customKindError = 'Enter a kind number'
+      return
+    }
+    customKindInput = ''
+    customKindError = null
+    if (!customKinds.includes(kind)) {
+      customKinds = [...customKinds, kind].sort((a, b) => a - b)
+    }
   }
 
   async function create() {
     if (!canCreate(name)) { error = nameError(name); return }
+    if (presetId === 'custom' && customKinds.length === 0) {
+      error = 'Choose at least one kind, or choose Everything.'
+      return
+    }
     creating = true
     error = null
     permNote = null
@@ -213,6 +243,29 @@
             >{ki.label}</button>
           {/each}
         </div>
+        {#if customExtraKinds.length > 0}
+          <div class="selected-custom-kinds">
+            {#each customExtraKinds as kind}
+              <button class="custom-kind-chip" onclick={() => toggleKind(kind)}>
+                {kindLabel(kind)}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <div class="custom-kind">
+          <input
+            class="custom-kind-input"
+            value={customKindInput}
+            placeholder="Custom kind number"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            aria-label="Custom kind number"
+            oninput={(e) => { customKindInput = (e.target as HTMLInputElement).value; customKindError = null; error = null }}
+            onkeydown={(e) => { if (e.key === 'Enter') addCustomKind() }}
+          />
+          <button class="btn btn-secondary btn-sm" disabled={!customKindInput.trim()} onclick={addCustomKind}>Add kind</button>
+        </div>
+        {#if customKindError}<p class="error-text">{customKindError}</p>{/if}
       {/if}
 
       {#if overUsb}
@@ -389,6 +442,45 @@
   }
   .kind-chip:hover { border-color: #444; }
   .kind-chip.on { border-color: var(--green); color: var(--green); background: #08130d; }
+
+  .selected-custom-kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.6rem;
+  }
+  .custom-kind-chip {
+    background: #08130d;
+    border: 1px solid var(--green-dim);
+    border-radius: 4px;
+    color: var(--green);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0.35rem 0.7rem;
+  }
+  .custom-kind-chip:hover { border-color: var(--green); }
+  .custom-kind {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+    margin-top: 0.65rem;
+  }
+  .custom-kind-input {
+    min-width: 9rem;
+    max-width: 13rem;
+    flex: 1 1 9rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0 0.6rem;
+  }
+  .custom-kind-input:focus { outline: none; border-color: #444; }
 
   .result-head { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.35rem; }
   .result-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: var(--green-glow); }

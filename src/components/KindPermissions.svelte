@@ -20,8 +20,10 @@
   let expanded = $state(false)
   let customKind = $state('')
   let customError = $state<string | null>(null)
+  let permissionNote = $state<string | null>(null)
 
   const commonKindSet = new Set(COMMON_KINDS.map(k => k.kind))
+  const allCommonKinds = COMMON_KINDS.map(k => k.kind)
 
   const categories: { label: string; kinds: KindInfo[] }[] = [
     { label: 'IDENTITY', kinds: COMMON_KINDS.filter(k => k.category === 'identity') },
@@ -37,18 +39,35 @@
     return allowedKinds.includes(kind)
   }
 
+  function cleanKinds(kinds: number[]): number[] {
+    return [...new Set(kinds)]
+      .filter((kind) => Number.isSafeInteger(kind) && kind >= 0)
+      .sort((a, b) => a - b)
+  }
+
+  function knownWhitelist(extraKinds: number[] = []): number[] {
+    return cleanKinds([...allCommonKinds, ...extraKinds])
+  }
+
   function toggle(kind: number) {
+    customError = null
+    permissionNote = null
     if (unrestricted) {
-      // First restriction: allow everything except this kind.
-      const allExcept = COMMON_KINDS.map(k => k.kind).filter(k => k !== kind)
+      // First restriction: allow known/common kinds except this one; unknown
+      // and future kinds then fall back to the signer's button prompt.
+      const allExcept = knownWhitelist().filter(k => k !== kind)
       onchange(allExcept)
     } else if (isAllowed(kind)) {
       // Remove from allowed — kind will now require button press.
       const next = allowedKinds.filter(k => k !== kind)
-      onchange(next.length > 0 ? next : null)
+      if (next.length === 0) {
+        permissionNote = 'To prompt for every kind, use Ask each time.'
+        return
+      }
+      onchange(next)
     } else {
       // Add to allowed — kind will now auto-sign.
-      onchange([...allowedKinds, kind])
+      onchange(cleanKinds([...allowedKinds, kind]))
     }
   }
 
@@ -67,13 +86,19 @@
     }
     customKind = ''
     customError = null
-    if (unrestricted) return
+    permissionNote = null
+    if (unrestricted) {
+      onchange(knownWhitelist([kind]))
+      return
+    }
     if (allowedKinds.includes(kind)) return
-    onchange([...allowedKinds, kind].sort((a, b) => a - b))
+    onchange(cleanKinds([...allowedKinds, kind]))
   }
 
   function allowAll() {
-    onchange(null as unknown as number[])
+    customError = null
+    permissionNote = null
+    onchange(null)
   }
 
   const customAllowedKinds = $derived(
@@ -89,7 +114,9 @@
   const summaryText = $derived(
     unrestricted
       ? 'All kinds auto-signed'
-      : `${allowedKinds.length} auto-signed, ${promptCount} prompted`
+      : promptCount > 0
+        ? `${allowedKinds.length} auto-signed, ${promptCount} prompted`
+        : `${allowedKinds.length} auto-signed, unknown prompted`
   )
 </script>
 
@@ -116,6 +143,12 @@
     </div>
 
     {#if expanded && !updating}
+      <div class="perms-note" class:warn={unrestricted}>
+        {unrestricted
+          ? 'Allow all includes unknown and future kinds.'
+          : 'Unknown or unlisted kinds prompt on the signer.'}
+      </div>
+
       <div class="perms-grid">
         {#each categories as cat}
           {#each cat.kinds as ki}
@@ -144,23 +177,24 @@
         {/each}
       </div>
 
-      {#if !unrestricted}
-        <div class="custom-kind">
-          <input
-            class="custom-kind-input"
-            value={customKind}
-            placeholder="Kind number"
-            inputmode="numeric"
-            pattern="[0-9]*"
-            aria-label="Kind number"
-            oninput={(e) => { customKind = (e.target as HTMLInputElement).value; customError = null }}
-            onkeydown={(e) => { if (e.key === 'Enter') addCustomKind() }}
-          />
-          <button class="btn btn-secondary btn-sm" disabled={!customKind.trim()} onclick={addCustomKind}>Add kind</button>
-        </div>
-        {#if customError}
-          <div class="custom-kind-error">{customError}</div>
-        {/if}
+      <div class="custom-kind">
+        <input
+          class="custom-kind-input"
+          value={customKind}
+          placeholder="Custom kind number"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          aria-label="Kind number"
+          oninput={(e) => { customKind = (e.target as HTMLInputElement).value; customError = null; permissionNote = null }}
+          onkeydown={(e) => { if (e.key === 'Enter') addCustomKind() }}
+        />
+        <button class="btn btn-secondary btn-sm" disabled={!customKind.trim()} onclick={addCustomKind}>Add kind</button>
+      </div>
+      {#if customError}
+        <div class="custom-kind-error">{customError}</div>
+      {/if}
+      {#if permissionNote}
+        <div class="custom-kind-note">{permissionNote}</div>
       {/if}
 
       <div class="perms-legend">
@@ -258,6 +292,14 @@
 
   .perms-reset { flex-shrink: 0; }
 
+  .perms-note {
+    margin-top: 0.55rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+  .perms-note.warn { color: var(--amber); }
+
   /* Kind chip grid */
   .perms-grid {
     display: flex;
@@ -322,6 +364,12 @@
   .custom-kind-error {
     margin-top: 0.3rem;
     color: var(--red);
+    font-size: 0.75rem;
+  }
+
+  .custom-kind-note {
+    margin-top: 0.3rem;
+    color: var(--amber);
     font-size: 0.75rem;
   }
 

@@ -12,8 +12,8 @@ describe('kindLabel', () => {
     expect(kindLabel(8)).toBe('Badge Award (8)')
   })
 
-  it('falls back to "kind N" for an unknown kind', () => {
-    expect(kindLabel(999999)).toBe('kind 999999')
+  it('falls back to "Unknown kind N" for an unknown kind', () => {
+    expect(kindLabel(999999)).toBe('Unknown kind 999999')
   })
 })
 
@@ -49,7 +49,7 @@ describe('COMMON_KINDS data integrity', () => {
     // The permissions UI shows these by name; a common kind missing from the
     // full label map would silently render as a bare number.
     for (const k of COMMON_KINDS) {
-      expect(kindLabel(k.kind), `kind ${k.kind} has no label`).not.toMatch(/^kind \d+$/)
+      expect(kindLabel(k.kind), `kind ${k.kind} has no label`).not.toMatch(/^Unknown kind \d+$/)
     }
   })
 

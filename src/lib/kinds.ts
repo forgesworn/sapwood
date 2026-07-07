@@ -43,19 +43,42 @@ const LABEL_MAP = new Map(COMMON_KINDS.map(k => [k.kind, k]))
 const ALL_LABELS: Record<number, string> = {
   0: 'Profile', 1: 'Note', 3: 'Contacts', 4: 'DM (NIP-04)', 5: 'Delete',
   6: 'Repost', 7: 'Reaction', 8: 'Badge Award', 9: 'Group Chat',
-  16: 'Repost (Generic)', 1059: 'Gift Wrap', 1063: 'File Metadata',
-  1984: 'Report', 6969: 'Zap Goal', 7000: 'Job Feedback',
+  11: 'Thread', 13: 'Seal', 14: 'Direct Message', 15: 'File Message',
+  16: 'Repost (Generic)', 17: 'Website Reaction', 20: 'Picture',
+  21: 'Video', 22: 'Portrait Video', 24: 'Public Message',
+  40: 'Channel Creation', 41: 'Channel Metadata', 42: 'Channel Message',
+  43: 'Channel Hide', 44: 'Channel Mute', 62: 'Request to Vanish',
+  64: 'Chess (PGN)', 78: 'App Data', 1018: 'Poll Response',
+  1059: 'Gift Wrap', 1063: 'File Metadata', 1068: 'Poll',
+  1111: 'Comment', 1311: 'Live Chat', 1337: 'Code Snippet',
+  1617: 'Patch', 1618: 'Pull Request', 1619: 'Pull Request Update',
+  1621: 'Issue', 1984: 'Report', 1985: 'Label', 2003: 'Torrent',
+  2004: 'Torrent Comment', 4550: 'Community Post Approval',
+  6969: 'Zap Goal', 7000: 'Job Feedback', 9041: 'Zap Goal',
   9734: 'Zap Request', 9735: 'Zap Receipt', 10000: 'Mute List',
-  10001: 'Pin List', 10002: 'Relay List', 13194: 'Wallet Info',
-  22242: 'Relay Auth', 23194: 'Wallet Request', 23195: 'Wallet Response',
-  24133: 'NIP-46', 27235: 'HTTP Auth', 30000: 'People List',
-  30001: 'Bookmarks', 30008: 'Profile Badges', 30009: 'Badge Definition',
-  30023: 'Article', 30078: 'App Data', 30311: 'Live Event',
+  10001: 'Pin List', 10002: 'Relay List', 10003: 'Bookmarks',
+  10004: 'Communities', 10005: 'Public Chats', 10006: 'Blocked Relays',
+  10007: 'Search Relays', 10009: 'User Groups',
+  10013: 'Private Relay List', 10019: 'Nutzap Mint Recommendation',
+  10030: 'Emoji List', 10050: 'DM Relays', 13194: 'Wallet Info',
+  17375: 'Cashu Wallet', 22242: 'Relay Auth', 23194: 'Wallet Request',
+  23195: 'Wallet Response', 24133: 'NIP-46', 27235: 'HTTP Auth',
+  30000: 'Follow Sets', 30001: 'Bookmarks', 30002: 'Relay Sets',
+  30003: 'Bookmark Sets', 30007: 'Kind Mute Sets',
+  30008: 'Profile Badges', 30009: 'Badge Definition',
+  30015: 'Interest Sets', 30023: 'Article', 30024: 'Draft Article',
+  30030: 'Emoji Sets', 30078: 'App Data', 30311: 'Live Event',
+  30382: 'User Trusted Assertion', 30383: 'Event Trusted Assertion',
+  30384: 'Addressable Trusted Assertion', 31234: 'Draft Event',
+  31922: 'Date Calendar', 31923: 'Time Calendar', 31924: 'Calendar',
+  31925: 'Calendar RSVP', 31989: 'Handler Recommendation',
+  31990: 'Handler Information', 34550: 'Community Definition',
+  39000: 'Group Metadata',
 }
 
 export function kindLabel(kind: number): string {
   const label = ALL_LABELS[kind]
-  return label ? `${label} (${kind})` : `kind ${kind}`
+  return label ? `${label} (${kind})` : `Unknown kind ${kind}`
 }
 
 export function kindInfo(kind: number): KindInfo | undefined {
