@@ -153,15 +153,21 @@ describe('Home', () => {
     expect(screen.queryByText('This signer needs an identity')).toBeNull()
   })
 
-  it('diagnoses relay/operator mismatch (not "needs an identity") when the device never answers', () => {
+  it('diagnoses relay/operator mismatch (not "needs an identity") when the device never answers', async () => {
+    const onadvanced = vi.fn()
     ;(device as { masters: unknown[] }).masters = []
     ;(device as { mode: string }).mode = 'relay'
     ;(device as { relayStatus: unknown }).relayStatus = null
     ;(device as { error: unknown }).error = 'timeout waiting for device (get_status)'
     ;(device as { portInfo: string }).portInfo = 'npub1cc…cc · wss://relay.trotters.cc'
-    render(Home)
+    ;(device as { operatorPub: string }).operatorPub = '1'.repeat(64)
+    render(Home, { props: { onadvanced } })
     expect(screen.getByText("Connected to the relay, but your signer isn't answering")).toBeTruthy()
+    expect(screen.getByText(/Most important check: operator key/)).toBeTruthy()
+    expect(screen.getByText(/11111111…11111111/)).toBeTruthy()
     expect(screen.getByText(/Operator-key mismatch/)).toBeTruthy()
     expect(screen.queryByText('This signer needs an identity')).toBeNull()
+    await fireEvent.click(screen.getByText('Restore operator key'))
+    expect(onadvanced).toHaveBeenCalledWith('identity')
   })
 })

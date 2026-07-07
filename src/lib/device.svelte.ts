@@ -1153,14 +1153,23 @@ export { serialTransport, httpTransport, HttpTransport }
 // network calls, and touches no secrets. Mirrors `__sapwoodFlashBackend`.
 if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: boolean }).__sapwoodE2E) {
   ;(window as unknown as { __sapwoodConnect?: unknown }).__sapwoodConnect = (
-    opts: { masters?: MasterInfo[]; slots?: ConnectSlot[]; mode?: TransportMode } = {},
+    opts: {
+      masters?: MasterInfo[]
+      slots?: ConnectSlot[]
+      mode?: TransportMode
+      portInfo?: string
+      operatorPub?: string
+      relayStatus?: RelayStatus | null
+      error?: string | null
+    } = {},
   ) => {
     device.connected = true
     device.mode = opts.mode ?? 'relay'
-    device.portInfo = 'test-device'
+    device.portInfo = opts.portInfo ?? 'test-device'
     device.masters = opts.masters ?? []
     device.slots = opts.slots ?? []
-    device.relayStatus = null
-    device.error = null
+    device.operatorPub = opts.operatorPub ?? device.operatorPub
+    device.relayStatus = opts.relayStatus ?? null
+    device.error = opts.error ?? null
   }
 }

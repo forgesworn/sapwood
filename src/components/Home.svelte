@@ -205,6 +205,12 @@
     try { await reconnectRelay() } finally { retrying = false }
   }
 
+  const currentOperator = $derived(
+    device.operatorPub
+      ? `${device.operatorPub.slice(0, 8)}…${device.operatorPub.slice(-8)}`
+      : 'unknown',
+  )
+
   // Transport is plumbing: when the cable goes silent and exactly one signer is
   // known on the network, hop to it automatically — once per silent episode.
   // The buttons below remain as the manual retry if the hop fails.
@@ -302,7 +308,24 @@
     <section class="card card--live wifi-usb">
       <h2 class="state-title">Connected to the relay, but your signer isn't answering</h2>
       <p class="hint">If the signer has just powered on, give it ~10 seconds to join WiFi, then
-        Try again. A USB cable always works: plug it into this computer and connect over USB.</p>
+        retry. A USB cable always works: plug it into this computer and connect over USB.</p>
+
+      <div class="operator-recovery">
+        <p class="operator-recovery-title">Most important check: operator key</p>
+        <p class="hint-sm">
+          Sapwood is signing management as <code>{currentOperator}</code>. If this signer was flashed
+          from another browser, or this browser storage was cleared, the signer will ignore this key.
+          Restore the operator recovery phrase created when this signer was flashed, then reconnect.
+        </p>
+        <div class="operator-recovery-actions">
+          <button class="btn btn-warn btn-sm" onclick={() => onadvanced?.('identity')}>
+            Restore operator key
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick={retryWifi} disabled={retrying}>
+            {retrying ? 'Retrying…' : 'Retry WiFi'}
+          </button>
+        </div>
+      </div>
 
       <details class="disclosure">
         <summary>Why this happens</summary>
@@ -320,9 +343,6 @@
       </details>
 
       <div class="state-actions">
-        <button class="btn btn-primary btn-sm" onclick={retryWifi} disabled={retrying}>
-          {retrying ? 'Retrying…' : 'Try again'}
-        </button>
         <button class="btn btn-danger btn-sm" onclick={() => disconnect()}>Disconnect</button>
       </div>
     </section>
@@ -550,6 +570,28 @@
   .state-disconnect { margin-top: 1.1rem; }
   .state-actions { display: flex; gap: 0.6rem; margin-top: 1.1rem; }
   .wifi-usb { padding: 1.4rem; }
+
+  .operator-recovery {
+    background: #120f06;
+    border: 1px solid #3a3320;
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    margin: 1rem 0;
+  }
+  .operator-recovery-title {
+    margin: 0 0 0.35rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--amber);
+  }
+  .operator-recovery .hint-sm { margin: 0; line-height: 1.55; }
+  .operator-recovery code { color: var(--green); word-break: break-all; }
+  .operator-recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+  }
 
   /* USB connect: still checking whether the device answers. */
   .checking { display: flex; align-items: center; gap: 1rem; padding: 1.3rem 1.4rem; }

@@ -60,6 +60,10 @@
         <p class="err-detail">{device.error}</p>
         <p class="hint-sm">Sapwood is asking on <code class="mono">{device.portInfo}</code>
           with operator key <code class="mono">{device.operatorPub}</code>.</p>
+        <div class="restore-callout">
+          <strong>Restoring the matching operator key is the recovery path if this signer was flashed elsewhere.</strong>
+          Paste the recovery phrase in <a href="#operator-key">Operator key</a>, then reconnect over WiFi.
+        </div>
         <details class="disclosure">
           <summary>Why this happens</summary>
           <ul class="err-causes">
@@ -144,6 +148,18 @@
   .err-causes { margin: 0; padding-left: 1.2rem; }
   .err-causes li { font-size: 0.8rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 0.5rem; }
   .err-causes strong { color: var(--text); }
+  .restore-callout {
+    background: #120f06;
+    border: 1px solid #3a3320;
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    margin: 0.8rem 0;
+    padding: 0.7rem 0.8rem;
+  }
+  .restore-callout strong { color: var(--amber); font-weight: 700; }
+  .restore-callout a { color: var(--green); }
 
   .status { margin-top: 0.6rem; color: var(--text-dim); }
 

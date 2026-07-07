@@ -66,13 +66,17 @@
   }
 </script>
 
-<section class="operator">
+<section class="operator" id="operator-key">
   <h2 class="section-title">Operator key</h2>
   <p class="hint">
     Your authority to manage signers over WiFi. A signer learns its operator when you flash it.
     Management only works if this key matches. (This is <em>not</em> the master seed; it's a
     separate, lower-stakes key.) <strong>Back it up</strong>: write down the recovery phrase and
     you can restore this exact key in any browser.
+  </p>
+  <p class="restore-note">
+    If Sapwood reaches the relay but the signer never answers, restore the operator recovery phrase
+    created when that signer was flashed. After restoring, disconnect and reconnect over WiFi.
   </p>
   <table class="kv-table"><tbody>
     <tr><td class="label">Pubkey</td><td class="mono">{operator.pubHex}</td></tr>
@@ -123,11 +127,11 @@
       type="text"
       class="field-input"
       bind:value={opPhraseImport}
-      placeholder="Restore: type your 12/24-word recovery phrase"
+      placeholder="Paste the matching 12/24-word operator recovery phrase"
       spellcheck="false"
       autocomplete="off"
     />
-    <button class="btn btn-secondary btn-sm" disabled={opPhraseImport.trim().split(/\s+/).length < 12} onclick={handleImportPhrase}>Restore</button>
+    <button class="btn btn-secondary btn-sm" disabled={opPhraseImport.trim().split(/\s+/).length < 12} onclick={handleImportPhrase}>Restore key</button>
     <ConfirmButton
       label="Regenerate"
       question="Replace your operator key? Signers flashed with the current one will refuse this browser until re-flashed."
@@ -159,6 +163,16 @@
 <style>
   .operator { display: flex; flex-direction: column; gap: 0.75rem; }
   .operator .section-title, .operator .hint { margin-bottom: 0; }
+  .restore-note {
+    margin: 0;
+    background: #120f06;
+    border: 1px solid #3a3320;
+    border-radius: 6px;
+    color: var(--amber);
+    font-size: 0.84rem;
+    line-height: 1.55;
+    padding: 0.65rem 0.8rem;
+  }
   .op-buttons { display: flex; gap: 0.35rem; margin-top: 0.4rem; }
   .mono.secret { color: var(--amber); }
   .mono.phrase { color: var(--text); line-height: 1.7; word-spacing: 0.25rem; display: inline-block; }

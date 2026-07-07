@@ -111,6 +111,30 @@ test('a device with no identity yet can restore an existing key on Home', async 
   await expect(page.getByText(/Keep this key's address/)).toBeVisible()
 })
 
+test('relay timeout gives an operator-key recovery path', async ({ page }) => {
+  await enableAdminTestSeam(page)
+  await page.goto('/#/')
+  await page.evaluate(() =>
+    (window as unknown as { __sapwoodConnect: (o: unknown) => void }).__sapwoodConnect({
+      masters: [],
+      slots: [],
+      mode: 'relay',
+      portInfo: 'npub1cc…cc · 4 relays',
+      operatorPub: '1'.repeat(64),
+      error: 'timeout waiting for device (get_status)',
+    }),
+  )
+
+  await expect(page.getByRole('heading', { name: "Connected to the relay, but your signer isn't answering" })).toBeVisible()
+  await expect(page.getByText('Most important check: operator key')).toBeVisible()
+  await expect(page.getByText(/11111111…11111111/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Restore operator key' }).click()
+  await expect(page.getByRole('button', { name: 'Identity', exact: true })).toHaveClass(/active/)
+  await expect(page.getByRole('heading', { name: 'Operator key' })).toBeVisible()
+  await expect(page.getByPlaceholder(/matching 12\/24-word operator recovery phrase/)).toBeVisible()
+})
+
 test('the disconnected console offers plain-language connect options', async ({ page }) => {
   await page.goto('/#/')
   await expect(page.getByRole('button', { name: 'Connect by USB cable' })).toBeVisible()
