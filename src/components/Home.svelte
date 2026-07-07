@@ -466,11 +466,9 @@
               </span>
             </div>
             <div class="app-actions">
-              {#if !slot.current_pubkey}
-                <button class="btn btn-secondary btn-sm" onclick={() => copyAppLink(slot.slot_index)}>
-                  {copiedSlot === slot.slot_index ? 'Link copied ✓' : 'Copy link'}
-                </button>
-              {/if}
+              <button class="btn btn-secondary btn-sm" onclick={() => copyAppLink(slot.slot_index)}>
+                {copiedSlot === slot.slot_index ? 'Link copied ✓' : 'Copy link'}
+              </button>
               {#if slot.current_pubkey && !slot.signing_approved && canApprove}
                 <button class="btn btn-secondary btn-sm allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot.slot_index)}>
                   {busySlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}

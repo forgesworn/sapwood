@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, screen, within } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
 import Home from './Home.svelte'
-import { device, refreshSlots, mgmtApproveSigning, mgmtRevokeClient } from '../lib/device.svelte.js'
+import { device, refreshSlots, mgmtApproveSigning, mgmtClientUri, mgmtRevokeClient } from '../lib/device.svelte.js'
 import { setDeviceLabel } from '../lib/known-devices.js'
+import { copyText } from '../lib/clipboard.js'
 
 const HEX = 'c'.repeat(64)
 const NPUB = nip19.npubEncode(HEX)
@@ -27,6 +28,10 @@ vi.mock('../lib/device.svelte.js', () => ({
   connectRelay: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('../lib/clipboard.js', () => ({
+  copyText: vi.fn().mockResolvedValue(true),
+}))
+
 beforeEach(() => {
   localStorage.clear()
   ;(device as { masters: unknown[] }).masters = [
@@ -35,7 +40,9 @@ beforeEach(() => {
   ;(device as { slots: unknown[] }).slots = []
   vi.mocked(refreshSlots).mockClear()
   vi.mocked(mgmtApproveSigning).mockClear()
+  vi.mocked(mgmtClientUri).mockClear()
   vi.mocked(mgmtRevokeClient).mockClear()
+  vi.mocked(copyText).mockClear()
 })
 
 describe('Home', () => {
@@ -65,6 +72,17 @@ describe('Home', () => {
     expect(screen.getByText('Damus')).toBeTruthy()
     await fireEvent.click(screen.getByText('Allow signing'))
     expect(vi.mocked(mgmtApproveSigning)).toHaveBeenCalledWith(1)
+  })
+
+  it('lets a connected app copy its reusable link from the friendly app row', async () => {
+    ;(device as { slots: unknown[] }).slots = [
+      { slot_index: 4, label: 'Primal', current_pubkey: 'p'.repeat(64), signing_approved: true, allowed_kinds: [], auto_approve: true },
+    ]
+    render(Home)
+    const card = screen.getByText('Primal').closest('.app-card') as HTMLElement
+    await fireEvent.click(within(card).getByText('Copy link'))
+    expect(vi.mocked(mgmtClientUri)).toHaveBeenCalledWith(4)
+    expect(vi.mocked(copyText)).toHaveBeenCalledWith('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
   })
 
   it('renames the signer and persists it', async () => {
