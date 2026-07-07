@@ -38,19 +38,25 @@ vi.mock('./avatar.js', () => ({
 vi.mock('./relay-transport.js', () => ({
   RelayTransport: class {
     operatorPub = 'op'
+    constructor(_devicePubHex: string, _relays: string[], opSkHex: string) {
+      this.operatorPub = opSkHex === 'b'.repeat(64) ? 'legacy-op' : 'op'
+    }
     async connect() { /* no relay in tests */ }
-    request(...args: unknown[]) { return relayRequestMock(...args) }
+    request(...args: unknown[]) { return relayRequestMock.apply(this, args) }
     close() { /* nothing to tear down */ }
   },
 }))
 
 import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, mgmtClientUri, connectRelay, disconnect, refreshRelayAudit } from './device.svelte.js'
 import { FrameType } from './frame.js'
+import { generateOperatorMnemonic } from './op-mgmt.js'
 import type { MasterInfo } from './types.js'
 
 const FAKE_AVATAR = { w: 2, h: 2, bytes: new Uint8Array(8) }
 const FAKE_FRAME = new Uint8Array([0xaa])
 const ACK = { type: FrameType.ACK, payload: new Uint8Array() }
+const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
+const LS_SK = 'heartwood.opMgmt.skHex'
 const FW_RESP = {
   type: FrameType.FIRMWARE_INFO_RESPONSE,
   payload: new TextEncoder().encode('{"version":"0.9.10","board":"tdisplay"}'),
@@ -392,6 +398,34 @@ describe('identity card auto-sync on serial master list', () => {
     try {
       expect(device.portInfo).toContain('3 relays')
       expect(device.relays).toEqual(relays)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('falls back to another saved operator key when the signer ignores the first', async () => {
+    const { pubHex } = freshMaster()
+    localStorage.setItem(LS_SK, 'b'.repeat(64))
+    localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(function (this: { operatorPub?: string }, method: unknown) {
+      if (method === 'get_status') {
+        if (this.operatorPub === 'legacy-op') {
+          return Promise.reject(new Error('timeout waiting for device (get_status)'))
+        }
+        return Promise.resolve({ master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' })
+      }
+      if (method === 'list_clients') return Promise.resolve({ clients: [] })
+      return Promise.resolve({ ok: true })
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      expect(device.operatorPub).toBe('op')
+      const getStatusCalls = relayRequestMock.mock.calls.filter((c) => c[0] === 'get_status')
+      expect(getStatusCalls).toHaveLength(2)
+      expect(device.masters[0]?.npub).toBe(nip19.npubEncode(pubHex))
+      expect(device.error).toBeNull()
     } finally {
       await disconnect()
     }

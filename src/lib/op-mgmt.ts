@@ -75,6 +75,25 @@ function operatorFromMnemonic(mnemonic: string): Operator {
   return { skHex, pubHex: pubFromSk(skHex), mnemonic }
 }
 
+function storedOperators(): Operator[] {
+  const out: Operator[] = []
+  const legacy = localStorage.getItem(LS_SK) ?? ''
+  if (/^[0-9a-f]{64}$/.test(legacy)) {
+    out.push(operatorFromSk(legacy))
+  }
+  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
+  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
+    out.push(operatorFromMnemonic(mnemonic))
+  }
+
+  const seen = new Set<string>()
+  return out.filter((op) => {
+    if (seen.has(op.pubHex)) return false
+    seen.add(op.pubHex)
+    return true
+  })
+}
+
 /** Generate a fresh operator recovery phrase. 128 bits → 12 words, 256 → 24. */
 export function generateOperatorMnemonic(strength: 128 | 256 = 128): string {
   return bip39GenerateMnemonic(wordlist, strength)
@@ -88,18 +107,22 @@ export function generateOperatorMnemonic(strength: 128 | 256 = 128): string {
  * recovery phrase wins; otherwise a new phrase-backed key is minted.
  */
 export function getOrCreateOperator(): Operator {
-  const legacy = localStorage.getItem(LS_SK) ?? ''
-  if (/^[0-9a-f]{64}$/.test(legacy)) {
-    return operatorFromSk(legacy)
-  }
-  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
-  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
-    return operatorFromMnemonic(mnemonic)
-  }
+  const stored = storedOperators()
+  if (stored.length > 0) return stored[0]!
   const fresh = generateOperatorMnemonic()
   localStorage.setItem(LS_MNEMONIC, fresh)
   localStorage.removeItem(LS_SK)
   return operatorFromMnemonic(fresh)
+}
+
+/** Saved operator keys worth trying for relay management. Browsers that lived
+ *  through the raw-key -> recovery-phrase migration can have both records, and
+ *  different signers may have been flashed with different ones. Do not guess:
+ *  relay connect can try all stored candidates and keep the one the signer
+ *  actually answers. If nothing exists yet, mint the normal single operator. */
+export function getOperatorCandidates(): Operator[] {
+  const stored = storedOperators()
+  return stored.length > 0 ? stored : [getOrCreateOperator()]
 }
 
 /** The recovery phrase backing the current operator, or `null` for a legacy
@@ -115,13 +138,7 @@ export function getOperatorMnemonic(): string | null {
  *  Read-only: unlike `getOrCreateOperator` it never mints a key — used to
  *  detect whether an incoming import would overwrite an existing operator. */
 export function peekOperatorPubHex(): string | null {
-  const legacy = localStorage.getItem(LS_SK) ?? ''
-  if (/^[0-9a-f]{64}$/.test(legacy)) return pubFromSk(legacy)
-  const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
-  if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
-    return operatorFromMnemonic(mnemonic).pubHex
-  }
-  return null
+  return storedOperators()[0]?.pubHex ?? null
 }
 
 /** The x-only pubkey (hex) for a raw operator secret, or `null` if malformed.

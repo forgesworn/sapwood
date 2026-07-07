@@ -14,7 +14,7 @@ import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
 import { RelayTransport } from './relay-transport.js'
-import { getOrCreateOperator } from './op-mgmt.js'
+import { getOperatorCandidates } from './op-mgmt.js'
 import { rememberDevice, npubShort } from './known-devices.js'
 import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
@@ -441,6 +441,74 @@ function relaySummary(relays: string[]): string {
   return `${relays.length} relays`
 }
 
+interface RelaySelection {
+  transport: RelayTransport
+  status?: Record<string, unknown>
+}
+
+function closeRelayTransports(transports: RelayTransport[], keep: RelayTransport): void {
+  for (const t of transports) {
+    if (t !== keep) t.close()
+  }
+}
+
+async function selectRelayTransport(devicePubHex: string, relays: string[]): Promise<RelaySelection> {
+  const operators = getOperatorCandidates()
+  if (operators.length === 1) {
+    const transport = new RelayTransport(devicePubHex, relays, operators[0]!.skHex)
+    console.log(`[hw] relay connect → signer ${devicePubHex.slice(0, 8)}… on [${relays.join(', ')}] as operator ${transport.operatorPub.slice(0, 8)}…`)
+    await transport.connect()
+    return { transport }
+  }
+
+  console.log(`[hw] relay connect → signer ${devicePubHex.slice(0, 8)}… on [${relays.join(', ')}] trying ${operators.length} saved operator keys`)
+  const transports = operators.map((op) => new RelayTransport(devicePubHex, relays, op.skHex))
+  try {
+    const selection = await Promise.any(transports.map(async (transport): Promise<RelaySelection> => {
+      await transport.connect()
+      const status = await transport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
+      return { transport, status }
+    }))
+    closeRelayTransports(transports, selection.transport)
+    console.log(`[hw] relay: signer answered operator ${selection.transport.operatorPub.slice(0, 8)}…`)
+    return selection
+  } catch (e) {
+    transports.forEach((t) => t.close())
+    if (e instanceof AggregateError) {
+      const first = e.errors.find((err) => err instanceof Error) as Error | undefined
+      throw first ?? new Error('timeout waiting for device (get_status)')
+    }
+    throw e
+  }
+}
+
+function applyRelayStatus(raw: Record<string, unknown>) {
+  appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
+  const status: RelayStatus = {
+    master_count: Number(raw.master_count ?? 0),
+    slots: Number(raw.slots ?? 0),
+    mode: String(raw.mode ?? 'wifi-standalone'),
+    relay: String(raw.relay ?? ''),
+  }
+  device.relayStatus = status
+  const masterHex = String(raw.master_npub_hex ?? '')
+  if (masterHex) {
+    let npub = masterHex
+    try { npub = nip19.npubEncode(masterHex) } catch { /* keep hex */ }
+    const known = device.masters[0]
+    device.masters = [{
+      slot: 0,
+      label: known?.label ?? 'master',
+      mode: -1,
+      modeLabel: status.mode.toUpperCase(),
+      npub,
+    }]
+  }
+  // Knowing the master npub is all we need to dress the signer's screen —
+  // over the relay too (firmware ≥0.9.12 accepts set_identity_meta).
+  if (device.masters.length > 0) void autoSyncIdentityMeta()
+}
+
 /**
  * Connect to a wifi-standalone device over its relay, as the operator.
  * `devicePubHex` is the device MASTER pubkey (the kind-24134 mgmt address);
@@ -448,10 +516,7 @@ function relaySummary(relays: string[]): string {
  */
 export async function connectRelay(devicePubHex: string, relays: string[], label?: string) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
-  const op = getOrCreateOperator()
-  const t = new RelayTransport(devicePubHex, relays, op.skHex)
-  console.log(`[hw] relay connect → signer ${devicePubHex.slice(0, 8)}… on [${relays.join(', ')}] as operator ${t.operatorPub.slice(0, 8)}…`)
-  await t.connect()
+  const { transport: t, status } = await selectRelayTransport(devicePubHex, relays)
   relayTransport = t
   device.connected = true
   device.mode = 'relay'
@@ -467,7 +532,7 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   rememberDevice(devicePubHex, relays, label)
 
   // First load, then poll for live status/clients every 4s while connected.
-  await relayRefresh()
+  await relayRefresh(status)
   if (pollTimer) clearInterval(pollTimer)
   pollTimer = setInterval(() => {
     if (!device.connected || device.mode !== 'relay') {
@@ -483,35 +548,12 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
  *  and piling more requests onto a struggling connection only makes it worse, so
  *  a tick that finds one already in flight simply skips. */
 let relayRefreshing = false
-async function relayRefresh() {
+async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
   if (!relayTransport || relayRefreshing) return
   relayRefreshing = true
   try {
-    const raw = await relayTransport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
-    appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
-    const status: RelayStatus = {
-      master_count: Number(raw.master_count ?? 0),
-      slots: Number(raw.slots ?? 0),
-      mode: String(raw.mode ?? 'wifi-standalone'),
-      relay: String(raw.relay ?? ''),
-    }
-    device.relayStatus = status
-    const masterHex = String(raw.master_npub_hex ?? '')
-    if (masterHex) {
-      let npub = masterHex
-      try { npub = nip19.npubEncode(masterHex) } catch { /* keep hex */ }
-      const known = device.masters[0]
-      device.masters = [{
-        slot: 0,
-        label: known?.label ?? 'master',
-        mode: -1,
-        modeLabel: status.mode.toUpperCase(),
-        npub,
-      }]
-    }
-    // Knowing the master npub is all we need to dress the signer's screen —
-    // over the relay too (firmware ≥0.9.12 accepts set_identity_meta).
-    if (device.masters.length > 0) void autoSyncIdentityMeta()
+    const raw = prefetchedStatus ?? await relayTransport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
+    applyRelayStatus(raw)
     const res = await relayTransport.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
     const clients = (res.clients as Array<Record<string, unknown>>) ?? []
     device.slots = clients.map((c) => ({

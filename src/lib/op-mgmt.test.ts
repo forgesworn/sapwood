@@ -11,6 +11,7 @@ import {
   importOperatorMnemonic,
   importOperator,
   peekOperatorPubHex,
+  getOperatorCandidates,
 } from './op-mgmt.js'
 
 const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
@@ -99,6 +100,25 @@ describe('peekOperatorPubHex', () => {
     localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
     localStorage.setItem(LS_SK, 'b'.repeat(64))
     expect(peekOperatorPubHex()).toBe(getOrCreateOperator().pubHex)
+  })
+})
+
+describe('getOperatorCandidates', () => {
+  it('returns every distinct saved operator so relay connect can try them', () => {
+    const phrase = generateOperatorMnemonic()
+    localStorage.setItem(LS_MNEMONIC, phrase)
+    localStorage.setItem(LS_SK, 'b'.repeat(64))
+    const candidates = getOperatorCandidates()
+    expect(candidates).toHaveLength(2)
+    expect(candidates[0]?.skHex).toBe('b'.repeat(64))
+    expect(candidates[1]?.mnemonic).toBe(phrase)
+  })
+
+  it('mints one operator when none is stored', () => {
+    const candidates = getOperatorCandidates()
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]?.skHex).toMatch(HEX64)
+    expect(localStorage.getItem(LS_MNEMONIC)).toBe(candidates[0]?.mnemonic)
   })
 })
 
