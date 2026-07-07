@@ -26,8 +26,11 @@
 // already flashed with one is still manageable); they simply have no phrase to
 // write down until you rotate to a phrase-backed key (`regenerateOperator()`),
 // which mints a new key and needs a re-flash. If both old and new records are
-// present, the legacy secret wins: preserving access to already-flashed signers
-// matters more than surfacing a newer phrase that was never baked into them.
+// present, the phrase-backed key is the primary one: it is the recoverable key,
+// so it is what new flashes, phone handoffs, Network saves, the backup nudge and
+// the operator display all use. A device already flashed with the legacy secret
+// stays reachable regardless, because relay connect tries every stored key
+// (`getOperatorCandidates`), not just the primary.
 
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
@@ -77,13 +80,17 @@ function operatorFromMnemonic(mnemonic: string): Operator {
 
 function storedOperators(): Operator[] {
   const out: Operator[] = []
-  const legacy = localStorage.getItem(LS_SK) ?? ''
-  if (/^[0-9a-f]{64}$/.test(legacy)) {
-    out.push(operatorFromSk(legacy))
-  }
+  // Phrase-backed key first: it is the recoverable primary, so it is the one
+  // getOrCreateOperator/peek return. A legacy raw-hex secret follows as a
+  // fallback candidate, keeping a device flashed with it (before phrases existed)
+  // reachable over the relay.
   const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
   if (mnemonic && validateMnemonic(mnemonic, wordlist)) {
     out.push(operatorFromMnemonic(mnemonic))
+  }
+  const legacy = localStorage.getItem(LS_SK) ?? ''
+  if (/^[0-9a-f]{64}$/.test(legacy)) {
+    out.push(operatorFromSk(legacy))
   }
 
   const seen = new Set<string>()
@@ -103,8 +110,8 @@ export function generateOperatorMnemonic(strength: 128 | 256 = 128): string {
  * Return the persisted operator key, creating + persisting a phrase-backed one
  * if none exists. Synchronous so existing call sites need no change.
  *
- * Precedence: a legacy raw-hex secret is honoured unchanged; otherwise a stored
- * recovery phrase wins; otherwise a new phrase-backed key is minted.
+ * Precedence: a stored recovery phrase wins; otherwise a legacy raw-hex secret
+ * is honoured unchanged; otherwise a new phrase-backed key is minted.
  */
 export function getOrCreateOperator(): Operator {
   const stored = storedOperators()
@@ -128,8 +135,6 @@ export function getOperatorCandidates(): Operator[] {
 /** The recovery phrase backing the current operator, or `null` for a legacy
  *  raw-hex key (which has no phrase to write down). */
 export function getOperatorMnemonic(): string | null {
-  const legacy = localStorage.getItem(LS_SK) ?? ''
-  if (/^[0-9a-f]{64}$/.test(legacy)) return null
   const mnemonic = localStorage.getItem(LS_MNEMONIC) ?? ''
   return mnemonic && validateMnemonic(mnemonic, wordlist) ? mnemonic : null
 }

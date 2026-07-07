@@ -66,13 +66,15 @@ describe('getOrCreateOperator', () => {
     expect(localStorage.getItem(LS_MNEMONIC)).toBeNull()
   })
 
-  it('preserves a legacy raw-hex secret when a phrase is also present', () => {
+  it('prefers the phrase-backed key when a legacy secret is also present', () => {
     const phrase = generateOperatorMnemonic()
     localStorage.setItem(LS_MNEMONIC, phrase)
     localStorage.setItem(LS_SK, 'b'.repeat(64))
     const op = getOrCreateOperator()
-    expect(op.skHex).toBe('b'.repeat(64))
-    expect(op.mnemonic).toBeUndefined()
+    // The recoverable phrase key is the primary; the legacy secret is only a
+    // fallback candidate for relay connect (see getOperatorCandidates).
+    expect(op.mnemonic).toBe(phrase)
+    expect(op.skHex).not.toBe('b'.repeat(64))
   })
 })
 
@@ -88,18 +90,21 @@ describe('getOperatorMnemonic', () => {
     expect(getOperatorMnemonic()).toBeNull()
   })
 
-  it('returns null when a legacy raw-hex key masks a phrase', () => {
-    localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
+  it('returns the phrase even when a legacy raw-hex key is also present', () => {
+    const phrase = generateOperatorMnemonic()
+    localStorage.setItem(LS_MNEMONIC, phrase)
     localStorage.setItem(LS_SK, 'c'.repeat(64))
-    expect(getOperatorMnemonic()).toBeNull()
+    expect(getOperatorMnemonic()).toBe(phrase)
   })
 })
 
 describe('peekOperatorPubHex', () => {
-  it('previews the same legacy key getOrCreateOperator will use', () => {
+  it('previews the phrase-backed key getOrCreateOperator will use', () => {
     localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
     localStorage.setItem(LS_SK, 'b'.repeat(64))
-    expect(peekOperatorPubHex()).toBe(getOrCreateOperator().pubHex)
+    const op = getOrCreateOperator()
+    expect(op.mnemonic).toBeDefined() // the phrase key is the primary
+    expect(peekOperatorPubHex()).toBe(op.pubHex)
   })
 })
 
@@ -110,8 +115,9 @@ describe('getOperatorCandidates', () => {
     localStorage.setItem(LS_SK, 'b'.repeat(64))
     const candidates = getOperatorCandidates()
     expect(candidates).toHaveLength(2)
-    expect(candidates[0]?.skHex).toBe('b'.repeat(64))
-    expect(candidates[1]?.mnemonic).toBe(phrase)
+    // Phrase-backed key first (the recoverable primary), legacy secret second.
+    expect(candidates[0]?.mnemonic).toBe(phrase)
+    expect(candidates[1]?.skHex).toBe('b'.repeat(64))
   })
 
   it('mints one operator when none is stored', () => {
