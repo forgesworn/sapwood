@@ -37,6 +37,18 @@ function save(devices: KnownDevice[]): void {
   localStorage.setItem(LS_KEY, JSON.stringify(devices))
 }
 
+function mergeRelays(preferred: string[], existing: string[] = []): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const relay of [...preferred, ...existing]) {
+    const clean = relay.trim()
+    if (!clean || seen.has(clean)) continue
+    seen.add(clean)
+    out.push(clean)
+  }
+  return out
+}
+
 export function listKnownDevices(): KnownDevice[] {
   return load().sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
 }
@@ -95,7 +107,7 @@ export function rememberDevice(pubHex: string, relays: string[], label?: string)
   const existing = devices.find((d) => d.pubHex.toLowerCase() === key)
   const now = new Date().toISOString()
   if (existing) {
-    if (relays.length) existing.relays = relays
+    if (relays.length) existing.relays = mergeRelays(relays, existing.relays)
     if (label) existing.label = label
     existing.lastSeen = now
     save(devices)
@@ -103,7 +115,7 @@ export function rememberDevice(pubHex: string, relays: string[], label?: string)
   }
   const entry: KnownDevice = {
     pubHex: key,
-    relays: relays.length ? relays : ['wss://relay.trotters.cc'],
+    relays: relays.length ? mergeRelays(relays) : ['wss://relay.trotters.cc'],
     label: label || npubShort(key),
     lastSeen: now,
   }

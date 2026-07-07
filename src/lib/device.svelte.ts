@@ -42,6 +42,20 @@ interface RelayAuditEntry {
   outcome?: unknown
 }
 
+export interface SignerActivityEntry {
+  id: string
+  at: string
+  source: 'relay-audit' | 'device-log'
+  method: string
+  outcome: string
+  action: string
+  app: string
+  client: string
+  kind: number | null
+  kindText: string
+  preview: string
+}
+
 export interface PendingClient {
   pubkey: string
   firstSeen: string
@@ -63,6 +77,7 @@ export const device = $state({
   approvals: [] as Record<string, unknown>[],
   selectedSlot: 0,
   logs: [] as string[],
+  signerActivity: [] as SignerActivityEntry[],
   error: null as string | null,
   /** When set, the signer is waiting on a physical button hold and this is the
    *  instruction to show (e.g. the one-time USB pairing). Cleared when done. */
@@ -90,6 +105,8 @@ export const device = $state({
 })
 
 const MAX_LOG_LINES = 500
+const MAX_ACTIVITY_LINES = 100
+let signerActivitySeq = 0
 
 // --- Serial transport listener ---
 
@@ -100,6 +117,7 @@ serialTransport.on((event: SerialEvent) => {
       device.mode = 'serial'
       device.portInfo = event.port
       device.error = null
+      device.signerActivity = []
       device.usbSilent = false
       void probeSerial()
       break
@@ -110,6 +128,7 @@ serialTransport.on((event: SerialEvent) => {
         device.portInfo = ''
         device.masters = []
         device.slots = []
+        device.signerActivity = []
         device.bridgeAuthed = false
         device.usbProbing = false
         device.usbSilent = false
@@ -136,6 +155,7 @@ httpTransport.on((event: HttpEvent) => {
       device.mode = 'http'
       device.portInfo = event.port
       device.error = null
+      device.signerActivity = []
       refreshMasters()
       break
     case 'disconnected':
@@ -147,6 +167,7 @@ httpTransport.on((event: HttpEvent) => {
         device.slots = []
         device.pendingClients = []
         device.approvals = []
+        device.signerActivity = []
         device.bridgeInfo = null
       }
       break
@@ -192,12 +213,48 @@ function addLog(line: string) {
   if (device.logs.length > MAX_LOG_LINES) {
     device.logs = device.logs.slice(-MAX_LOG_LINES)
   }
+  const activity = signerActivityFromDeviceLog(line)
+  if (activity) appendSignerActivity(activity)
   // Lift the signer's WiFi-join outcome out of the log stream. The firmware
   // retries a failed join every 3s (relay.rs), so a bad SSID/password otherwise
   // just scrolls past unnoticed; surface the reason and clear it once WiFi is up.
   const failed = line.match(/wifi connect failed:\s*(.+?)(?:;|$)/i)
   if (failed) device.wifiJoinError = failed[1]!.trim()
   else if (/wifi up\b/i.test(line)) device.wifiJoinError = null
+}
+
+function appendSignerActivity(entry: Omit<SignerActivityEntry, 'id' | 'at'> & { at?: string }) {
+  const next: SignerActivityEntry = {
+    ...entry,
+    id: `activity-${++signerActivitySeq}`,
+    at: entry.at ?? new Date().toISOString(),
+  }
+  device.signerActivity.push(next)
+  if (device.signerActivity.length > MAX_ACTIVITY_LINES) {
+    device.signerActivity = device.signerActivity.slice(-MAX_ACTIVITY_LINES)
+  }
+}
+
+function signerActivityFromDeviceLog(line: string): Omit<SignerActivityEntry, 'id' | 'at'> | null {
+  if (/^Sign audit:/i.test(line)) return null
+  const signed = line.match(/^sign_event\s+([^:]+):\s+(.+?)(?:\s+\((\d+)\))?\s+for\s+(.+?)(?:\s+[—-]\s+(.+))?$/i)
+  if (!signed) return null
+  const outcome = signed[1]!.trim()
+  const kindName = signed[2]!.trim()
+  const kind = signed[3] ? Number(signed[3]) : NaN
+  const app = signed[4]!.trim() || 'unknown app'
+  const preview = signed[5]?.trim() ?? ''
+  return {
+    source: 'device-log',
+    method: 'sign_event',
+    outcome,
+    action: auditAction('sign_event', outcome),
+    app,
+    client: '',
+    kind: Number.isFinite(kind) ? kind : null,
+    kindText: Number.isFinite(kind) ? `${kindName} (kind ${kind})` : kindName,
+    preview,
+  }
 }
 
 // --- Actions ---
@@ -378,6 +435,12 @@ const RELAY_STATUS_TIMEOUT_MS = 75_000
 const RELAY_POLL_MS = 4_000
 let lastRelayRefreshLog = ''
 
+function relaySummary(relays: string[]): string {
+  if (relays.length === 0) return ''
+  if (relays.length === 1) return relays[0]
+  return `${relays.length} relays`
+}
+
 /**
  * Connect to a wifi-standalone device over its relay, as the operator.
  * `devicePubHex` is the device MASTER pubkey (the kind-24134 mgmt address);
@@ -393,10 +456,11 @@ export async function connectRelay(devicePubHex: string, relays: string[], label
   device.connected = true
   device.mode = 'relay'
   device.operatorPub = t.operatorPub
-  device.portInfo = `${npubShort(devicePubHex)} · ${relays[0] ?? ''}`
+  device.portInfo = `${npubShort(devicePubHex)} · ${relaySummary(relays)}`
   device.error = null
   device.masters = []
   device.slots = []
+  device.signerActivity = []
   device.relays = relays
   device.relayStatus = null
   lastRelayAuditSeq = 0
@@ -497,17 +561,37 @@ function auditAction(method: string, outcome: string): string {
 }
 
 function relayAuditLine(entry: RelayAuditEntry): string {
+  const activity = signerActivityFromRelayAudit(entry)
+  const method = activity.method
+  const outcome = activity.outcome
+  const label = activity.app
+  const client = activity.client
+  const fromClient = client ? ` from client ${client}` : ''
+  const preview = activity.preview ? `; preview: ${activity.preview}` : ''
+  const action = auditAction(method, outcome)
+  const target = activity.kind !== null ? ` ${activity.kindText}` : ''
+  return `Sign audit: ${action}${target} for ${label}${fromClient}${preview}`
+}
+
+function signerActivityFromRelayAudit(entry: RelayAuditEntry): Omit<SignerActivityEntry, 'id' | 'at'> {
   const method = typeof entry.method === 'string' && entry.method ? entry.method : 'sign_event'
   const rawKind = entry.kind
   const kind = typeof rawKind === 'number' || typeof rawKind === 'string' ? Number(rawKind) : NaN
   const outcome = typeof entry.outcome === 'string' && entry.outcome ? entry.outcome : 'handled'
-  const label = typeof entry.label === 'string' && entry.label ? entry.label : 'unknown app'
+  const app = typeof entry.label === 'string' && entry.label ? entry.label : 'unknown app'
   const client = typeof entry.client === 'string' && entry.client ? entry.client.slice(0, 8) : ''
-  const fromClient = client ? ` from client ${client}` : ''
-  const preview = typeof entry.preview === 'string' && entry.preview ? `; preview: ${entry.preview}` : ''
-  const action = auditAction(method, outcome)
-  const target = Number.isFinite(kind) ? ` ${auditKindLabel(kind)}` : ''
-  return `Sign audit: ${action}${target} for ${label}${fromClient}${preview}`
+  const preview = typeof entry.preview === 'string' && entry.preview ? entry.preview : ''
+  return {
+    source: 'relay-audit',
+    method,
+    outcome,
+    action: auditAction(method, outcome),
+    app,
+    client,
+    kind: Number.isFinite(kind) ? kind : null,
+    kindText: Number.isFinite(kind) ? auditKindLabel(kind) : '',
+    preview,
+  }
 }
 
 function appendRelayAudit(entries: RelayAuditEntry[]) {
@@ -515,6 +599,7 @@ function appendRelayAudit(entries: RelayAuditEntry[]) {
     const seq = Number(entry.seq ?? 0)
     if (!Number.isFinite(seq) || seq <= lastRelayAuditSeq) continue
     lastRelayAuditSeq = Math.max(lastRelayAuditSeq, seq)
+    appendSignerActivity(signerActivityFromRelayAudit(entry))
     addLog(relayAuditLine(entry))
   }
 }
@@ -589,6 +674,7 @@ export async function disconnect() {
     device.masters = []
     device.slots = []
     device.relays = []
+    device.signerActivity = []
     device.relayStatus = null
   }
 }

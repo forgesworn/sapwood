@@ -56,6 +56,24 @@ describe('device labels', () => {
     expect(d?.relays).toEqual(['wss://relay.example'])
   })
 
+  it('merges relay updates instead of forgetting older relays', () => {
+    rememberDevice(HEX_B, [
+      'wss://relay.trotters.cc',
+      'wss://nos.lol',
+      'wss://relay.damus.io',
+    ], 'signer')
+
+    rememberDevice(HEX_B, ['wss://relay.primal.net', 'wss://nos.lol'])
+
+    const d = listKnownDevices().find((k) => k.pubHex === HEX_B)
+    expect(d?.relays).toEqual([
+      'wss://relay.primal.net',
+      'wss://nos.lol',
+      'wss://relay.trotters.cc',
+      'wss://relay.damus.io',
+    ])
+  })
+
   it('ignores a blank label and invalid pubkeys', () => {
     setDeviceLabel(HEX_A, '   ')
     setDeviceLabel('short', 'x')

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { device, refreshRelayAudit } from '../lib/device.svelte.js'
+  import SignerActivity from './SignerActivity.svelte'
 
   let autoScroll = $state(true)
   let refreshing = $state(false)
@@ -21,6 +22,7 @@
 
   function clearLogs() {
     device.logs = []
+    device.signerActivity = []
     refreshError = null
   }
 
@@ -38,6 +40,8 @@
 </script>
 
 <div class="log-monitor">
+  <SignerActivity />
+
   <div class="header-row">
     <h2 class="section-title">Device Log</h2>
     <div class="controls">

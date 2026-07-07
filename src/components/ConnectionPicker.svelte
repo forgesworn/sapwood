@@ -95,7 +95,7 @@
     knownDevices = listKnownDevices()
     if (knownDevices.length) {
       relayPubInput = nip19.npubEncode(knownDevices[0].pubHex)
-      relayUrlInput = knownDevices[0].relays[0] ?? relayUrlInput
+      relayUrlInput = knownDevices[0].relays.join(', ') || relayUrlInput
     }
     relayError = ''
     showRelayForm = true
@@ -104,7 +104,7 @@
   function pickKnown(e: Event) {
     const hex = (e.target as HTMLSelectElement).value
     const d = knownDevices.find((k) => k.pubHex === hex)
-    if (d) { relayPubInput = nip19.npubEncode(d.pubHex); relayUrlInput = d.relays[0] ?? relayUrlInput }
+    if (d) { relayPubInput = nip19.npubEncode(d.pubHex); relayUrlInput = d.relays.join(', ') || relayUrlInput }
   }
 
   /** Accept an npub or 64-char hex; return x-only hex or null. */
@@ -261,19 +261,19 @@
           </div>
 
           <div class="field">
-            <label class="field-label" for="relay-url-input">2 · The relay it talks through</label>
+            <label class="field-label" for="relay-url-input">2 · The relays it uses</label>
             <input
               id="relay-url-input"
               class="field-input"
               type="text"
               bind:value={relayUrlInput}
-              placeholder="wss://relay.trotters.cc"
+              placeholder="wss://relay.trotters.cc, wss://nos.lol"
               disabled={connecting}
               aria-describedby="relay-url-hint"
             />
             <span id="relay-url-hint" class="field-hint">
               A relay is a shared postbox on the internet: your browser drops off a message and the
-              device picks it up. Use the same one you chose during setup.
+              device picks it up. Use every relay you configured during setup; commas or new lines are fine.
             </span>
           </div>
 

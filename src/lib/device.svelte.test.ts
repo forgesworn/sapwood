@@ -89,10 +89,12 @@ function emitMasterList(masters: MasterInfo[]) {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   device.mode = 'none'
   device.connected = false
   device.masters = []
   device.logs = []
+  device.signerActivity = []
   device.error = null
   resolveMock.mockReset()
   loadAvatarMock.mockReset()
@@ -285,9 +287,59 @@ describe('identity card auto-sync on serial master list', () => {
       expect(device.logs.join('\n')).toContain('Sign audit: signed Profile (kind 0) for Primal from client aaaaaaaa; preview: {"name":"alice"}')
       expect(device.logs.join('\n')).toContain('Sign audit: nip04_decrypt ok for Primal from client bbbbbbbb; preview: peer 12345678 - content redacted')
       expect(device.logs.join('\n')).toContain('Sign audit: signed unknown Nostr kind 999999 for unknown app from client cccccccc; preview: {"custom":true}')
+      expect(device.signerActivity).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'relay-audit',
+          action: 'signed',
+          app: 'Primal',
+          client: 'aaaaaaaa',
+          kind: 0,
+          kindText: 'Profile (kind 0)',
+          preview: '{"name":"alice"}',
+        }),
+        expect.objectContaining({
+          source: 'relay-audit',
+          action: 'nip04_decrypt ok',
+          app: 'Primal',
+          client: 'bbbbbbbb',
+          kind: null,
+          preview: 'peer 12345678 - content redacted',
+        }),
+        expect.objectContaining({
+          source: 'relay-audit',
+          action: 'signed',
+          app: 'unknown app',
+          client: 'cccccccc',
+          kind: 999999,
+          kindText: 'unknown Nostr kind 999999',
+          preview: '{"custom":true}',
+        }),
+      ]))
     } finally {
       await disconnect()
     }
+  })
+
+  it('records signer activity from structured firmware log lines', () => {
+    for (const fn of serialMock.listeners) {
+      fn({
+        kind: 'log',
+        line: 'sign_event signed: App Data (30078) for primal — {"subkey":"user-home-feeds"}',
+      })
+    }
+
+    expect(device.signerActivity).toHaveLength(1)
+    expect(device.signerActivity[0]).toEqual(expect.objectContaining({
+      source: 'device-log',
+      method: 'sign_event',
+      outcome: 'signed',
+      action: 'signed',
+      app: 'primal',
+      client: '',
+      kind: 30078,
+      kindText: 'App Data (kind 30078)',
+      preview: '{"subkey":"user-home-feeds"}',
+    }))
   })
 
   it('maps remembered client pubkeys from relay slot listings', async () => {
@@ -319,6 +371,27 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       expect(device.slots[0]?.authorized_pubkeys).toEqual(['a'.repeat(64), 'b'.repeat(64)])
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('summarizes multi-relay WiFi connections without hiding the full relay set', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    const relays = ['wss://relay.trotters.cc', 'wss://nos.lol', 'wss://relay.primal.net']
+    await connectRelay(pubHex, relays)
+    try {
+      expect(device.portInfo).toContain('3 relays')
+      expect(device.relays).toEqual(relays)
     } finally {
       await disconnect()
     }
