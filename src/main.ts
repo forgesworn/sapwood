@@ -9,6 +9,10 @@ import './app.css'
 import { mount } from 'svelte'
 import Root from './Root.svelte'
 import { consumeImportLink } from './lib/import-link.svelte.js'
+import { migrateOperatorStorage } from './lib/op-mgmt.js'
+
+// Purge any malformed legacy operator record before anything reads it.
+migrateOperatorStorage()
 
 // Load an operator key from a "connect your phone" deep link, if present, before
 // the app mounts (and strip it from the URL).

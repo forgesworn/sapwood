@@ -78,6 +78,23 @@ function operatorFromMnemonic(mnemonic: string): Operator {
   return { skHex, pubHex: pubFromSk(skHex), mnemonic }
 }
 
+/**
+ * One-off storage hygiene, run once at startup. A legacy raw-hex operator record
+ * (`LS_SK`) that cannot be read as a 64-hex secret can never be used — every
+ * reader gates on `/^[0-9a-f]{64}$/` — yet it lingers looking like a usable
+ * fallback key and muddies operator diagnostics. Drop such junk so the phrase
+ * key is unambiguously the operator. A salvageable value (valid once trimmed and
+ * lower-cased) is left untouched; only genuinely malformed records are removed.
+ */
+export function migrateOperatorStorage(): void {
+  try {
+    const legacy = localStorage.getItem(LS_SK)
+    if (legacy !== null && !/^[0-9a-f]{64}$/.test(legacy.trim().toLowerCase())) {
+      localStorage.removeItem(LS_SK)
+    }
+  } catch { /* storage unavailable — nothing to migrate */ }
+}
+
 function storedOperators(): Operator[] {
   const out: Operator[] = []
   // Phrase-backed key first: it is the recoverable primary, so it is the one

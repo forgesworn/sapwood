@@ -12,6 +12,7 @@ import {
   importOperator,
   peekOperatorPubHex,
   getOperatorCandidates,
+  migrateOperatorStorage,
 } from './op-mgmt.js'
 
 const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
@@ -125,6 +126,42 @@ describe('getOperatorCandidates', () => {
     expect(candidates).toHaveLength(1)
     expect(candidates[0]?.skHex).toMatch(HEX64)
     expect(localStorage.getItem(LS_MNEMONIC)).toBe(candidates[0]?.mnemonic)
+  })
+})
+
+describe('migrateOperatorStorage', () => {
+  it('drops a malformed legacy secret (wrong length)', () => {
+    // A 65-char record: not a valid 32-byte secret, silently ignored by readers.
+    localStorage.setItem(LS_SK, 'a'.repeat(65))
+    migrateOperatorStorage()
+    expect(localStorage.getItem(LS_SK)).toBeNull()
+  })
+
+  it('drops a legacy secret containing non-hex characters', () => {
+    localStorage.setItem(LS_SK, 'z'.repeat(64))
+    migrateOperatorStorage()
+    expect(localStorage.getItem(LS_SK)).toBeNull()
+  })
+
+  it('keeps a well-formed legacy secret', () => {
+    const legacy = 'a'.repeat(64)
+    localStorage.setItem(LS_SK, legacy)
+    migrateOperatorStorage()
+    expect(localStorage.getItem(LS_SK)).toBe(legacy)
+  })
+
+  it('keeps a salvageable upper-case legacy secret', () => {
+    const legacy = 'A'.repeat(64)
+    localStorage.setItem(LS_SK, legacy)
+    migrateOperatorStorage()
+    expect(localStorage.getItem(LS_SK)).toBe(legacy)
+  })
+
+  it('leaves a phrase-backed key alone', () => {
+    const phrase = generateOperatorMnemonic()
+    localStorage.setItem(LS_MNEMONIC, phrase)
+    migrateOperatorStorage()
+    expect(localStorage.getItem(LS_MNEMONIC)).toBe(phrase)
   })
 })
 
