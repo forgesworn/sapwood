@@ -1,7 +1,6 @@
 {
-  "version": "0.10.12",
-  "builtAt": "2026-07-07T08:19:22Z",
-  "signingPubKey": "3cdfa635d0a058119b412999f061870e7e0a6d41df5deffadb0c1ff4a9d339b7",
+  "version": "0.10.13",
+  "builtAt": "2026-07-07T12:53:21Z",
   "boards": {
     "esp8266": {
       "app": "app.bin",
@@ -12,47 +11,31 @@
     },
     "heltec-v4": {
       "app": "app.bin",
-      "sha256": "5861d6e6afa32b6caeb215b4ed44836a7d27843d11aebc7d7863e3db7c910148",
-      "bytes": 1753360,
+      "sha256": "d7e412f795c4b039aa223573328d781a1e28ec7387bef20e8a36bf16c3354a84",
+      "bytes": 1768384,
       "ota": true,
-      "bootloader": "bootloader.bin",
-      "bootloaderSha256": "65864095c9f65ca49cb85bc75be69773bcdd1a58c1940db968de1c34993e1ec5",
-      "partitionTable": "partition-table.bin",
-      "partitionTableSha256": "5fd1f7a513f7f2e7b50952379103da099a1448029a459033bf250ac649df5f38",
-      "signature": "c8317eeef2399e643f1cd97a12fa44f7f05cf78f348e024536f1ee19b84f798bfb2ac4b2b2c07447d86a37e2b4a2859e88d9e5ad211dc040a028985798ebf00e"
+      "signature": "15218a0715c71772beb64c704135e4f0a8511c63e763a7f703f1c04ca07d07e7196c4dadf2caee2447b6811c899562d3a8fc278409cca00cbb7b6377fe4e0a0f"
     },
     "c6": {
       "app": "app.bin",
-      "sha256": "7d48f8d16465394cb00454c809c70aec7f558b8c3fefcac033d2e94899575bf9",
-      "bytes": 1823552,
+      "sha256": "7697486440f4c04293f4c9278aa1f1c7e56d71e1b49b129cf637df7ed7559770",
+      "bytes": 1838400,
       "ota": false,
-      "bootloader": "bootloader.bin",
-      "bootloaderSha256": "885979aa867fb2ffa491cf3f0ba522ec7bc5aa95c4a8327f057fc76ac16855fc",
-      "partitionTable": "partition-table.bin",
-      "partitionTableSha256": "784517352918bbb97434ea4df9cba20459385beff0988acb1d64dd53b3d1f9cc",
-      "signature": "a9f4313d04fa82f1c730fb2396c2a9469ef2375a6a22f42fb9b24ef823dbef32d131cdb76864c6e2b7270b9a89c5289a6255c4f7507e101a8647abd3316f6206"
+      "signature": "ea44904d579fe8bbcd74259ff95120c144d67aab923be8ac8dc3bc5164eb5da45e069843de4dfbf82eedcdb8b0d2b11a0e230ec4c6c34e289bf7946a72859505"
     },
     "heltec-v3": {
       "app": "app.bin",
-      "sha256": "d47196a7b150d07d16418efbbdc9739d2568bcc6ead11100ae09922872823797",
-      "bytes": 1756912,
+      "sha256": "0cd76c7b52c2652c9fb293d004e965ab83cb3335fc9790375b5171456647c4da",
+      "bytes": 1771904,
       "ota": true,
-      "bootloader": "bootloader.bin",
-      "bootloaderSha256": "588f675930ed26883bea36dc9859c02cbdb78fc67faff392b569d96f7a5dce74",
-      "partitionTable": "partition-table.bin",
-      "partitionTableSha256": "5fd1f7a513f7f2e7b50952379103da099a1448029a459033bf250ac649df5f38",
-      "signature": "c3223520b4b9b8eca021a70334ccb8e8400d1b060f342b15a0b8e97ec2b702bfdc7af9f8d456529d05ce5be539816ddad85b6b5be5602287d23f80db922c1803"
+      "signature": "8c6edb2b43f497dda9e9289601a76bae5c64f94316acad2bf363af98f67d201b4daf94d031733f27e5caaaabd205fa5b7cbe4db9bd706f120e79e2dfca515e07"
     },
     "tdisplay": {
       "app": "app.bin",
-      "sha256": "e9a3180047bf6d8dbd322e1633d7a21d36907efe896044316d4b3a91ec5300b8",
-      "bytes": 1782624,
+      "sha256": "65090a196c0e09263ecb628b2c92fe30b9b2e4877922440df22d9a0255c3a601",
+      "bytes": 1797552,
       "ota": false,
-      "bootloader": "bootloader.bin",
-      "bootloaderSha256": "435d91a7bb67cd3e398487476bdb4cc1b877211c6ecb80633d3355eeec369239",
-      "partitionTable": "partition-table.bin",
-      "partitionTableSha256": "784517352918bbb97434ea4df9cba20459385beff0988acb1d64dd53b3d1f9cc",
-      "signature": "8e9dc886529e23844ec47c8e701548b59167fd2115589870debc65a4acf1fd445b6c0c6147dc111616a4cbcb0f6d0864f70e158d243c82be66113e2bc20e6f0b"
+      "signature": "8eb627f722c9a78688693c119c43c1ae461a0284da1fe709e7a7e30250d90b7e0f19b2d297cdbf85f050fd81937a43f98acaed94b5ff230992fe5f1b8fcb7006"
     }
   }
 }
