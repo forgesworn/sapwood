@@ -264,6 +264,15 @@ describe('identity card auto-sync on serial master list', () => {
               preview: 'peer 12345678 - content redacted',
               outcome: 'ok',
             },
+            {
+              seq: 3,
+              method: 'sign_event',
+              label: '',
+              client: 'c'.repeat(64),
+              kind: 999999,
+              preview: '{"custom":true}',
+              outcome: 'signed',
+            },
           ],
         }
       }
@@ -273,9 +282,9 @@ describe('identity card auto-sync on serial master list', () => {
 
     await connectRelay(pubHex, ['wss://r.example'])
     try {
-      expect(device.logs.join('\n')).toContain('sign_event signed: Profile (0) for Primal')
-      expect(device.logs.join('\n')).toContain('nip04_decrypt ok for Primal')
-      expect(device.logs.join('\n')).toContain('peer 12345678 - content redacted')
+      expect(device.logs.join('\n')).toContain('Sign audit: signed Profile (kind 0) for Primal from client aaaaaaaa; preview: {"name":"alice"}')
+      expect(device.logs.join('\n')).toContain('Sign audit: nip04_decrypt ok for Primal from client bbbbbbbb; preview: peer 12345678 - content redacted')
+      expect(device.logs.join('\n')).toContain('Sign audit: signed unknown Nostr kind 999999 for unknown app from client cccccccc; preview: {"custom":true}')
     } finally {
       await disconnect()
     }

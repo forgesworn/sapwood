@@ -484,24 +484,38 @@ function logRelayRefreshIssue(message: string) {
   addLog(line)
 }
 
+function auditKindLabel(kind: number): string {
+  const label = kindLabel(kind)
+  const known = /^(.+) \((\d+)\)$/.exec(label)
+  return known ? `${known[1]} (kind ${known[2]})` : `unknown Nostr kind ${kind}`
+}
+
+function auditAction(method: string, outcome: string): string {
+  if (method === 'sign_event' && outcome === 'signed') return 'signed'
+  if (outcome.startsWith('error:')) return `${method} failed (${outcome.slice('error:'.length).trim()})`
+  return `${method} ${outcome}`
+}
+
+function relayAuditLine(entry: RelayAuditEntry): string {
+  const method = typeof entry.method === 'string' && entry.method ? entry.method : 'sign_event'
+  const rawKind = entry.kind
+  const kind = typeof rawKind === 'number' || typeof rawKind === 'string' ? Number(rawKind) : NaN
+  const outcome = typeof entry.outcome === 'string' && entry.outcome ? entry.outcome : 'handled'
+  const label = typeof entry.label === 'string' && entry.label ? entry.label : 'unknown app'
+  const client = typeof entry.client === 'string' && entry.client ? entry.client.slice(0, 8) : ''
+  const fromClient = client ? ` from client ${client}` : ''
+  const preview = typeof entry.preview === 'string' && entry.preview ? `; preview: ${entry.preview}` : ''
+  const action = auditAction(method, outcome)
+  const target = Number.isFinite(kind) ? ` ${auditKindLabel(kind)}` : ''
+  return `Sign audit: ${action}${target} for ${label}${fromClient}${preview}`
+}
+
 function appendRelayAudit(entries: RelayAuditEntry[]) {
   for (const entry of entries) {
     const seq = Number(entry.seq ?? 0)
     if (!Number.isFinite(seq) || seq <= lastRelayAuditSeq) continue
     lastRelayAuditSeq = Math.max(lastRelayAuditSeq, seq)
-    const method = typeof entry.method === 'string' && entry.method ? entry.method : 'sign_event'
-    const rawKind = entry.kind
-    const kind = typeof rawKind === 'number' || typeof rawKind === 'string' ? Number(rawKind) : NaN
-    const kindText = Number.isFinite(kind) ? `${kindLabel(kind)} ` : ''
-    const outcome = typeof entry.outcome === 'string' && entry.outcome ? entry.outcome : 'handled'
-    const label = typeof entry.label === 'string' && entry.label ? entry.label : ''
-    const client = typeof entry.client === 'string' && entry.client ? entry.client.slice(0, 8) : ''
-    const who = label || (client ? `client ${client}` : 'unknown app')
-    const preview = typeof entry.preview === 'string' && entry.preview ? ` — ${entry.preview}` : ''
-    const line = kindText
-      ? `${method} ${outcome}: ${kindText}for ${who}${preview}`
-      : `${method} ${outcome} for ${who}${preview}`
-    addLog(line)
+    addLog(relayAuditLine(entry))
   }
 }
 
