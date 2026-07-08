@@ -7,7 +7,7 @@ Web management UI for the Heartwood ESP32 signing device. Connects directly to t
 Two surfaces: a guided **Home** (signer card, connect-an-app flow, connected apps with inline permissions, operator-key backup nudge, firmware nudge, phone handoff) and an **Advanced console** with four sections:
 
 - **Apps** -- create connections, approve/revoke apps, per-kind signing permissions (one surface for USB, WiFi and bridge transports)
-- **Identity** -- identities (master slots) on the signer, add-identity (provision), identity-card sync, operator key, profile relays
+- **Identity** -- identities (master slots) on the signer, add-identity (provision), identity-card sync, NIP-05 short-address generator (nostr.json for bunker discovery), operator key, profile relays
 - **Device** -- connection info, network mode, OTA firmware updates (SHA-256 verified), security (boot PIN, bridge secret), bridge control, danger zone (disconnect all apps, factory reset -- physical button confirm)
 - **Logs** -- real-time ESP-IDF log output from the device
 
