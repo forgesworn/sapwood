@@ -431,6 +431,9 @@ let lastRelayAuditSeq = 0
 // must outwait that window, or a create/update issued while a signature is
 // pending reports a spurious "timeout" (and a create loses its one-shot link).
 const MGMT_WRITE_TIMEOUT_MS = 35_000
+/** Pairing that may dial a new relay: TLS + WS handshake on the signer adds
+ * up to ~10s of connect timeout on top of the normal management round trip. */
+const MGMT_DIAL_TIMEOUT_MS = 50_000
 const RELAY_STATUS_TIMEOUT_MS = 75_000
 const RELAY_POLL_MS = 4_000
 let lastRelayRefreshLog = ''
@@ -1101,9 +1104,11 @@ export async function mgmtCreateClient(
 
 /**
  * Pair a nostrconnect app: bind a slot to the app's pubkey and have the signer
- * publish the connect ACK on its relay. Relay-only — the signer must be on the
- * relay to publish, and the app must share that relay (checked in the UI). The
- * device has no clock, so we hand it our current time for the ACK's created_at.
+ * publish the connect ACK on the relay the app listens on. Relay-only — the
+ * signer must be online to publish. When the app's relay is not one the signer
+ * already serves, pass it as `relay` and the signer dials and keeps it as a
+ * pinned session (capacity permitting; it answers `relay_capacity` when full).
+ * The device has no clock, so we hand it our current time for the ACK's created_at.
  */
 export async function mgmtNostrconnect(params: {
   clientPubkey: string
@@ -1111,7 +1116,9 @@ export async function mgmtNostrconnect(params: {
   label: string
   approveSigning: boolean
   allowedKinds: number[]
-}): Promise<{ slot_index: number }> {
+  /** The app's relay, when it is not already in the signer's relay set. */
+  relay?: string
+}): Promise<{ slot_index: number; joined_relay: boolean }> {
   if (device.mode !== 'relay' || !relayTransport) {
     throw new Error('Pairing a nostrconnect app needs the signer connected over WiFi, so it can publish the connect reply. Connect over WiFi and try again.')
   }
@@ -1122,9 +1129,13 @@ export async function mgmtNostrconnect(params: {
     label: params.label,
     approve_signing: params.approveSigning,
     allowed_kinds: params.allowedKinds,
-  })
+    ...(params.relay ? { relay: params.relay } : {}),
+  }, MGMT_DIAL_TIMEOUT_MS)
   await relayRefresh()
-  return { slot_index: Number(res.slot_index ?? -1) }
+  return {
+    slot_index: Number(res.slot_index ?? -1),
+    joined_relay: Boolean(res.joined_relay ?? false),
+  }
 }
 
 /**

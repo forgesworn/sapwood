@@ -53,7 +53,11 @@
   let ncError = $state<string | null>(null)
   let ncPaired = $state<{ appName: string } | null>(null)
   const ncReq = $derived(isValidNostrConnect(ncUri) ? parseNostrConnectURI(ncUri.trim()) : null)
-  const ncRelayOk = $derived(!!ncReq && sharesRelay(ncReq.relays, device.relays))
+  const ncRelayShared = $derived(!!ncReq && sharesRelay(ncReq.relays, device.relays))
+  // No overlap is no longer fatal: the signer can dial the app's relay and keep
+  // it as a pinned session. It only refuses when it is already at capacity.
+  const ncJoinRelay = $derived(ncReq && !ncRelayShared ? ncReq.relays[0] ?? null : null)
+  let ncJoined = $state(false)
 
   function reset() {
     step = 'name'
@@ -68,6 +72,7 @@
     ncUri = ''
     ncError = null
     ncPaired = null
+    ncJoined = false
   }
 
   function start() {
@@ -156,17 +161,22 @@
     ncPairing = true
     ncError = null
     try {
-      await mgmtNostrconnect({
+      const res = await mgmtNostrconnect({
         clientPubkey: ncReq.clientPubkey,
         secret: ncReq.secret,
         label: ncReq.appName,
         approveSigning: mgmtCanApproveSigning(),
         allowedKinds: permsToAllowedKinds(ncReq.perms),
+        ...(ncJoinRelay ? { relay: ncJoinRelay } : {}),
       })
+      ncJoined = res.joined_relay
       ncPaired = { appName: ncReq.appName }
       step = 'nc-done'
     } catch (e) {
-      ncError = e instanceof Error ? e.message : 'Could not pair the app.'
+      const msg = e instanceof Error ? e.message : 'Could not pair the app.'
+      ncError = msg.includes('relay_capacity')
+        ? `Your signer already serves its maximum relays, so it cannot join ${ncJoinRelay}. Point the app at ${device.relays[0] ?? 'your signer’s relay'} instead, or remove a connected app that pinned a relay.`
+        : msg
     } finally {
       ncPairing = false
     }
@@ -323,21 +333,22 @@
         <p class="error-text">That does not look like a valid nostrconnect link.</p>
       {/if}
       {#if ncReq}
-        <div class="nc-summary" class:bad={!ncRelayOk}>
+        <div class="nc-summary" class:bad={!ncRelayShared && !ncJoinRelay}>
           <p class="nc-app">{ncReq.appName}{#if ncReq.appUrl} · <span class="nc-url">{ncReq.appUrl}</span>{/if}</p>
-          {#if ncRelayOk}
+          {#if ncRelayShared}
             <p class="hint-sm">Pairs on <code>{ncReq.relays[0]}</code>. Your signer will send the connection reply there.</p>
+          {:else if ncJoinRelay}
+            <p class="hint-sm">This app listens on <code>{ncJoinRelay}</code>, which your signer does not
+              serve yet. Your signer will join that relay and keep serving it for this app.</p>
           {:else}
-            <p class="warn-text">This app listens on a different relay to your signer, so the pairing
-              can't reach it. Point the app at your signer's relay ({device.relays[0] ?? 'your relay'}),
-              or add the app's relay under Device › Network first.</p>
+            <p class="warn-text">This link names no usable relay, so the pairing cannot reach the app.</p>
           {/if}
         </div>
       {/if}
       {#if ncError}<p class="error-text">{ncError}</p>{/if}
       <div class="flow-actions">
         <button class="btn btn-ghost" onclick={() => { step = 'name'; ncError = null }} disabled={ncPairing}>Back</button>
-        <button class="btn btn-primary" disabled={!ncReq || !ncRelayOk || ncPairing} onclick={pairNostrconnect}>
+        <button class="btn btn-primary" disabled={!ncReq || (!ncRelayShared && !ncJoinRelay) || ncPairing} onclick={pairNostrconnect}>
           {ncPairing ? 'Pairing…' : 'Pair this app'}
         </button>
       </div>
@@ -349,6 +360,10 @@
       </div>
       <p class="hint">Your signer sent the connection reply. The app should show as connected now, and
         appears under your connected apps.</p>
+      {#if ncJoined}
+        <p class="hint-sm">Your signer joined the app's relay and keeps serving it while this
+          connection exists. Removing the app releases the relay.</p>
+      {/if}
       <div class="flow-actions">
         <button class="btn btn-primary" onclick={finish}>Done</button>
       </div>
