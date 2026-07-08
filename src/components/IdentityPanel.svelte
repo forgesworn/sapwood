@@ -6,6 +6,7 @@
   import Provision from './Provision.svelte'
   import OperatorKey from './OperatorKey.svelte'
   import ProfileRelays from './ProfileRelays.svelte'
+  import Nip05Card from './Nip05Card.svelte'
 
   const MODE_LABELS: Record<number, string> = {
     0: 'BUNKER',
@@ -109,6 +110,9 @@
       {#if profileStatus}<p class="hint-sm status">{profileStatus}</p>{/if}
     </section>
   {/if}
+
+  <!-- Short address (NIP-05): nostr.json generator for bunker discovery. -->
+  <Nip05Card />
 
   <!-- Add an identity (USB-gated inside). Open by default when the signer has
        none yet, so a device that fell through to the console from setup lands
