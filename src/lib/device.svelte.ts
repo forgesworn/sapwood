@@ -555,8 +555,28 @@ function closeRelayTransports(transports: RelayTransport[], keep: RelayTransport
   }
 }
 
-async function selectRelayTransport(devicePubHex: string, relays: string[]): Promise<RelaySelection> {
+async function selectRelayTransport(
+  devicePubHex: string,
+  relays: string[],
+  requiredOperatorPubHex?: string,
+): Promise<RelaySelection> {
   const operators = getOperatorCandidates()
+  if (requiredOperatorPubHex) {
+    const required = requiredOperatorPubHex.toLowerCase()
+    const operator = operators.find((candidate) => candidate.pubHex === required)
+    if (!operator) throw new Error('the imported operator credential is unavailable')
+    const transport = new RelayTransport(devicePubHex, relays, operator.skHex)
+    try {
+      await transport.connect()
+      // A phone handoff is not complete merely because a relay subscription
+      // opened. Require an authenticated reply from this exact signer/operator.
+      const status = await transport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
+      return { transport, status }
+    } catch (error) {
+      transport.close()
+      throw error
+    }
+  }
   if (operators.length === 1) {
     const transport = new RelayTransport(devicePubHex, relays, operators[0]!.skHex)
     console.log(`[hw] relay connect → signer ${devicePubHex.slice(0, 8)}… on [${relays.join(', ')}] as operator ${transport.operatorPub.slice(0, 8)}…`)
@@ -620,13 +640,22 @@ function applyRelayStatus(raw: Record<string, unknown>) {
  * `devicePubHex` is the device MASTER pubkey (the kind-24134 mgmt address);
  * `relays` is where it listens. Uses the persisted operator secret to sign.
  */
-export async function connectRelay(devicePubHex: string, relays: string[], label?: string) {
+export async function connectRelay(
+  devicePubHex: string,
+  relays: string[],
+  label?: string,
+  requiredOperatorPubHex?: string,
+) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   // A killed/reloaded mobile tab may have left an activated handoff whose
   // terminal route is not known yet. Subscribe to B + A from the password-free
   // journal so either commit or rollback remains reachable.
   const recoveryRelays = networkRecoveryRelays(devicePubHex, relays)
-  const { transport: t, status } = await selectRelayTransport(devicePubHex, recoveryRelays)
+  const { transport: t, status } = await selectRelayTransport(
+    devicePubHex,
+    recoveryRelays,
+    requiredOperatorPubHex,
+  )
   relayTransport = t
   device.connectionGeneration += 1
   device.connected = true

@@ -7,6 +7,19 @@
   import { nip05, nip19 } from 'nostr-tools'
 
   const canUseUsb = $derived(typeof navigator !== 'undefined' && 'serial' in navigator)
+  const MOBILE_QUERY = '(max-width: 640px), ((max-width: 1024px) and (pointer: coarse))'
+  let mobile = $state(
+    typeof window !== 'undefined'
+      && (window.matchMedia?.(MOBILE_QUERY).matches ?? window.innerWidth <= 640),
+  )
+
+  $effect(() => {
+    const query = window.matchMedia?.(MOBILE_QUERY)
+    if (!query) return
+    const update = () => { mobile = query.matches }
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
 
   let showHttpForm = $state(false)
   let httpAddress = $state(HttpTransport.savedAddress() ?? '')
@@ -72,6 +85,23 @@
       smartError = e instanceof Error
         ? e.message
         : 'Could not reach it over the network: is it powered on?'
+    } finally {
+      connecting = false
+    }
+  }
+
+  /** A phone never detours through USB detection: its remembered signer route
+   * is the primary path whether the phone itself uses Wi-Fi or cellular. */
+  async function handleRemoteSmartConnect() {
+    if (!smartDevice) { openRelayForm(); return }
+    smartError = ''
+    connecting = true
+    try {
+      await connectRelay(smartDevice.pubHex, smartDevice.relays, smartDevice.label)
+    } catch (e) {
+      smartError = e instanceof Error
+        ? e.message
+        : 'Could not reach the signer over the internet.'
     } finally {
       connecting = false
     }
@@ -204,7 +234,7 @@
       <span class="indicator connected"></span>
       <span class="conn-label">CONNECTED</span>
       <span class="conn-detail">
-        {device.mode === 'serial' ? 'USB' : device.mode === 'relay' ? 'WIFI' : 'BRIDGE'} · {device.portInfo}
+        {device.mode === 'serial' ? 'USB' : device.mode === 'relay' ? 'REMOTE' : 'BRIDGE'} · {device.portInfo}
       </span>
       <button class="btn btn-danger btn-disconnect" onclick={() => disconnect()}>Disconnect</button>
     </div>
@@ -217,11 +247,10 @@
     {/if}
     {#if showRelayForm}
       <div class="relay-setup">
-        <h3 class="section-title relay-title">Connect by signer address</h3>
+        <h3 class="section-title relay-title">Connect remotely</h3>
         <p class="hint relay-lead">
-          No cable needed: your Heartwood is on your WiFi. To find it, fill in the two boxes
-          below. Easiest of all: on the computer where you first set the device up, show its QR
-          code and scan it. Both boxes then fill themselves in.
+          Your signer can be in another country. Enter its public address and internet relays,
+          or scan the protected pairing QR shown by a browser that already manages it.
         </p>
         <form class="relay-form" onsubmit={(e) => { e.preventDefault(); handleConnectRelay() }}>
           {#if knownDevices.length}
@@ -252,6 +281,9 @@
               placeholder="npub1… or you@example.com"
               disabled={connecting}
               aria-describedby="relay-pub-hint"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
             />
             <span id="relay-pub-hint" class="field-hint">
               Its <code>npub1…</code> address, or a name like <code>you@example.com</code> if it has
@@ -270,6 +302,9 @@
               placeholder="wss://relay.trotters.cc, wss://nos.lol"
               disabled={connecting}
               aria-describedby="relay-url-hint"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
             />
             <span id="relay-url-hint" class="field-hint">
               A relay is a shared postbox on the internet: your browser drops off a message and the
@@ -281,7 +316,7 @@
 
           <div class="relay-actions">
             <button type="submit" class="btn btn-primary" disabled={connecting || !relayPubInput.trim()}>
-              {connecting ? 'Connecting…' : 'Connect'}
+              {connecting ? 'Connecting…' : 'Connect remotely'}
             </button>
             <button type="button" class="btn btn-ghost" onclick={() => showRelayForm = false}>
               Cancel
@@ -289,6 +324,27 @@
           </div>
         </form>
       </div>
+    {:else if mobile}
+      <section class="mobile-remote" aria-labelledby="mobile-remote-title">
+        <h2 id="mobile-remote-title">Manage your signer remotely</h2>
+        <p>
+          Your signer can stay powered on anywhere. This phone reaches it through internet
+          relays over Wi-Fi or cellular.
+        </p>
+        {#if smartDevice}
+          <button class="btn btn-primary btn-block btn-setup" onclick={handleRemoteSmartConnect} disabled={connecting}>
+            {connecting ? 'Connecting…' : `Connect to “${smartDevice.label}” →`}
+          </button>
+          <button class="btn btn-ghost btn-block mobile-another" onclick={openRelayForm} disabled={connecting}>
+            Connect another signer
+          </button>
+        {:else}
+          <button class="btn btn-primary btn-block btn-setup" onclick={openRelayForm} disabled={connecting}>
+            Connect remotely →
+          </button>
+        {/if}
+        {#if smartError}<p class="warn-text notice">{smartError}</p>{/if}
+      </section>
     {:else if justFlashed}
       <div class="card card--raised card--live finish-setup">
         <h3 class="finish-title">✓ Flashed: now let's finish your signer</h3>
@@ -384,7 +440,9 @@
       </details>
     {:else}
       <form class="http-form" onsubmit={(e) => { e.preventDefault(); handleConnectHttp() }}>
+        <label class="field-label" for="bridge-address">Local bridge address</label>
         <input
+          id="bridge-address"
           type="text"
           class="field-input"
           bind:value={httpAddress}
@@ -411,6 +469,20 @@
     padding: 1.25rem 1.5rem;
     margin-bottom: 1rem;
   }
+
+  .mobile-remote {
+    padding: 0.35rem 0 0.2rem;
+  }
+  .mobile-remote h2 {
+    margin: 0 0 0.55rem;
+    font-size: 1.05rem;
+  }
+  .mobile-remote p {
+    margin: 0 0 1rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+  .mobile-another { margin-top: 0.55rem; }
 
   .status-row {
     display: flex;

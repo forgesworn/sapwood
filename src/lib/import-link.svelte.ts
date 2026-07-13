@@ -23,6 +23,68 @@ import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 /** One-shot banner state: set when a deep-linked handoff has been consumed. */
 export const importNotice = $state<{ shown: boolean }>({ shown: false })
 
+type HandoffConnectionPhase = 'idle' | 'connecting' | 'connected' | 'error'
+
+interface HandoffConnectionTarget {
+  deviceHex: string
+  relays: string[]
+  /** Public identity of the exact operator credential carried by this handoff. */
+  operatorPubHex: string
+}
+
+/** Phone-handoff connection state. This is deliberately separate from the
+ * generic picker: a protected QR has already supplied the one route we should
+ * try, so showing USB/bridge choices while that attempt runs is misleading. */
+export const handoffConnection = $state<{
+  phase: HandoffConnectionPhase
+  target: HandoffConnectionTarget | null
+  error: string
+}>({ phase: 'idle', target: null, error: '' })
+
+let handoffAttempt = 0
+
+function startHandoffConnection(target: HandoffConnectionTarget): void {
+  const attempt = ++handoffAttempt
+  handoffConnection.phase = 'connecting'
+  handoffConnection.target = {
+    ...target,
+    relays: [...target.relays],
+  }
+  handoffConnection.error = ''
+
+  void connectRelay(
+    target.deviceHex,
+    target.relays,
+    undefined,
+    target.operatorPubHex,
+  ).then(() => {
+    if (attempt !== handoffAttempt) return
+    handoffConnection.phase = 'connected'
+  }).catch(() => {
+    if (attempt !== handoffAttempt) return
+    handoffConnection.phase = 'error'
+    // Do not leak relay URLs, keys or device identifiers into a screenshotable
+    // phone error. Detailed diagnostics remain available from a trusted manager.
+    handoffConnection.error = 'Make sure the signer is powered on and online, then try again.'
+  })
+}
+
+/** Retry the exact imported route and operator; never guess another authority. */
+export function retryHandoffConnection(): boolean {
+  const target = handoffConnection.target
+  if (!target) return false
+  startHandoffConnection(target)
+  return true
+}
+
+/** Leave the dedicated handoff state and return to the normal connection UI. */
+export function dismissHandoffConnection(): void {
+  handoffAttempt += 1
+  handoffConnection.phase = 'idle'
+  handoffConnection.target = null
+  handoffConnection.error = ''
+}
+
 /**
  * A handoff link that would overwrite an *existing, different* operator key,
  * held back for explicit confirmation. Importing it silently would destroy the
@@ -52,6 +114,19 @@ export interface HandoffLink {
 }
 
 const NCRYPTSEC_RE = /^ncryptsec1[02-9ac-hj-np-z]+$/
+
+function isSafeHandoffRelay(value: string): boolean {
+  if (value.length > 512) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'wss:'
+      && url.hostname.length > 0
+      && url.username === ''
+      && url.password === ''
+  } catch {
+    return false
+  }
+}
 
 /** Accept an npub or 64-char hex; return x-only hex, or null. */
 function toHex(input: string): string | null {
@@ -126,7 +201,11 @@ export function parseImportLink(hash: string): HandoffLink | null {
   }
   const relays = params.get('relays')
   if (relays) {
-    const list = relays.split(',').map((r) => r.trim()).filter(Boolean)
+    const list = relays
+      .split(',')
+      .map((r) => r.trim())
+      .filter(isSafeHandoffRelay)
+      .slice(0, 8)
     if (list.length) out.relays = list
   }
   return out
@@ -141,16 +220,23 @@ export function parseImportOp(hash: string): string | null {
  *  loaded banner. Called only with a link whose `op` is resolved. */
 function applyLink(link: HandoffLink): boolean {
   if (!link.op) return false
+  let operator
   try {
-    importOperator(link.op)
+    operator = importOperator(link.op)
   } catch {
     return false
   }
   if (link.deviceHex && link.relays && link.relays.length) {
-    rememberDevice(link.deviceHex, link.relays)
-    // Fire-and-forget: the relay connection updates device state; failures
-    // surface via device.error (and the device is remembered for a manual retry).
-    void connectRelay(link.deviceHex, link.relays).catch(() => { /* surfaced via device.error */ })
+    try { rememberDevice(link.deviceHex, link.relays) } catch { /* live route still works */ }
+    startHandoffConnection({
+      deviceHex: link.deviceHex,
+      relays: link.relays,
+      operatorPubHex: operator.pubHex,
+    })
+  } else {
+    // Backwards-compatible operator-only links still import the credential, but
+    // they cannot claim to be pairing a phone with a signer route.
+    dismissHandoffConnection()
   }
   importNotice.shown = true
   return true
@@ -221,8 +307,10 @@ export function submitPin(pin: string): { ok: boolean; error?: string } {
     return { ok: false, error: 'That PIN did not unlock the link. Check it and try again.' }
   }
   pendingPin.link = null
-  resolveAndImport(opHex, link.deviceHex, link.relays)
-  return { ok: true }
+  const ok = resolveAndImport(opHex, link.deviceHex, link.relays)
+  return ok
+    ? { ok: true }
+    : { ok: false, error: 'This pairing link could not be imported.' }
 }
 
 /** Abandon a parked protected link without importing. */

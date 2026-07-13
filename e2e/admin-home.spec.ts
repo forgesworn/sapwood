@@ -184,6 +184,18 @@ test('without Web Serial, signer-address connect is the primary path', async ({ 
 test.describe('mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
+  test('shows a remote-only disconnected surface without USB or local-bridge noise', async ({ page }) => {
+    await disableWebSerial(page)
+    await page.goto('/#/')
+
+    await expect(page.getByRole('button', { name: /Connect remotely/ })).toBeVisible()
+    await expect(page.getByText(/Wi-Fi or cellular/)).toBeVisible()
+    await expect(page.getByText(/USB setup|USB management/)).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Setup instructions' })).toHaveCount(0)
+    await expect(page.getByText('Other ways to connect')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Connect to local bridge' })).toHaveCount(0)
+  })
+
   test('no horizontal overflow on the connected Home or cockpit at 390px', async ({ page }) => {
     await enableAdminTestSeam(page)
     await page.goto('/#/')
@@ -263,7 +275,7 @@ test.describe('mobile', () => {
       }))
     }, { pub: pubHex })
     await page.goto('/#/')
-    await page.getByRole('button', { name: 'Connect by signer address', exact: true }).click()
+    await page.getByRole('button', { name: 'Connect another signer', exact: true }).click()
 
     await expect(page.getByLabel(/The relays it uses/)).toHaveValue('wss://candidate.example, wss://old.example')
     const journal = await page.evaluate(() => localStorage.getItem('heartwood.pendingNetworkHandoffs.v1') ?? '')

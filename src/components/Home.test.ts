@@ -165,13 +165,13 @@ describe('Home', () => {
     expect(screen.getByText('This signer needs an identity')).toBeTruthy()
   })
 
-  it('shows a reaching-over-WiFi state (not "needs an identity") while the relay status is pending', () => {
+  it('shows a reaching-over-internet state (not "needs an identity") while relay status is pending', () => {
     ;(device as { masters: unknown[] }).masters = []
     ;(device as { mode: string }).mode = 'relay'
     ;(device as { relayStatus: unknown }).relayStatus = null
     ;(device as { error: unknown }).error = null
     render(Home)
-    expect(screen.getByText('Reaching your signer over WiFi…')).toBeTruthy()
+    expect(screen.getByText('Reaching your signer over the internet…')).toBeTruthy()
     expect(screen.queryByText('This signer needs an identity')).toBeNull()
   })
 

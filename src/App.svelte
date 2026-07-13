@@ -7,6 +7,7 @@
   import {
     importNotice, pendingImport, confirmPendingImport, dismissPendingImport,
     pendingPin, submitPin, dismissPin,
+    handoffConnection, retryHandoffConnection, dismissHandoffConnection,
   } from './lib/import-link.svelte.js'
   import { nip19 } from 'nostr-tools'
 
@@ -87,10 +88,12 @@
   {/if}
 
   {#if pendingPin.link}
-    <div class="import-confirm" role="alertdialog" aria-labelledby="pin-title">
+    <div class="import-confirm" role="alertdialog" aria-modal="true" aria-labelledby="pin-title">
       <h2 id="pin-title">Unlock this pairing link</h2>
       <p>This link is protected. Enter the PIN shown on the other device to connect to your signer.</p>
+      <label class="field-label" for="pairing-pin">PIN or passphrase</label>
       <input
+        id="pairing-pin"
         type="text"
         class="field-input"
         bind:value={pinInput}
@@ -132,14 +135,44 @@
 
   {#if importNotice.shown}
     <div class="import-banner" role="status">
-      <span>Operator key loaded. You can manage this signer from here.</span>
+      <span>
+        {handoffConnection.phase === 'connecting'
+          ? 'Phone paired. Connecting remotely…'
+          : handoffConnection.phase === 'error'
+            ? 'Phone paired. The operator key is saved; retry the internet connection below.'
+          : 'Operator key loaded. You can manage this signer from here.'}
+      </span>
       <button class="import-dismiss" onclick={() => (importNotice.shown = false)} aria-label="Dismiss">×</button>
     </div>
   {/if}
 
   <!-- On the connected Home the signer card owns the connection state + Disconnect,
        so the picker only shows when disconnected or in the Advanced cockpit. -->
-  {#if !device.connected || view === 'advanced'}
+  {#if !device.connected && handoffConnection.phase === 'connecting'}
+    <section class="card card--raised handoff-connect" role="status" data-testid="handoff-connect-state">
+      <span class="handoff-spinner" aria-hidden="true"></span>
+      <div>
+        <h2>Connecting to your signer over the internet…</h2>
+        <p>
+          Your phone can use mobile data or Wi-Fi. The signer can stay powered on anywhere;
+          this authenticated check can take up to a minute.
+        </p>
+      </div>
+    </section>
+  {:else if !device.connected && handoffConnection.phase === 'error'}
+    <section class="card card--raised handoff-connect handoff-connect--error" role="alert" data-testid="handoff-connect-state">
+      <div>
+        <h2>Phone paired, but the signer did not answer over the internet</h2>
+        <p>
+          Your phone can use mobile data or Wi-Fi. {handoffConnection.error}
+        </p>
+        <div class="handoff-connect-actions">
+          <button class="btn btn-primary" onclick={retryHandoffConnection}>Retry connection</button>
+          <button class="btn btn-ghost" onclick={dismissHandoffConnection}>Connect another signer</button>
+        </div>
+      </div>
+    </section>
+  {:else if !device.connected || view === 'advanced'}
     <ConnectionPicker />
   {/if}
 
@@ -184,6 +217,31 @@
     gap: 1rem;
     flex-wrap: wrap;
   }
+
+  .handoff-connect {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1.25rem 1.4rem;
+    margin-bottom: 1rem;
+    border-color: var(--green-dim);
+  }
+  .handoff-connect h2 { margin: 0 0 0.45rem; font-size: 1.05rem; }
+  .handoff-connect p { margin: 0; color: var(--text-muted); line-height: 1.55; }
+  .handoff-spinner {
+    width: 18px;
+    height: 18px;
+    margin-top: 0.15rem;
+    flex: 0 0 auto;
+    border: 2px solid var(--green-dim);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: handoff-spin 0.9s linear infinite;
+  }
+  .handoff-connect--error { border-color: var(--amber); }
+  .handoff-connect-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+  @keyframes handoff-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .handoff-spinner { animation: none; } }
 
   .brand {
     display: flex;

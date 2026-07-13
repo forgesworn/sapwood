@@ -3,6 +3,22 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.11.1 — 2026-07-13
+
+Phone handoff now behaves like remote management, not a desktop connection
+picker.
+
+### Fixed
+
+- A protected pairing QR now shows a dedicated internet-connection state after
+  unlock, authenticates with the exact imported operator key, and exposes a
+  safe retry if the signer does not answer. Early relay failures are no longer
+  swallowed behind a misleading “disconnected” screen.
+- The phone-sized disconnected view is remote-only: it explains that either
+  cellular or Wi-Fi works and omits USB setup and local-bridge controls.
+- Remote connections are labelled as internet/remote connections rather than
+  implying that the phone must share the signer's Wi-Fi.
+
 ## 0.8.10 — 2026-06-23
 
 Bundled firmware v0.9.4 — during on-device restore, **hold now goes back** one

@@ -3,9 +3,15 @@ import { nip19 } from 'nostr-tools'
 
 // device.svelte pulls in the whole connection stack; stub the one thing the
 // import flow touches so these stay unit tests.
-vi.mock('./device.svelte.js', () => ({ connectRelay: vi.fn(async () => {}) }))
+const connectRelayMock = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('./device.svelte.js', () => ({ connectRelay: connectRelayMock }))
 
-import { parseImportLink, parseImportOp, buildHandoffLink, buildProtectedHandoffLink, encryptOperator, submitPin, dismissPin, pendingPin, consumeImportLink, confirmPendingImport, dismissPendingImport, pendingImport, importNotice } from './import-link.svelte'
+import {
+  parseImportLink, parseImportOp, buildHandoffLink, buildProtectedHandoffLink,
+  encryptOperator, submitPin, dismissPin, pendingPin, consumeImportLink,
+  confirmPendingImport, dismissPendingImport, pendingImport, importNotice,
+  handoffConnection, dismissHandoffConnection, retryHandoffConnection,
+} from './import-link.svelte'
 import { peekOperatorPubHex, pubHexFromSecret } from './op-mgmt'
 
 const HEX = 'a1b2c3d4e5f6'.repeat(5) + 'abcd' // 64 hex chars
@@ -50,6 +56,21 @@ describe('parseImportLink', () => {
     const link = parseImportLink(`#/import?op=${HEX}&dev=not-an-npub`)
     expect(link).toEqual({ op: HEX })
   })
+  it('accepts only bounded secure websocket relay routes from a handoff', () => {
+    const relays = [
+      'ws://insecure.example',
+      'https://not-a-websocket.example',
+      'wss://user:password@credentialed.example',
+      `wss://${'a'.repeat(513)}.example`,
+      ...Array.from({ length: 10 }, (_, index) => `wss://relay-${index}.example`),
+    ]
+    const link = parseImportLink(
+      `#/import?op=${HEX}&dev=${DEV}&relays=${encodeURIComponent(relays.join(','))}`,
+    )
+    expect(link?.relays).toEqual(
+      Array.from({ length: 8 }, (_, index) => `wss://relay-${index}.example`),
+    )
+  })
 })
 
 describe('buildHandoffLink', () => {
@@ -67,6 +88,8 @@ describe('buildHandoffLink', () => {
 describe('consumeImportLink — overwrite guard', () => {
   beforeEach(() => {
     localStorage.clear()
+    connectRelayMock.mockReset().mockResolvedValue(undefined)
+    dismissHandoffConnection()
     pendingImport.link = null
     importNotice.shown = false
     location.hash = ''
@@ -133,6 +156,8 @@ describe('consumeImportLink — overwrite guard', () => {
 describe('consumeImportLink — PIN-protected (eop)', () => {
   beforeEach(() => {
     localStorage.clear()
+    connectRelayMock.mockReset().mockResolvedValue(undefined)
+    dismissHandoffConnection()
     pendingImport.link = null
     pendingPin.link = null
     importNotice.shown = false
@@ -161,6 +186,41 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
     expect(pendingPin.link).toBeNull()
     expect(peekOperatorPubHex()).toBe(pubHexFromSecret(HEX))
     expect(importNotice.shown).toBe(true)
+    expect(connectRelayMock).toHaveBeenCalledWith(
+      DEV,
+      ['wss://a.cc'],
+      undefined,
+      pubHexFromSecret(HEX),
+    )
+  })
+
+  it('tracks the remote connection and makes an early failure retriable', async () => {
+    let rejectConnection!: (error: Error) => void
+    connectRelayMock.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectConnection = reject
+    }))
+    const eop = encryptOperator(HEX, 'correct horse')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://a.cc'])
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+
+    expect(submitPin('correct horse').ok).toBe(true)
+    expect(handoffConnection.phase).toBe('connecting')
+    expect(handoffConnection.target).toEqual({
+      deviceHex: DEV,
+      relays: ['wss://a.cc'],
+      operatorPubHex: pubHexFromSecret(HEX),
+    })
+
+    rejectConnection(new Error('relay unavailable'))
+    await vi.waitFor(() => expect(handoffConnection.phase).toBe('error'))
+    expect(handoffConnection.error).toMatch(/powered on and online/i)
+
+    connectRelayMock.mockResolvedValueOnce(undefined)
+    expect(retryHandoffConnection()).toBe(true)
+    expect(handoffConnection.phase).toBe('connecting')
+    await vi.waitFor(() => expect(handoffConnection.phase).toBe('connected'))
+    expect(connectRelayMock).toHaveBeenCalledTimes(2)
   })
 
   it('rejects a wrong PIN and keeps the link parked for a retry', () => {

@@ -62,7 +62,7 @@ describe('ConnectionPicker', () => {
     expect((screen.getByLabelText(/The relays it uses/) as HTMLInputElement).value)
       .toBe(relays.join(', '))
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Connect remotely' }))
 
     expect(vi.mocked(connectRelay)).toHaveBeenCalledWith(HEX, relays, 'TheCryptoDonkey')
   })

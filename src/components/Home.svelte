@@ -46,7 +46,7 @@
   // How this signer is reached, in plain words — folded into the signer card so
   // Home shows one connection panel, not two.
   const transportLabel = $derived(
-    device.mode === 'serial' ? 'USB cable' : device.mode === 'relay' ? 'WiFi' : 'a bridge',
+    device.mode === 'serial' ? 'USB cable' : device.mode === 'relay' ? 'the internet' : 'a bridge',
   )
 
   // Friendly name: a saved label wins; otherwise a gentle default.
@@ -298,7 +298,7 @@
     <section class="card card--raised checking">
       <span class="checking-spin"></span>
       <div>
-        <h2 class="checking-title">Reaching your signer over WiFi…</h2>
+        <h2 class="checking-title">Reaching your signer over the internet…</h2>
         <p class="hint no-gap">Asking it for its status over the relay. This usually takes a few
           seconds and finishes on its own.</p>
       </div>
@@ -325,7 +325,7 @@
             Restore operator key
           </button>
           <button class="btn btn-secondary btn-sm" onclick={retryWifi} disabled={retrying}>
-            {retrying ? 'Retrying…' : 'Retry WiFi'}
+            {retrying ? 'Retrying…' : 'Retry connection'}
           </button>
         </div>
       </div>

@@ -61,7 +61,7 @@ import {
   refreshUsbNetworkState, setOperatorOverUsb,
 } from './device.svelte.js'
 import { FrameType } from './frame.js'
-import { generateOperatorMnemonic, getOrCreateOperator } from './op-mgmt.js'
+import { generateOperatorMnemonic, getOrCreateOperator, pubHexFromSecret } from './op-mgmt.js'
 import type { MasterInfo } from './types.js'
 import { fullClientPolicy } from './client-policy.js'
 import {
@@ -1062,6 +1062,37 @@ describe('identity card auto-sync on serial master list', () => {
       expect(getStatusCalls).toHaveLength(2)
       expect(device.masters[0]?.npub).toBe(nip19.npubEncode(pubHex))
       expect(device.error).toBeNull()
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('a phone handoff authenticates with only its exact imported operator', async () => {
+    const { pubHex } = freshMaster()
+    const importedSecret = 'b'.repeat(64)
+    localStorage.setItem(LS_SK, importedSecret)
+    localStorage.setItem(LS_MNEMONIC, generateOperatorMnemonic())
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(function (this: { operatorPub?: string }, method: unknown) {
+      if (method === 'get_status') {
+        if (this.operatorPub !== 'legacy-op') throw new Error('wrong operator was tried')
+        return Promise.resolve({ master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' })
+      }
+      if (method === 'list_clients') return Promise.resolve({ clients: [] })
+      return Promise.resolve({ ok: true })
+    })
+
+    await connectRelay(
+      pubHex,
+      ['wss://r.example'],
+      undefined,
+      pubHexFromSecret(importedSecret)!,
+    )
+    try {
+      expect(relayInstances).toHaveLength(1)
+      expect(device.operatorPub).toBe('legacy-op')
+      expect(relayRequestMock.mock.calls.filter((call) => call[0] === 'get_status')).toHaveLength(1)
+      expect(device.masters[0]?.npub).toBe(nip19.npubEncode(pubHex))
     } finally {
       await disconnect()
     }
