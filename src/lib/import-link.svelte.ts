@@ -25,6 +25,8 @@ export const importNotice = $state<{ shown: boolean }>({ shown: false })
 
 type HandoffConnectionPhase = 'idle' | 'connecting' | 'connected' | 'error'
 
+export const HANDOFF_CONNECT_TIMEOUT_MS = 45_000
+
 interface HandoffConnectionTarget {
   deviceHex: string
   relays: string[]
@@ -42,26 +44,81 @@ export const handoffConnection = $state<{
 }>({ phase: 'idle', target: null, error: '' })
 
 let handoffAttempt = 0
+let handoffController: AbortController | null = null
+let handoffTimer: ReturnType<typeof setTimeout> | null = null
+let handoffDeadlineAt = 0
+
+function clearHandoffTimer(): void {
+  if (handoffTimer) clearTimeout(handoffTimer)
+  handoffTimer = null
+}
+
+function abortActiveHandoff(reason: string): void {
+  const controller = handoffController
+  handoffController = null
+  if (controller && !controller.signal.aborted) {
+    controller.abort(new DOMException(reason, 'AbortError'))
+  }
+}
+
+function expireHandoff(attempt: number): void {
+  if (attempt !== handoffAttempt || handoffConnection.phase !== 'connecting') return
+  clearHandoffTimer()
+  handoffDeadlineAt = 0
+  handoffConnection.phase = 'error'
+  handoffConnection.error = 'The signer did not answer within 45 seconds. Make sure it is powered on and online, then try again.'
+  abortActiveHandoff('phone handoff timed out')
+}
+
+/** Mobile browsers can suspend timers while backgrounded. Re-check the actual
+ * wall clock whenever the page resumes or the network comes back so a frozen
+ * attempt cannot remain "Connecting" indefinitely. */
+function recheckHandoffDeadline(): void {
+  if (handoffConnection.phase !== 'connecting' || handoffDeadlineAt === 0) return
+  if (Date.now() >= handoffDeadlineAt) expireHandoff(handoffAttempt)
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', recheckHandoffDeadline)
+  window.addEventListener('pageshow', recheckHandoffDeadline)
+  window.addEventListener('focus', recheckHandoffDeadline)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) recheckHandoffDeadline()
+  })
+}
 
 function startHandoffConnection(target: HandoffConnectionTarget): void {
   const attempt = ++handoffAttempt
+  abortActiveHandoff('superseded by a new phone handoff attempt')
+  clearHandoffTimer()
+  const controller = new AbortController()
+  handoffController = controller
+  handoffDeadlineAt = Date.now() + HANDOFF_CONNECT_TIMEOUT_MS
   handoffConnection.phase = 'connecting'
   handoffConnection.target = {
     ...target,
     relays: [...target.relays],
   }
   handoffConnection.error = ''
+  handoffTimer = setTimeout(() => expireHandoff(attempt), HANDOFF_CONNECT_TIMEOUT_MS)
 
   void connectRelay(
     target.deviceHex,
     target.relays,
     undefined,
     target.operatorPubHex,
+    controller.signal,
   ).then(() => {
-    if (attempt !== handoffAttempt) return
+    if (attempt !== handoffAttempt || controller.signal.aborted) return
+    clearHandoffTimer()
+    handoffDeadlineAt = 0
+    if (handoffController === controller) handoffController = null
     handoffConnection.phase = 'connected'
   }).catch(() => {
-    if (attempt !== handoffAttempt) return
+    if (attempt !== handoffAttempt || controller.signal.aborted) return
+    clearHandoffTimer()
+    handoffDeadlineAt = 0
+    if (handoffController === controller) handoffController = null
     handoffConnection.phase = 'error'
     // Do not leak relay URLs, keys or device identifiers into a screenshotable
     // phone error. Detailed diagnostics remain available from a trusted manager.
@@ -80,6 +137,9 @@ export function retryHandoffConnection(): boolean {
 /** Leave the dedicated handoff state and return to the normal connection UI. */
 export function dismissHandoffConnection(): void {
   handoffAttempt += 1
+  clearHandoffTimer()
+  handoffDeadlineAt = 0
+  abortActiveHandoff('phone handoff dismissed')
   handoffConnection.phase = 'idle'
   handoffConnection.target = null
   handoffConnection.error = ''

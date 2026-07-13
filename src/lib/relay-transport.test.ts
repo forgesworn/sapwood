@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { getPublicKey } from 'nostr-tools/pure'
 import { hexToBytes } from '@noble/hashes/utils.js'
 import {
@@ -15,6 +15,21 @@ import {
 const OP_SK_HEX = '01'.repeat(32)
 const DEVICE_PUB = getPublicKey(hexToBytes('02'.repeat(32))) // valid 64-hex x-only key
 const RELAYS = ['wss://relay.example']
+
+function fakePool() {
+  const close = vi.fn()
+  return {
+    pool: {
+      ensureRelay: vi.fn(async () => ({})),
+      subscribe: vi.fn(() => ({ close })),
+      publish: vi.fn(() => [Promise.resolve('saved')]),
+      destroy: vi.fn(),
+    },
+    close,
+  }
+}
+
+afterEach(() => vi.useRealTimers())
 
 describe('RelayTransport construction', () => {
   it('rejects a device pubkey that is not 64 hex chars', () => {
@@ -53,6 +68,35 @@ describe('RelayTransport construction', () => {
 })
 
 describe('RelayTransport request lifecycle', () => {
+  it('rejects connect when every relay fails to open', async () => {
+    const { pool } = fakePool()
+    pool.ensureRelay.mockRejectedValue(new Error('connection failed'))
+    const t = new RelayTransport(DEVICE_PUB, [
+      'wss://one.example',
+      'wss://two.example',
+    ], OP_SK_HEX, pool as never)
+
+    await expect(t.connect()).rejects.toThrow(/could not connect to any relay/i)
+    expect(pool.ensureRelay).toHaveBeenCalledTimes(2)
+    expect(pool.subscribe).not.toHaveBeenCalled()
+    t.close()
+  })
+
+  it('connects when one relay opens even if another never settles', async () => {
+    const { pool } = fakePool()
+    pool.ensureRelay.mockImplementation((url?: string) => url?.includes('open')
+      ? Promise.resolve({})
+      : new Promise(() => {}))
+    const t = new RelayTransport(DEVICE_PUB, [
+      'wss://open.example',
+      'wss://stalled.example',
+    ], OP_SK_HEX, pool as never)
+
+    await expect(t.connect()).resolves.toBeUndefined()
+    expect(pool.subscribe).toHaveBeenCalledOnce()
+    t.close()
+  })
+
   it('uses unpredictable 128-bit duplicate-delivery ids', () => {
     const ids = Array.from({ length: 64 }, () => newManagementRequestId())
     expect(ids.every((id) => /^[0-9a-f]{32}$/.test(id))).toBe(true)
@@ -75,6 +119,32 @@ describe('RelayTransport request lifecycle', () => {
     const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX)
     t.close()
     expect(() => t.close()).not.toThrow()
+  })
+
+  it('treats nostr-tools resolved connection failures as publish failures', async () => {
+    const { pool } = fakePool()
+    pool.publish.mockReturnValue([Promise.resolve('connection failure: connection failed')])
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    await expect(t.request('get_status', {}, 1_000)).rejects.toThrow(
+      /failed to publish to any relay/i,
+    )
+    t.close()
+  })
+
+  it('times out even when every publish promise stays pending', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    pool.publish.mockReturnValue([new Promise(() => {})])
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    const request = t.request('get_status', {}, 50)
+    const rejection = expect(request).rejects.toThrow(/timeout waiting for device/i)
+    await vi.advanceTimersByTimeAsync(50)
+    await rejection
+    t.close()
   })
 })
 

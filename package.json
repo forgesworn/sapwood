@@ -1,6 +1,6 @@
 {
   "name": "sapwood",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Shape your signer -- web management UI for Heartwood ESP32",
   "type": "module",
   "license": "MIT",

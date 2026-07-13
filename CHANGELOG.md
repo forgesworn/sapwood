@@ -3,6 +3,26 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.11.2 — 2026-07-13
+
+Cellular handoff now proves a real relay path and survives mobile network
+changes instead of sitting on an optimistic connection spinner.
+
+### Fixed
+
+- Remote pairing now waits for at least one actual relay WebSocket before it
+  publishes the authenticated status request. A failed socket can no longer be
+  mistaken for a successful relay connection.
+- Relay ping and reconnect support keeps the phone session alive across
+  Wi-Fi-to-cellular transitions and transient mobile-network drops.
+- A protected handoff stops after 45 seconds, cancels its underlying transport,
+  and offers a clean retry. Returning from a suspended mobile browser also
+  enforces the wall-clock deadline, and stale attempts cannot change device
+  state later.
+- Once the signer answers the authenticated status check, the connected phone
+  screen appears immediately while the app list finishes loading in the
+  background.
+
 ## 0.11.1 — 2026-07-13
 
 Phone handoff now behaves like remote management, not a desktop connection

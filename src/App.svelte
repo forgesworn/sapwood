@@ -155,7 +155,7 @@
         <h2>Connecting to your signer over the internet…</h2>
         <p>
           Your phone can use mobile data or Wi-Fi. The signer can stay powered on anywhere;
-          this authenticated check can take up to a minute.
+          this authenticated check stops after 45 seconds and then offers a retry.
         </p>
       </div>
     </section>

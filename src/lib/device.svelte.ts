@@ -559,6 +559,7 @@ async function selectRelayTransport(
   devicePubHex: string,
   relays: string[],
   requiredOperatorPubHex?: string,
+  signal?: AbortSignal,
 ): Promise<RelaySelection> {
   const operators = getOperatorCandidates()
   if (requiredOperatorPubHex) {
@@ -567,10 +568,12 @@ async function selectRelayTransport(
     if (!operator) throw new Error('the imported operator credential is unavailable')
     const transport = new RelayTransport(devicePubHex, relays, operator.skHex)
     try {
-      await transport.connect()
+      await transport.connect(signal)
+      signal?.throwIfAborted()
       // A phone handoff is not complete merely because a relay subscription
       // opened. Require an authenticated reply from this exact signer/operator.
       const status = await transport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
+      signal?.throwIfAborted()
       return { transport, status }
     } catch (error) {
       transport.close()
@@ -645,6 +648,7 @@ export async function connectRelay(
   relays: string[],
   label?: string,
   requiredOperatorPubHex?: string,
+  signal?: AbortSignal,
 ) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   // A killed/reloaded mobile tab may have left an activated handoff whose
@@ -655,7 +659,12 @@ export async function connectRelay(
     devicePubHex,
     recoveryRelays,
     requiredOperatorPubHex,
+    signal,
   )
+  if (signal?.aborted) {
+    t.close()
+    signal.throwIfAborted()
+  }
   relayTransport = t
   device.connectionGeneration += 1
   device.connected = true
@@ -672,9 +681,18 @@ export async function connectRelay(
   lastRelayAuditSeq = 0
   rememberDevice(devicePubHex, relays, label)
 
-  // First load, then poll for live status/clients every 4s while connected.
-  await relayRefresh(status)
-  startRelayPoll()
+  // First load, then poll for live status/clients every 4s while connected. A
+  // protected phone handoff already proved the signer with get_status above;
+  // surface that success immediately while the client list finishes in the
+  // background. Normal/manual connects preserve their existing await contract.
+  const initialRefresh = relayRefresh(status)
+  if (requiredOperatorPubHex) {
+    startRelayPoll()
+    void initialRefresh
+  } else {
+    await initialRefresh
+    startRelayPoll()
+  }
 }
 
 /** Refresh masters (get_status) and clients (list_clients) over the relay.

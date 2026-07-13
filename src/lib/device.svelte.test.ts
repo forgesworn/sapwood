@@ -1098,6 +1098,42 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
+  it('does not let an aborted phone handoff mutate global device state', async () => {
+    const { pubHex } = freshMaster()
+    const importedSecret = 'b'.repeat(64)
+    localStorage.setItem(LS_SK, importedSecret)
+    let finishStatus!: (status: Record<string, unknown>) => void
+    relayRequestMock.mockImplementation((method: unknown) => {
+      if (method === 'get_status') {
+        return new Promise<Record<string, unknown>>((resolve) => { finishStatus = resolve })
+      }
+      return Promise.resolve({ clients: [] })
+    })
+    const controller = new AbortController()
+
+    const connecting = connectRelay(
+      pubHex,
+      ['wss://r.example'],
+      undefined,
+      pubHexFromSecret(importedSecret)!,
+      controller.signal,
+    )
+    const rejection = expect(connecting).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(finishStatus).toBeTypeOf('function'))
+    controller.abort(new DOMException('superseded', 'AbortError'))
+    finishStatus({
+      master_count: 1,
+      master_npub_hex: pubHex,
+      mode: 'wifi-standalone',
+      relay: 'wss://r',
+    })
+
+    await rejection
+    expect(device.connected).toBe(false)
+    expect(device.mode).toBe('none')
+    expect(relayInstances.at(-1)?.closed).toBe(true)
+  })
+
   it('uses the long relay status timeout when refreshing signing audit', async () => {
     const { pubHex } = freshMaster()
     resolveMock.mockResolvedValue(new Map())

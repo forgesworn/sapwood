@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 import { nip19 } from 'nostr-tools'
 
 // device.svelte pulls in the whole connection stack; stub the one thing the
@@ -11,6 +11,7 @@ import {
   encryptOperator, submitPin, dismissPin, pendingPin, consumeImportLink,
   confirmPendingImport, dismissPendingImport, pendingImport, importNotice,
   handoffConnection, dismissHandoffConnection, retryHandoffConnection,
+  HANDOFF_CONNECT_TIMEOUT_MS,
 } from './import-link.svelte'
 import { peekOperatorPubHex, pubHexFromSecret } from './op-mgmt'
 
@@ -18,6 +19,8 @@ const HEX = 'a1b2c3d4e5f6'.repeat(5) + 'abcd' // 64 hex chars
 const DEV = 'f'.repeat(64)
 // A second, distinct valid operator secret (for overwrite-collision tests).
 const HEX2 = 'b2c3d4e5f6a1'.repeat(5) + '1234'
+
+afterEach(() => vi.useRealTimers())
 
 describe('parseImportOp (back-compat)', () => {
   it('extracts a 64-hex operator key', () => {
@@ -191,6 +194,7 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
       ['wss://a.cc'],
       undefined,
       pubHexFromSecret(HEX),
+      expect.any(AbortSignal),
     )
   })
 
@@ -221,6 +225,67 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
     expect(handoffConnection.phase).toBe('connecting')
     await vi.waitFor(() => expect(handoffConnection.phase).toBe('connected'))
     expect(connectRelayMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('abandons a never-settling attempt at the 45-second handoff deadline', async () => {
+    vi.useFakeTimers()
+    let signal: AbortSignal | undefined
+    connectRelayMock.mockImplementationOnce((...args: unknown[]) => {
+      signal = args[4] as AbortSignal
+      return new Promise<void>(() => {})
+    })
+    const eop = encryptOperator(HEX, 'correct horse')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://a.cc'])
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+
+    expect(submitPin('correct horse').ok).toBe(true)
+    expect(handoffConnection.phase).toBe('connecting')
+    const timeout = vi.advanceTimersByTimeAsync(HANDOFF_CONNECT_TIMEOUT_MS)
+    await timeout
+
+    expect(signal?.aborted).toBe(true)
+    expect(handoffConnection.phase).toBe('error')
+    expect(handoffConnection.error).toMatch(/45 seconds/i)
+  })
+
+  it('rechecks the wall-clock deadline when a suspended page resumes', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-13T10:00:00Z'))
+    connectRelayMock.mockImplementationOnce(() => new Promise<void>(() => {}))
+    const eop = encryptOperator(HEX, 'correct horse')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://a.cc'])
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+    submitPin('correct horse')
+
+    vi.setSystemTime(new Date('2026-07-13T10:00:46Z'))
+    window.dispatchEvent(new Event('pageshow'))
+
+    expect(handoffConnection.phase).toBe('error')
+  })
+
+  it('aborts the old attempt on retry and ignores its stale completion', async () => {
+    const attempts: Array<{ signal: AbortSignal; resolve: () => void }> = []
+    connectRelayMock.mockImplementation((...args: unknown[]) => new Promise<void>((resolve) => {
+      attempts.push({ signal: args[4] as AbortSignal, resolve })
+    }))
+    const eop = encryptOperator(HEX, 'correct horse')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://a.cc'])
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+    submitPin('correct horse')
+
+    expect(retryHandoffConnection()).toBe(true)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[0]?.signal.aborted).toBe(true)
+
+    attempts[0]?.resolve()
+    await Promise.resolve()
+    expect(handoffConnection.phase).toBe('connecting')
+
+    attempts[1]?.resolve()
+    await vi.waitFor(() => expect(handoffConnection.phase).toBe('connected'))
   })
 
   it('rejects a wrong PIN and keeps the link parked for a retry', () => {

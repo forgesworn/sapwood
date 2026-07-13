@@ -30,6 +30,16 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>
 }
 
+type RelayPool = Pick<SimplePool, 'ensureRelay' | 'subscribe' | 'publish' | 'destroy'>
+
+const RELAY_CONNECT_TIMEOUT_MS = 10_000
+
+function abortError(signal?: AbortSignal): Error {
+  return signal?.reason instanceof Error
+    ? signal.reason
+    : new DOMException('relay connection aborted', 'AbortError')
+}
+
 interface ManagementAttempt {
   method: string
   params: Record<string, unknown>
@@ -127,7 +137,7 @@ export function managementRequestPayload(
 }
 
 export class RelayTransport {
-  private pool = new SimplePool()
+  private readonly pool: RelayPool
   private sub: { close(): void } | null = null
   private readonly sk: Uint8Array
   private readonly ck: Uint8Array
@@ -137,8 +147,15 @@ export class RelayTransport {
   private readonly pending = new Map<string, Pending>()
   private mutationQueue: Promise<void> = Promise.resolve()
   private closed = false
+  private abortSignal: AbortSignal | null = null
+  private abortHandler: (() => void) | null = null
 
-  constructor(devicePubHex: string, relays: string[], opSkHex: string) {
+  constructor(
+    devicePubHex: string,
+    relays: string[],
+    opSkHex: string,
+    pool: RelayPool = new SimplePool({ enablePing: true, enableReconnect: true }),
+  ) {
     if (!/^[0-9a-f]{64}$/i.test(devicePubHex)) throw new Error('device pubkey must be 64 hex chars')
     if (!relays.length) throw new Error('at least one relay is required')
     if (!/^[0-9a-f]{64}$/i.test(opSkHex)) throw new Error('operator secret must be 64 hex chars')
@@ -147,31 +164,70 @@ export class RelayTransport {
     this.sk = hexToBytes(opSkHex)
     this.operatorPub = getPublicKey(this.sk)
     this.ck = getConversationKey(this.sk, this.devicePub)
+    this.pool = pool
   }
 
-  /** Open the response subscription. Resolves once the relay sends EOSE (or after a short grace). */
-  async connect(): Promise<void> {
+  /** Open the response subscription only after at least one real relay socket
+   * has connected. EOSE is a query boundary, not connection proof: aggregate
+   * subscriptions also report it when every relay failed. */
+  async connect(signal?: AbortSignal): Promise<void> {
+    if (this.closed) throw new Error('transport closed')
     if (this.sub) return
+    signal?.throwIfAborted()
+
+    if (signal) {
+      this.abortSignal = signal
+      this.abortHandler = () => this.close(abortError(signal))
+      signal.addEventListener('abort', this.abortHandler, { once: true })
+    }
+
+    try {
+      await Promise.any(this.relays.map((relay) => this.pool.ensureRelay(relay, {
+        connectionTimeout: RELAY_CONNECT_TIMEOUT_MS,
+        abort: signal,
+      })))
+      signal?.throwIfAborted()
+    } catch (error) {
+      this.unbindAbort()
+      if (signal?.aborted) throw abortError(signal)
+      throw new Error('could not connect to any relay', { cause: error })
+    }
+
     const since = Math.floor(Date.now() / 1000) - 5
-    await new Promise<void>((resolve) => {
-      let settled = false
-      const done = (via: string) => {
-        if (settled) return
-        settled = true
-        console.log(`[hw] relay: subscription ready (${via}) on ${this.relays.join(', ')}`)
-        resolve()
-      }
+    try {
       this.sub = this.pool.subscribe(
         this.relays,
         { kinds: [MGMT_KIND], '#p': [this.operatorPub], since },
         {
           onevent: (ev) => this.routeEvent(ev),
-          oneose: () => done('relay acknowledged'),
+          onclose: () => {
+            this.sub = null
+            this.rejectPending(new Error('relay connection closed'))
+          },
+          abort: signal,
         },
       )
-      // Don't block the UI if a relay never sends EOSE.
-      setTimeout(() => done('grace — no relay EOSE, relay slow or quiet'), 1500)
-    })
+      console.log(`[hw] relay: at least one socket connected; response subscription opened on ${this.relays.join(', ')}`)
+    } catch (error) {
+      this.unbindAbort()
+      throw error
+    }
+  }
+
+  private unbindAbort(): void {
+    if (this.abortSignal && this.abortHandler) {
+      this.abortSignal.removeEventListener('abort', this.abortHandler)
+    }
+    this.abortSignal = null
+    this.abortHandler = null
+  }
+
+  private rejectPending(error: Error): void {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timer)
+      this.pending.delete(id)
+      pending.reject(error)
+    }
   }
 
   private routeEvent(ev: { pubkey: string; content: string }): void {
@@ -255,8 +311,17 @@ export class RelayTransport {
         reject(new Error(`timeout waiting for device (${method})`))
       }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
-      // publish returns one promise per relay; a single accept is enough.
-      Promise.any(this.pool.publish(this.relays, event)).catch(() => {
+      // publish returns one promise per relay; a single accept is enough. In
+      // nostr-tools 2.x a failed ensureRelay can resolve with a
+      // "connection failure:" string, so turn that false success back into a
+      // rejection before Promise.any selects it.
+      const publishes = this.pool.publish(this.relays, event).map((published) =>
+        published.then((reason) => {
+          if (/^connection failure:/i.test(reason)) throw new Error(reason)
+          return reason
+        }))
+      Promise.any(publishes).catch(() => {
+        if (!this.pending.has(id)) return
         clearTimeout(timer)
         this.pending.delete(id)
         console.warn(`[hw] relay: ${method} could not be published to any relay ${JSON.stringify(this.relays)}`)
@@ -265,14 +330,11 @@ export class RelayTransport {
     })
   }
 
-  close(): void {
+  close(reason: Error = new Error('transport closed')): void {
     if (this.closed) return
     this.closed = true
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer)
-      p.reject(new Error('transport closed'))
-    }
-    this.pending.clear()
+    this.unbindAbort()
+    this.rejectPending(reason)
     try { this.sub?.close() } catch { /* ignore */ }
     try { this.pool.destroy() } catch { /* ignore */ }
     this.sub = null
