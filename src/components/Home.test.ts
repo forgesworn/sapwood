@@ -8,6 +8,7 @@ import { copyText } from '../lib/clipboard.js'
 
 const HEX = 'c'.repeat(64)
 const NPUB = nip19.npubEncode(HEX)
+const FINGERPRINT = 'f'.repeat(64)
 
 // device.svelte is mocked (no transport); known-devices is REAL so rename persists.
 // The factory is hoisted, so it must not reference top-level consts — masters
@@ -66,22 +67,43 @@ describe('Home', () => {
 
   it('lists connected apps and can allow signing on an unapproved one', async () => {
     ;(device as { slots: unknown[] }).slots = [
-      { slot_index: 1, label: 'Damus', current_pubkey: 'd'.repeat(64), signing_approved: false, allowed_kinds: [], auto_approve: false },
+      { slot_index: 1, label: 'Damus', current_pubkey: 'd'.repeat(64), signing_approved: false, allowed_kinds: [], auto_approve: false, secret_fingerprint: FINGERPRINT },
     ]
     render(Home)
     expect(screen.getByText('Damus')).toBeTruthy()
     await fireEvent.click(screen.getByText('Allow signing'))
-    expect(vi.mocked(mgmtApproveSigning)).toHaveBeenCalledWith(1)
+    expect(vi.mocked(mgmtApproveSigning)).toHaveBeenCalledWith(1, FINGERPRINT)
+  })
+
+  it('never offers legacy unrestricted approval for a strict crypto-only app', () => {
+    ;(device as { slots: unknown[] }).slots = [{
+      slot_index: 2,
+      label: 'Messages reader',
+      current_pubkey: 'e'.repeat(64),
+      signing_approved: false,
+      strict_permissions: true,
+      allowed_methods: ['get_public_key', 'nip44_decrypt'],
+      allowed_kinds: [],
+      auto_approve: true,
+      secret_fingerprint: FINGERPRINT,
+    }]
+
+    render(Home)
+
+    expect(screen.getByText('NO SIGNING')).toBeTruthy()
+    expect(screen.getByText(/exact policy that does not include signing/)).toBeTruthy()
+    expect(screen.queryByText('Allow signing')).toBeNull()
+    expect(vi.mocked(mgmtApproveSigning)).not.toHaveBeenCalled()
   })
 
   it('lets a connected app copy its reusable link from the friendly app row', async () => {
     ;(device as { slots: unknown[] }).slots = [
-      { slot_index: 4, label: 'Primal', current_pubkey: 'p'.repeat(64), signing_approved: true, allowed_kinds: [], auto_approve: true },
+      { slot_index: 4, label: 'Primal', current_pubkey: 'p'.repeat(64), signing_approved: true, allowed_kinds: [], auto_approve: true, secret_fingerprint: FINGERPRINT },
     ]
     render(Home)
     const card = screen.getByText('Primal').closest('.app-card') as HTMLElement
     await fireEvent.click(within(card).getByText('Copy link'))
-    expect(vi.mocked(mgmtClientUri)).toHaveBeenCalledWith(4)
+    expect(vi.mocked(mgmtClientUri)).toHaveBeenCalledWith(4, FINGERPRINT)
     expect(vi.mocked(copyText)).toHaveBeenCalledWith('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
   })
 
@@ -102,7 +124,7 @@ describe('Home', () => {
 
   it('confirms in-app before disconnecting an app (no native dialog)', async () => {
     ;(device as { slots: unknown[] }).slots = [
-      { slot_index: 2, label: 'Amethyst', current_pubkey: 'e'.repeat(64), signing_approved: true, allowed_kinds: [], auto_approve: true },
+      { slot_index: 2, label: 'Amethyst', current_pubkey: 'e'.repeat(64), signing_approved: true, allowed_kinds: [], auto_approve: true, secret_fingerprint: FINGERPRINT },
     ]
     render(Home)
     const card = screen.getByText('Amethyst').closest('.app-card') as HTMLElement
@@ -111,7 +133,7 @@ describe('Home', () => {
     expect(screen.getByText('Disconnect this app?')).toBeTruthy()
     expect(vi.mocked(mgmtRevokeClient)).not.toHaveBeenCalled()
     await fireEvent.click(screen.getByText('Yes, disconnect'))
-    expect(vi.mocked(mgmtRevokeClient)).toHaveBeenCalledWith(2)
+    expect(vi.mocked(mgmtRevokeClient)).toHaveBeenCalledWith(2, FINGERPRINT)
   })
 
   it('nudges an operator-key backup until confirmed, then stays quiet', async () => {

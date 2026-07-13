@@ -129,18 +129,20 @@ describe('flashDevice — region layout', () => {
     ])
   })
 
-  it('writes 4 regions at the correct offsets with the config blob last', async () => {
+  it('preserves the config partition by default during a firmware re-flash', async () => {
     const h = makeHarness()
     await flashDevice(BOARD, CFG, {}, h.backend)
     const regions = h.wrote()!
-    expect(regions).toHaveLength(4)
-    expect(regions.map((r) => r.address)).toEqual([0x0, 0x8000, 0x10000, BOARD.configOffset])
+    expect(regions).toHaveLength(3)
+    expect(regions.map((r) => r.address)).toEqual([0x0, 0x8000, 0x10000])
+    expect(regions.some((r) => r.address === BOARD.configOffset)).toBe(false)
   })
 
-  it('appends exactly the config blob buildConfigBlob produces for cfg', async () => {
+  it('writes config only when setup/reconfigure explicitly opts in', async () => {
     const h = makeHarness()
-    await flashDevice(BOARD, CFG, {}, h.backend)
+    await flashDevice(BOARD, CFG, { writeConfig: true }, h.backend)
     const regions = h.wrote()!
+    expect(regions).toHaveLength(4)
     expect([...regions[3].data]).toEqual([...buildConfigBlob(CFG)])
     expect(regions[3].address).toBe(BOARD.configOffset)
   })
@@ -148,7 +150,7 @@ describe('flashDevice — region layout', () => {
   it('puts the classic-ESP32 (T-Display) bootloader at 0x1000, not 0x0', async () => {
     const tdisplay = BOARDS.find((b) => b.id === 'tdisplay')!
     const h = makeHarness()
-    await flashDevice(tdisplay, CFG, {}, h.backend)
+    await flashDevice(tdisplay, CFG, { writeConfig: true }, h.backend)
     const regions = h.wrote()!
     // classic ESP32 loads the bootloader from 0x1000; config sits in the 4 MB layout.
     expect(regions.map((r) => r.address)).toEqual([0x1000, 0x8000, 0x10000, tdisplay.configOffset])
@@ -160,9 +162,16 @@ describe('flashDevice — full erase', () => {
   it('erases the whole flash and emits an erasing stage when fullErase is set', async () => {
     const h = makeHarness()
     const progress: Array<[number, string]> = []
-    await flashDevice(BOARD, CFG, { fullErase: true, onProgress: (p, s) => progress.push([p, s]) }, h.backend)
+    await flashDevice(BOARD, CFG, { fullErase: true, writeConfig: true, onProgress: (p, s) => progress.push([p, s]) }, h.backend)
     expect(h.session.eraseFlash).toHaveBeenCalledTimes(1)
     expect(progress).toContainEqual([0, 'erasing flash'])
+  })
+
+  it('refuses a full erase without replacement config before touching the device', async () => {
+    const h = makeHarness()
+    await expect(flashDevice(BOARD, CFG, { fullErase: true }, h.backend)).rejects.toThrow(/full erase destroys device configuration/i)
+    expect(h.backend.requestPort).not.toHaveBeenCalled()
+    expect(h.session.eraseFlash).not.toHaveBeenCalled()
   })
 
   it('does not erase when fullErase is false', async () => {
@@ -175,7 +184,7 @@ describe('flashDevice — full erase', () => {
     const order: string[] = []
     const h = makeHarness({ writeFlash: async () => { order.push('write') } })
     ;(h.session.eraseFlash as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('erase') })
-    await flashDevice(BOARD, CFG, { fullErase: true }, h.backend)
+    await flashDevice(BOARD, CFG, { fullErase: true, writeConfig: true }, h.backend)
     expect(order).toEqual(['erase', 'write'])
   })
 })

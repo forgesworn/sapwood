@@ -80,4 +80,59 @@ describe('KindPermissions', () => {
     expect(changes).toEqual([])
     expect(screen.getByText(/To prompt for every kind/)).toBeTruthy()
   })
+
+  it('shows strict automatic policy as auto-signed versus denied, never prompted', async () => {
+    render(KindPermissions, {
+      props: {
+        allowedKinds: [1],
+        unrestricted: false,
+        signingApproved: true,
+        autoApprove: true,
+        strictPermissions: true,
+        updating: false,
+        onchange: () => {},
+      },
+    })
+
+    expect(screen.getByText(/1 auto-signed, \d+ denied/)).toBeTruthy()
+    expect(screen.queryByText(/prompted/)).toBeNull()
+    await fireEvent.click(screen.getByText('Signing'))
+    expect(screen.getByText(/Unknown or unlisted kinds are denied by this exact policy/)).toBeTruthy()
+    expect(screen.getByTitle('Profile (kind 0): denied (exact policy)')).toBeTruthy()
+    expect(screen.getByTitle('Note (kind 1): auto-sign')).toBeTruthy()
+  })
+
+  it('shows a strict manual policy as button-approved versus denied', () => {
+    render(KindPermissions, {
+      props: {
+        allowedKinds: [1],
+        unrestricted: false,
+        signingApproved: true,
+        autoApprove: false,
+        strictPermissions: true,
+        updating: false,
+        onchange: () => {},
+      },
+    })
+
+    expect(screen.getByText(/1 button-approved, \d+ denied/)).toBeTruthy()
+  })
+
+  it('treats a strict crypto-only slot as no signing, never legacy TOFU approval', () => {
+    render(KindPermissions, {
+      props: {
+        allowedKinds: [],
+        unrestricted: true,
+        signingApproved: false,
+        signingIncluded: false,
+        strictPermissions: true,
+        updating: false,
+        onchange: () => {},
+      },
+    })
+
+    expect(screen.getByText(/Signing is not included in this app's exact policy/)).toBeTruthy()
+    expect(screen.getByText(/Reconnect it with a signing preset/)).toBeTruthy()
+    expect(screen.queryByText(/Awaiting first approval/)).toBeNull()
+  })
 })

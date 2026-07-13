@@ -1,6 +1,8 @@
 // Browser flasher — the flasher.meshtastic.org / Raspberry Pi Imager model.
-// Flashes the device firmware *and* a config blob over Web Serial with
-// esptool-js, so the device boots already configured (no separate setup step).
+// Flashes device firmware over Web Serial with esptool-js. Firmware-only
+// flashes preserve the config partition by default; the guided setup wizard
+// explicitly opts in to writing a config blob so a new device boots already
+// configured (no separate network setup step).
 // See heartwood-esp32/docs/2026-06-19-web-flasher-flash-and-configure.md
 //
 // Flash layout (must match the board's heartwood-esp32 partition table). The
@@ -9,7 +11,8 @@
 //   bootloader.bin   0x00000 on S3/C6, 0x01000 on the classic ESP32 (T-Display)
 //   partition-table  0x08000
 //   app.bin          0x10000  (ota_0 on heltec's 2 MB A/B layout; factory on 4 MB)
-//   config blob      board.configOffset  (0x410000 heltec / 0x310000 the 4 MB boards)
+//   config blob      board.configOffset  (optional; setup/reconfigure only)
+//                    (0x410000 heltec / 0x310000 the 4 MB boards)
 //
 // Testability: every side effect (Web Serial port pick, esptool session, firmware
 // fetch) is reached through a `FlasherBackend`. The default backend wraps esptool-js
@@ -295,12 +298,20 @@ export interface FlashHandlers {
    * and the device boots into provision-wait mode instead. DESTRUCTIVE.
    */
   fullErase?: boolean
+  /**
+   * Write `cfg` into the board's config partition. This is deliberately opt-in:
+   * a firmware update/re-flash must preserve the existing Wi-Fi, relays, mode
+   * and operator unless the caller is explicitly running setup/reconfigure.
+   * Required with `fullErase`, because a whole-chip erase destroys config.
+   */
+  writeConfig?: boolean
 }
 
 /**
- * Flash `board` with its firmware plus a `config` blob built from `cfg`, over
- * Web Serial. Prompts the user to pick the serial port (must be a user gesture).
- * The device boots already configured.
+ * Flash `board` over Web Serial. By default only firmware regions are written,
+ * preserving the existing config partition. Pass `writeConfig: true` to append
+ * a config blob built from `cfg` during explicit setup/reconfiguration.
+ * Prompts the user to pick the serial port (must be a user gesture).
  *
  * `backend` is injectable purely for testing; production always uses esptool-js.
  */
@@ -312,6 +323,9 @@ export async function flashDevice(
 ): Promise<void> {
   if (!backend.hasWebSerial()) {
     throw new Error('Web Serial unavailable — use Chrome or Edge.')
+  }
+  if (h.fullErase && !h.writeConfig) {
+    throw new Error('A full erase destroys device configuration; enable writeConfig to install replacement settings.')
   }
   const log = (s: string) => h.onLog?.(s.replace(/\s+$/, ''))
 
@@ -344,11 +358,17 @@ export async function flashDevice(
   })
   await verifyAppIntegrity(manifest, board.id, regions[fwRegions.findIndex((r) => r.file === 'app.bin')].data, log)
 
-  // 3. Build the config blob and append it at the config-partition offset.
-  const configBlob = buildConfigBlob(cfg)
-  regions.push({ address: board.configOffset, data: configBlob })
-  labels.push('config')
-  log(`Config blob: ${configBlob.length} bytes → 0x${board.configOffset.toString(16)}`)
+  // 3. Config is a separate trust/configuration boundary. Ordinary firmware
+  // updates leave the partition untouched; only explicit setup/reconfigure
+  // appends a replacement blob.
+  if (h.writeConfig) {
+    const configBlob = buildConfigBlob(cfg)
+    regions.push({ address: board.configOffset, data: configBlob })
+    labels.push('config')
+    log(`Config blob: ${configBlob.length} bytes → 0x${board.configOffset.toString(16)}`)
+  } else {
+    log('Config partition preserved (Wi-Fi, relays, mode and operator unchanged).')
+  }
 
   // 4. Open an esptool session on the chosen port.
   const terminal: FlashTerminal = {
@@ -374,8 +394,9 @@ export async function flashDevice(
 
     // 4. Flash all regions; report progress weighted by BYTES, not region count.
     //    The bootloader (~21KB) and partition table (~3KB) flash in a blink but
-    //    are 2 of 4 regions, so per-region weighting jumped the bar to 50% before
-    //    the ~1.8MB app.bin had really started. Byte-weighting makes the big app
+    //    are 2 of 3 firmware regions (4 during setup), so per-region weighting
+    //    jumped the bar far ahead before the ~1.8MB app.bin had really started.
+    //    Byte-weighting makes the big app
     //    dominate the bar, as the user expects.
     const sizes = regions.map((r) => r.data.length)
     const totalBytes = sizes.reduce((a, b) => a + b, 0) || 1

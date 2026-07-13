@@ -2,35 +2,39 @@
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/TheCryptoDonkey?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/TheCryptoDonkey)
 
-**Shape your signer** -- browser-based management UI for the [Heartwood](https://github.com/forgesworn/heartwood-esp32) ESP32 signing device.
+**Shape your signer** -- browser-based local and remote management UI for the [Heartwood](https://github.com/forgesworn/heartwood-esp32) ESP32 signing device.
 
-Connect your Heartwood via USB, open [sapwood.forgesworn.dev](https://sapwood.forgesworn.dev/) in Chrome, and manage your signing device from the browser. No server, no install, no dependencies.
+Bootstrap Heartwood over USB, then leave it online in WiFi-standalone mode and manage it from Sapwood on your phone through Nostr relays. The device can sign unattended only inside exact client method/event-kind policies installed by its authenticated operator.
 
 ## Features
 
 - **Masters** -- view provisioned master slots, npubs, and derivation modes
-- **Clients** -- list, revoke, and update TOFU-approved client policies
+- **Clients** -- remotely create, list, revoke, and update exact client policies
+- **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely
+- **Phone handoff** -- transfer the separate operator credential to a phone with a protected QR flow
+- **USB recovery** -- read password-redacted state, preserve credentials during network edits, and physically rotate only the management operator
 - **Firmware** -- OTA updates with SHA-256 verification and progress bar
 - **Logs** -- real-time ESP-IDF log output from the device
 - **Factory Reset** -- erase all keys (requires physical button confirmation)
 
 ## How it works
 
-Sapwood connects directly to the ESP32 via the [Web Serial API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API) (Chrome/Edge 89+). It speaks the Heartwood frame protocol over USB -- the same protocol used by the provision CLI and bridge. No server component, no bridge required.
+Sapwood supports two transports. USB bootstrap and recovery use the [Web Serial API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API). Remote management sends authenticated, encrypted management events through Nostr relays to Heartwood's outbound WiFi connection; the device exposes no inbound port and requires no cloud account or management server.
 
 ```
-Browser (Sapwood)  --Web Serial-->  ESP32 USB-Serial-JTAG
+Browser (Sapwood)  --Web Serial-->  Heartwood               (local)
+Phone (Sapwood)    --Nostr relays--> Heartwood outbound WiFi (remote)
 ```
 
 The frame protocol is a TypeScript port of [heartwood-common/src/frame.rs](https://github.com/forgesworn/heartwood-esp32), with 19 tests verifying byte-level compatibility with the Rust implementation.
 
 ## Security
 
-Secrets never leave the ESP32. The serial protocol only carries public keys, policy metadata, unsigned events, and signatures. All destructive operations (factory reset, OTA, provisioning) require physical button confirmation on the device. A compromised web UI cannot extract keys or perform destructive actions without someone pressing the button.
+Master secrets never leave the ESP32. Remote mutations require the separate operator key, a device-issued one-time challenge, and the current client credential fingerprint. Exact policies fail closed: unlisted methods and event kinds cannot be signed automatically. Sapwood keeps multiple operator credentials in an additive local keyring, and a protected phone QR is built only from relays/operator state proven by the exact signer. Seed/PIN changes, trust-root changes, factory reset, provisioning, and OTA remain local USB/physical operations; firmware-only flashing preserves the config partition by default.
 
 ## Quick start
 
-Visit [sapwood.forgesworn.dev](https://sapwood.forgesworn.dev/) in Chrome or Edge, plug in your Heartwood, and click **Connect USB**.
+Visit [sapwood.forgesworn.dev](https://sapwood.forgesworn.dev/) in Chrome or Edge, plug in Heartwood, and click **Connect USB** for the initial setup. Enable WiFi-standalone mode and use **Move management to phone** to create the protected operator handoff. Afterwards the phone can connect remotely while the device stays in another country.
 
 ### Local development
 
@@ -39,7 +43,7 @@ git clone https://github.com/forgesworn/sapwood.git
 cd sapwood
 npm install
 npm run dev       # dev server at localhost:5173
-npm test          # 19 frame protocol tests
+npm test          # unit and component tests
 npm run build     # production build to dist/
 ```
 

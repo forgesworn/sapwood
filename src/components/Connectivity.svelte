@@ -1,15 +1,19 @@
 <script lang="ts">
-  import { device, configureNetwork, scanWifi, type WifiNetwork } from '../lib/device.svelte.js'
+  import { onDestroy } from 'svelte'
+  import {
+    abortNetworkConfig, device, configureNetwork, configureNetworkRemotely, getNetworkConfig,
+    patchNetworkOverUsb, scanWifi, type NetworkConfigTrial, type RemotePasswordChange,
+    type WifiNetwork,
+  } from '../lib/device.svelte.js'
   import { getOrCreateOperator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
   import { DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS } from '../lib/wizard.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import RelayEditor from './RelayEditor.svelte'
 
-  // The firmware exposes no read-back for the network config, so the signer's
-  // relays as flashed (persisted by the flasher) are the best local truth. Start
-  // from those, not the hardcoded defaults — otherwise the panel always shows
-  // defaults and a saved edit reads as reverted ("it didn't stick").
+  // Older firmware has no USB read-back, so these are display-only defaults
+  // until the signer proves its own exact redacted state. They are never used
+  // as authority for a current-firmware patch.
   function savedRelays(): string[] {
     try {
       const raw = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
@@ -22,10 +26,16 @@
   let mode = $state<'usb' | 'wifi'>('wifi')
   let ssid = $state('')
   let password = $state('')
+  let passwordSet = $state(false)
+  let activeSsid = $state('')
+  let clearPassword = $state(false)
   let showPw = $state(false)
   let relays = $state<string[]>(savedRelays())
   let status = $state<'idle' | 'sending' | 'done' | 'error'>('idle')
   let message = $state('')
+  let loading = $state(false)
+  let discarding = $state(false)
+  let pendingTrial = $state<NetworkConfigTrial | null>(null)
 
   // WiFi scan (setup aid): ask the signer's own radio which 2.4 GHz networks it
   // can see, so the SSID is picked from reality instead of typed blind.
@@ -34,9 +44,129 @@
   let scanMsg = $state('')
   let scanNote = $state('')
 
-  // Network config travels as a USB frame and needs the device's button —
-  // it cannot be changed over the bridge or a relay.
-  const canConfigure = $derived(device.connected && device.mode === 'serial')
+  const overUsb = $derived(device.connected && device.mode === 'serial')
+  const overRelay = $derived(device.connected && device.mode === 'relay')
+  const usbState = $derived(device.usbNetworkState)
+  const usbConfigured = $derived(overUsb && usbState?.configured === true)
+  const canConfigure = $derived(overUsb || overRelay)
+  let loadEpoch = 0
+
+  function connectionKey(): string {
+    const generation = Number(device.connectionGeneration ?? 0)
+    const relayTarget = device.mode === 'relay' ? (device.relayDevicePub ?? '').toLowerCase() : ''
+    return `${generation}:${device.connected ? device.mode : 'none'}:${relayTarget}`
+  }
+
+  function remoteTargetKey(): string {
+    const target = (device.relayDevicePub ?? '').toLowerCase()
+    return device.connected && device.mode === 'relay' && /^[0-9a-f]{64}$/.test(target)
+      ? connectionKey()
+      : ''
+  }
+
+  function resetForConnectionChange(): void {
+    mode = 'wifi'
+    ssid = ''
+    activeSsid = ''
+    password = ''
+    passwordSet = false
+    clearPassword = false
+    showPw = false
+    relays = savedRelays()
+    status = 'idle'
+    message = ''
+    loading = false
+    discarding = false
+    pendingTrial = null
+    scanning = false
+    scanResults = null
+    scanMsg = ''
+    scanNote = ''
+  }
+
+  async function loadRemoteConfig(targetKey: string, epoch: number) {
+    if (!targetKey) return
+    loading = true
+    message = ''
+    try {
+      const state = await getNetworkConfig()
+      if (epoch !== loadEpoch || remoteTargetKey() !== targetKey) return
+      mode = 'wifi'
+      ssid = state.active.ssid
+      activeSsid = state.active.ssid
+      relays = [...state.active.relays]
+      password = '' // a password is never returned or persisted in the browser
+      passwordSet = state.active.password_set
+      clearPassword = false
+      pendingTrial = state.trial
+      if (state.trial) {
+        message = state.trial.phase === 'staged'
+          ? `A pending network change was staged but never activated (transaction ${state.trial.transaction_id}). Discard it before making another change.`
+          : `The signer is trying a network change (transaction ${state.trial.transaction_id}). Wait for it to reconnect or roll back automatically.`
+      }
+    } catch (e) {
+      if (epoch !== loadEpoch || remoteTargetKey() !== targetKey) return
+      status = 'error'
+      message = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (epoch === loadEpoch && remoteTargetKey() === targetKey) loading = false
+    }
+  }
+
+  $effect(() => {
+    // Bind both the exact device pubkey and a monotonic transport epoch. A late
+    // response from signer A must never populate the form after signer B (or a
+    // new session to A) has taken over this still-mounted panel.
+    connectionKey()
+    const targetKey = remoteTargetKey()
+    const epoch = ++loadEpoch
+    resetForConnectionChange()
+    if (targetKey) void loadRemoteConfig(targetKey, epoch)
+  })
+
+  $effect(() => {
+    const state = device.usbNetworkState
+    if (!overUsb || !state?.configured || !state.mode) return
+    mode = state.mode
+    ssid = state.ssid ?? ''
+    activeSsid = state.ssid ?? ''
+    relays = [...(state.relays ?? [])]
+    password = ''
+    passwordSet = state.password_set === true
+    clearPassword = false
+    loading = false
+  })
+
+  onDestroy(() => {
+    loadEpoch += 1
+    // Never leave a supplied network credential in a detached component's
+    // reactive state after navigation. Password-manager ignore hints below are
+    // defence in depth; the browser app itself stores no password.
+    password = ''
+    clearPassword = false
+  })
+
+  async function discardPending() {
+    if (!pendingTrial || pendingTrial.phase !== 'staged') return
+    const requestKey = connectionKey()
+    const epoch = loadEpoch
+    const transactionId = pendingTrial.transaction_id
+    discarding = true
+    status = 'idle'
+    message = ''
+    try {
+      await abortNetworkConfig(transactionId)
+      if (epoch !== loadEpoch || connectionKey() !== requestKey) return
+      pendingTrial = null
+      message = 'Pending network change discarded. The active network was not changed.'
+    } catch (e) {
+      if (epoch !== loadEpoch || connectionKey() !== requestKey) return
+      status = 'error'
+      message = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (epoch === loadEpoch && connectionKey() === requestKey) discarding = false
+    }
+  }
 
   async function scan() {
     scanning = true
@@ -80,35 +210,99 @@
   }
 
   async function send() {
+    const requestKey = connectionKey()
+    const epoch = loadEpoch
     status = 'sending'
     message = ''
-    const cfg: NetConfig = {
-      ssid: ssid.trim(),
-      password,
-      relays: mode === 'wifi' ? relays : [],
-      mode,
-      // The firmware stores the whole config verbatim, so an omitted op_mgmt
-      // wipes the operator key and disables WiFi management. Always carry this
-      // browser's operator (as the flasher does) so a network edit keeps — or
-      // restores — the ability to manage over the relay.
-      op_mgmt: getOrCreateOperator().pubHex,
-    }
-    if (mode === 'wifi' && (!cfg.ssid || cfg.relays.length === 0)) {
+    const cleanSsid = ssid.trim()
+    const cleanRelays = relays.map((relay) => relay.trim()).filter(Boolean)
+    if (mode === 'wifi' && (!cleanSsid || cleanRelays.length === 0)) {
       status = 'error'
       message = 'WiFi mode needs an SSID and at least one relay'
       return
     }
+    if ((overRelay || usbConfigured) && activeSsid && cleanSsid !== activeSsid && !password && !clearPassword) {
+      status = 'error'
+      message = 'Changing the WiFi name needs a new password, or explicitly choose Clear for an open network. Blank only keeps the password when the SSID is unchanged.'
+      return
+    }
     try {
-      const ok = await configureNetwork(cfg)
+      let ok = false
+      if (overRelay) {
+        const passwordChange: RemotePasswordChange = clearPassword
+          ? { action: 'clear' }
+          : password
+            ? { action: 'set', value: password }
+            : { action: 'keep' }
+        await configureNetworkRemotely({
+          mode: 'wifi',
+          ssid: cleanSsid,
+          relays: cleanRelays,
+          password: passwordChange,
+        })
+        if (epoch !== loadEpoch || connectionKey() !== requestKey) return
+        ok = true
+        passwordSet = passwordChange.action === 'clear' ? false
+          : passwordChange.action === 'set' ? true
+            : passwordSet
+        password = ''
+        clearPassword = false
+        activeSsid = cleanSsid
+      } else if (usbConfigured) {
+        const passwordChange: RemotePasswordChange = clearPassword
+          ? { action: 'clear' }
+          : password
+            ? { action: 'set', value: password }
+            : { action: 'keep' }
+        const next = await patchNetworkOverUsb(mode === 'usb'
+          ? { mode: 'usb' }
+          : {
+              mode: 'wifi',
+              ssid: cleanSsid,
+              relays: cleanRelays,
+              password: passwordChange,
+            })
+        if (epoch !== loadEpoch || connectionKey() !== requestKey) return
+        ok = true
+        password = ''
+        clearPassword = false
+        passwordSet = next.password_set === true
+        activeSsid = next.ssid ?? cleanSsid
+      } else {
+        if (device.usbNetworkSupport === 'unsupported') {
+          throw new Error('This signer firmware cannot safely preserve its stored password and operator during a network edit. Update the firmware over USB first.')
+        }
+        // A current, genuinely unconfigured device needs one full initial
+        // configuration. This is the only path that deliberately establishes
+        // the browser's operator while writing a password.
+        const cfg: NetConfig = {
+          ssid: cleanSsid,
+          password,
+          relays: mode === 'wifi' ? cleanRelays : [],
+          mode,
+          // USB's legacy whole-config frame must carry the existing operator
+          // key. Relay staging never constructs or sends this field.
+          op_mgmt: getOrCreateOperator().pubHex,
+        }
+        ok = await configureNetwork(cfg)
+        if (epoch !== loadEpoch || connectionKey() !== requestKey) return
+      }
       status = ok ? 'done' : 'error'
-      message = ok ? 'Saved. Re-plug power to apply.' : 'Device rejected the config'
+      message = ok
+        ? (overRelay
+            ? 'Saved. The signer reconnected on the staged network and committed it.'
+            : usbConfigured
+              ? 'Saved and verified after the signer rebooted.'
+              : 'Initial network and operator saved. The signer is rebooting.')
+        : 'Device rejected the config'
       // Remember the relays we just wrote so the panel reflects them next time
       // and the USB bunker-URI builder (serialGetUri reads lastRelays) hands out
       // links that name them.
       if (ok && mode === 'wifi') {
-        try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(relays)) } catch { /* ignore */ }
+        try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(cleanRelays)) } catch { /* ignore */ }
       }
     } catch (e) {
+      if (epoch !== loadEpoch || connectionKey() !== requestKey) return
       status = 'error'
       message = e instanceof Error ? e.message : String(e)
     }
@@ -123,13 +317,20 @@
     daemon on the computer it's plugged into.</p>
 
   {#if device.connected && !canConfigure}
-    <p class="hint">Network settings are changed over USB. Plug the signer into this computer, connect, and come back here.</p>
+    <p class="hint">Connect directly by USB or through the signer's authenticated WiFi management channel to change its network.</p>
+  {:else if overRelay}
+    <p class="hint">Remote saves are staged first. Sapwood reconnects through the old and candidate relays, commits only the matching transaction, and otherwise leaves the signer to roll back automatically.</p>
+    {#if pendingTrial?.phase === 'staged'}
+      <button class="btn btn-secondary" onclick={discardPending} disabled={discarding}>
+        {discarding ? 'Discarding…' : 'Discard pending change'}
+      </button>
+    {/if}
   {/if}
 
   <div class="form">
     <label class="field">
       <span class="field-label">Mode</span>
-      <select class="field-input" bind:value={mode} disabled={!canConfigure}>
+      <select class="field-input" bind:value={mode} disabled={!overUsb || loading || status === 'sending'}>
         <option value="wifi">WiFi-standalone (standard)</option>
         <option value="usb">USB-only, radio off (hardened)</option>
       </select>
@@ -145,15 +346,17 @@
       <div class="field">
         <span class="field-label">WiFi SSID</span>
         <div class="ssid-row">
-          <input class="field-input" bind:value={ssid} disabled={!canConfigure} aria-label="WiFi SSID" />
-          <button
-            type="button"
-            class="btn btn-secondary scan-btn"
-            onclick={scan}
-            disabled={!canConfigure || scanning}
-          >
-            {scanning ? 'Scanning…' : 'Scan'}
-          </button>
+          <input class="field-input" bind:value={ssid} disabled={!canConfigure || loading || status === 'sending'} aria-label="WiFi SSID" />
+          {#if overUsb}
+            <button
+              type="button"
+              class="btn btn-secondary scan-btn"
+              onclick={scan}
+              disabled={!canConfigure || scanning}
+            >
+              {scanning ? 'Scanning…' : 'Scan'}
+            </button>
+          {/if}
         </div>
         {#if scanMsg}<p class="hint-sm scan-msg">{scanMsg}</p>{/if}
         {#if scanResults && scanResults.length}
@@ -171,32 +374,56 @@
         {/if}
         {#if scanNote}<p class="hint-sm scan-note">{scanNote}</p>{/if}
       </div>
-      <label class="field">
+      <div class="field">
         <span class="field-label">WiFi password</span>
         <div class="pw-wrap">
-          <input type={showPw ? 'text' : 'password'} class="field-input" bind:value={password} disabled={!canConfigure} />
-          <PasswordReveal bind:shown={showPw} disabled={!canConfigure} />
+          <input
+            type={showPw ? 'text' : 'password'}
+            class="field-input"
+            bind:value={password}
+            disabled={!canConfigure || loading || status === 'sending' || clearPassword}
+            placeholder={(overRelay || usbConfigured) ? (passwordSet ? 'Leave blank to keep current password' : 'Leave blank for an open network') : ''}
+            autocomplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            aria-label="WiFi password"
+          />
+          <PasswordReveal bind:shown={showPw} disabled={!canConfigure || loading || status === 'sending' || clearPassword} />
         </div>
-      </label>
+        {#if overRelay || usbConfigured}
+          <p class="hint-sm">The signer only reports whether a password exists; it never sends the password back. Blank keeps the current value, typing sets a new one.</p>
+          <label class="clear-password">
+            <input type="checkbox" bind:checked={clearPassword} disabled={loading || status === 'sending'} />
+            Clear the saved password (open network)
+          </label>
+        {/if}
+      </div>
       <div class="field">
         <span class="field-label">Relays</span>
         <RelayEditor
           {relays}
           suggestions={SUGGESTED_SIGNER_RELAYS}
-          disabled={!canConfigure}
+          disabled={!canConfigure || loading || status === 'sending'}
           onchange={(next) => (relays = next)}
         />
       </div>
-      <p class="hint-sm">Saving rewrites the whole network config, so enter the WiFi name and password
-        as well, even to change only the relays. The signer applies it after you re-plug its power.</p>
+      {#if overUsb}
+        {#if usbConfigured}
+          <p class="hint-sm">This signer supports safe USB patches: blank keeps the stored password and network saves cannot change the management operator.</p>
+        {:else if device.usbNetworkSupport === 'unsupported'}
+          <p class="hint-sm error-text">Update the signer firmware before editing its network. Older firmware can only rewrite the whole configuration and may clear a password or replace the operator.</p>
+        {:else}
+          <p class="hint-sm">Reading the signer's current network state…</p>
+        {/if}
+      {/if}
     {/if}
 
     <button
       class="btn btn-secondary form-submit"
       onclick={send}
-      disabled={!canConfigure || status === 'sending'}
+      disabled={!canConfigure || loading || status === 'sending' || pendingTrial !== null || (overUsb && device.usbNetworkSupport === 'unsupported')}
     >
-      {status === 'sending' ? 'Sending…' : 'Save to device'}
+      {loading ? 'Loading…' : status === 'sending' ? (overRelay ? 'Testing network…' : 'Sending…') : overRelay ? 'Test & save network' : 'Save to device'}
     </button>
   </div>
 
@@ -233,4 +460,5 @@
   .scan-auth { flex: 0 0 auto; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.03em; }
   .scan-sig { flex: 0 0 auto; color: var(--green); letter-spacing: 1px; font-size: 0.8rem; }
   .scan-note { margin: 0.4rem 0 0; color: var(--amber, #d9a441); }
+  .clear-password { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.45rem; font-size: 0.78rem; color: var(--text-muted); }
 </style>

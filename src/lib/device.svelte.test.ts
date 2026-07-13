@@ -5,8 +5,9 @@ import { nip19 } from 'nostr-tools'
 // avatar/profile modules so no canvas or relay is needed. The serial mock
 // captures the listener device.svelte.ts registers at import, which is the
 // only way to feed frames into its (unexported) handleFrame.
-const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildMetaMock, relayRequestMock } = vi.hoisted(() => ({
+const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildMetaMock, relayRequestMock, relayInstances } = vi.hoisted(() => ({
   relayRequestMock: vi.fn(),
+  relayInstances: [] as Array<{ relays: string[]; closed: boolean }>,
   serialMock: {
     listeners: [] as Array<(e: unknown) => void>,
     on(fn: (e: unknown) => void) { serialMock.listeners.push(fn); return () => {} },
@@ -38,25 +39,41 @@ vi.mock('./avatar.js', () => ({
 vi.mock('./relay-transport.js', () => ({
   RelayTransport: class {
     operatorPub = 'op'
-    constructor(_devicePubHex: string, _relays: string[], opSkHex: string) {
+    devicePub: string
+    relays: string[]
+    closed = false
+    constructor(devicePubHex: string, relays: string[], opSkHex: string) {
+      this.devicePub = devicePubHex
+      this.relays = [...relays]
       this.operatorPub = opSkHex === 'b'.repeat(64) ? 'legacy-op' : 'op'
+      relayInstances.push(this)
     }
     async connect() { /* no relay in tests */ }
     request(...args: unknown[]) { return relayRequestMock.apply(this, args) }
-    close() { /* nothing to tear down */ }
+    close() { this.closed = true }
   },
 }))
 
-import { device, syncIdentityMeta, configureNetwork, mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning, mgmtClientUri, connectRelay, disconnect, refreshRelayAudit } from './device.svelte.js'
+import {
+  abortNetworkConfig, device, syncIdentityMeta, configureNetwork, configureNetworkRemotely, getNetworkConfig,
+  mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning,
+  mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
+  refreshUsbNetworkState, setOperatorOverUsb,
+} from './device.svelte.js'
 import { FrameType } from './frame.js'
-import { generateOperatorMnemonic } from './op-mgmt.js'
+import { generateOperatorMnemonic, getOrCreateOperator } from './op-mgmt.js'
 import type { MasterInfo } from './types.js'
+import { fullClientPolicy } from './client-policy.js'
+import {
+  listKnownDevices, pendingNetworkHandoff, rememberDevice, savePendingNetworkHandoff,
+} from './known-devices.js'
 
 const FAKE_AVATAR = { w: 2, h: 2, bytes: new Uint8Array(8) }
 const FAKE_FRAME = new Uint8Array([0xaa])
 const ACK = { type: FrameType.ACK, payload: new Uint8Array() }
 const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
 const LS_SK = 'heartwood.opMgmt.skHex'
+const SLOT_FP = 'f'.repeat(64)
 const FW_RESP = {
   type: FrameType.FIRMWARE_INFO_RESPONSE,
   payload: new TextEncoder().encode('{"version":"0.9.10","board":"tdisplay"}'),
@@ -101,13 +118,22 @@ beforeEach(() => {
   device.masters = []
   device.logs = []
   device.signerActivity = []
+  device.relays = []
+  device.relayStatus = null
+  device.slotUris = {}
+  device.slots = []
   device.error = null
+  device.usbNetworkState = null
+  device.usbNetworkSupport = 'unknown'
+  device.awaitingButton = null
+  device.connectionGeneration = 1
   resolveMock.mockReset()
   loadAvatarMock.mockReset()
   placeholderMock.mockReset()
   buildMetaMock.mockReset()
   serialMock.sendAndReceive.mockReset()
   relayRequestMock.mockReset()
+  relayInstances.length = 0
 })
 
 describe('transport guards', () => {
@@ -130,7 +156,7 @@ describe('transport guards', () => {
   })
 
   it('mgmt actions throw when not connected', async () => {
-    await expect(mgmtCreateClient('x', false)).rejects.toThrow('not connected')
+    await expect(mgmtCreateClient('x', fullClientPolicy(false))).rejects.toThrow('not connected')
     await expect(mgmtRevokeClient(0)).rejects.toThrow('not connected')
     await expect(mgmtUpdateClient(0, {})).rejects.toThrow('not connected')
   })
@@ -139,6 +165,616 @@ describe('transport guards', () => {
     device.mode = 'serial'
     device.connected = true
     await expect(mgmtApproveSigning(0)).rejects.toThrow(/PRG press/)
+  })
+})
+
+describe('USB redacted network and operator recovery', () => {
+  const stateResponse = (overrides: Record<string, unknown> = {}) => ({
+    type: FrameType.GET_NET_CONFIG_RESPONSE,
+    payload: new TextEncoder().encode(JSON.stringify({
+      version: 1,
+      configured: true,
+      revision: 7,
+      mode: 'wifi',
+      ssid: 'Home',
+      relays: ['wss://relay.example'],
+      password_set: true,
+      op_mgmt: '11'.repeat(32),
+      recovery_ok: true,
+      trial: null,
+      last_result: null,
+      ...overrides,
+    })),
+  })
+
+  it('loads exact state without ever accepting a password field', async () => {
+    device.mode = 'serial'
+    device.connected = true
+    serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse())
+    const state = await refreshUsbNetworkState()
+    expect(state).toMatchObject({ ssid: 'Home', password_set: true, revision: 7 })
+    expect(device.usbNetworkSupport).toBe('supported')
+    expect(JSON.stringify(state)).not.toContain('"password"')
+
+    device.usbNetworkState = null
+    device.usbNetworkSupport = 'unknown'
+    serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse({ password: 'injected' }))
+    expect(await refreshUsbNetworkState()).toBeNull()
+    expect(device.usbNetworkState).toBeNull()
+    expect(device.error).toMatch(/malformed network state/)
+  })
+
+  it('distinguishes an old-firmware NACK from a temporary timeout', async () => {
+    device.mode = 'serial'
+    device.connected = true
+    serialMock.sendAndReceive.mockResolvedValueOnce({ type: FrameType.NACK, payload: new Uint8Array() })
+    expect(await refreshUsbNetworkState()).toBeNull()
+    expect(device.usbNetworkSupport).toBe('unsupported')
+
+    device.usbNetworkSupport = 'unknown'
+    serialMock.sendAndReceive.mockRejectedValueOnce(new Error('Timed out'))
+    expect(await refreshUsbNetworkState()).toBeNull()
+    expect(device.usbNetworkSupport).toBe('unknown')
+  })
+
+  it('resolves a lost operator ACK by read-back and never resends the mutation', async () => {
+    vi.useFakeTimers()
+    try {
+      const operator = getOrCreateOperator()
+      device.mode = 'serial'
+      device.connected = true
+      device.usbNetworkState = {
+        version: 1, configured: true, revision: 7, mode: 'wifi', ssid: 'Home',
+        relays: ['wss://relay.example'], password_set: true, op_mgmt: '11'.repeat(32), recovery_ok: true,
+      }
+      serialMock.sendAndReceive
+        .mockRejectedValueOnce(new Error('Timed out waiting for response'))
+        .mockResolvedValueOnce(stateResponse({ revision: 8, op_mgmt: operator.pubHex }))
+
+      const pending = setOperatorOverUsb(operator.pubHex)
+      await vi.runAllTimersAsync()
+      const state = await pending
+      expect(state.op_mgmt).toBe(operator.pubHex)
+      expect(state.revision).toBe(8)
+      expect(serialMock.sendAndReceive.mock.calls.filter((call) => call[0][2] === FrameType.SET_OPERATOR)).toHaveLength(1)
+      expect(device.awaitingButton).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('staged remote network management', () => {
+  it('rejects insecure relay URLs before staging a remote change', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://old.example' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://old.example'])
+    try {
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: ['ws://insecure.example'],
+        password: { action: 'keep' },
+      })).rejects.toThrow(/must start with wss:\/\//)
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'x'.repeat(33),
+        relays: ['wss://safe.example'],
+        password: { action: 'keep' },
+      })).rejects.toThrow(/SSID must be 1–32 bytes/)
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: ['wss://safe.example'],
+        password: { action: 'set', value: 'short' },
+      })).rejects.toThrow(/password must be 8–63 bytes/)
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: Array.from({ length: 9 }, (_, index) => `wss://relay-${index}.example`),
+        password: { action: 'keep' },
+      })).rejects.toThrow(/at most eight relays/)
+      for (const [relay, error] of [
+        ['wss://relay.example/path', /paths, queries, and fragments are not supported/],
+        ['wss://relay.example?search=x', /paths, queries, and fragments are not supported/],
+        ['wss://relay.example#fragment', /paths, queries, and fragments are not supported/],
+        ['wss://user@relay.example', /cannot contain credentials/],
+        ['wss://relay.example:444', /ports must be 443/],
+        ['wss://relay_example', /require an ASCII hostname/],
+        ['wss://---', /require an ASCII hostname/],
+      ] as const) {
+        await expect(configureNetworkRemotely({
+          mode: 'wifi',
+          ssid: 'Home',
+          relays: [relay],
+          password: { action: 'keep' },
+        })).rejects.toThrow(error)
+      }
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: ['wss://RELAY.example', 'wss://relay.EXAMPLE/'],
+        password: { action: 'keep' },
+      })).rejects.toThrow(/must not be duplicated/)
+      expect(relayRequestMock.mock.calls.some((call) => call[0] === 'stage_network_config')).toBe(false)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('rejects a candidate whose serialized NVS config can exceed 512 bytes', async () => {
+    const { pubHex } = freshMaster()
+    const activeRelays = ['wss://old.example']
+    const largeRelaySet = Array.from(
+      { length: 8 },
+      (_, index) => `wss://${'a'.repeat(45)}${index}.example`,
+    )
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: activeRelays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'get_network_config') {
+        return {
+          revision: 2,
+          active: { mode: 'wifi', ssid: 'Home', relays: activeRelays, password_set: true },
+          trial: null,
+          last_result: null,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, activeRelays)
+    try {
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: largeRelaySet,
+        password: { action: 'keep' },
+      })).rejects.toThrow(/exceeding the signer's 512-byte limit/)
+      expect(relayRequestMock.mock.calls.some((call) => call[0] === 'stage_network_config')).toBe(false)
+      expect(relayInstances.filter((instance) => !instance.closed)).toHaveLength(1)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('refuses activation when a mobile recovery route cannot be persisted', async () => {
+    const { pubHex } = freshMaster()
+    const relays = ['wss://old.example']
+    let transactionId = ''
+    let activated = false
+    let aborted = false
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: relays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'get_network_config') {
+        return {
+          revision: 4,
+          active: { mode: 'wifi', ssid: 'Home', relays, password_set: true },
+          trial: null,
+          last_result: null,
+        }
+      }
+      if (method === 'stage_network_config') {
+        transactionId = (params as { transaction_id: string }).transaction_id
+        return { transaction_id: transactionId, staged: true, revision: 5 }
+      }
+      if (method === 'activate_network_config') {
+        activated = true
+        return { transaction_id: transactionId, revision: 5, rebooting: true }
+      }
+      if (method === 'abort_network_config') {
+        aborted = true
+        return { transaction_id: transactionId, revision: 5, aborted: true }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, relays)
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota exceeded', 'QuotaExceededError')
+    })
+    try {
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: ['wss://new.example'],
+        password: { action: 'keep' },
+      })).rejects.toThrow(/could not save a recovery route/i)
+      expect(activated).toBe(false)
+      expect(aborted).toBe(true)
+    } finally {
+      write.mockRestore()
+      await disconnect()
+    }
+  })
+
+  it('reads only redacted active and trial state over the authenticated relay', async () => {
+    const { pubHex } = freshMaster()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://old.example' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'get_network_config') {
+        return {
+          revision: 7,
+          active: {
+            mode: 'wifi', ssid: 'Home', relays: ['wss://old.example'],
+            password_set: true, password: 'must-not-escape',
+          },
+          trial: null,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://old.example'])
+    try {
+      await expect(getNetworkConfig()).resolves.toEqual({
+        revision: 7,
+        active: { mode: 'wifi', ssid: 'Home', relays: ['wss://old.example'], password_set: true },
+        trial: null,
+        last_result: null,
+      })
+      expect(JSON.stringify(await getNetworkConfig())).not.toContain('must-not-escape')
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('stages with a revision, activates, observes the same trial, commits, then replaces relays', async () => {
+    const { pubHex } = freshMaster()
+    const oldRelays = ['wss://old.example', 'wss://fallback.example']
+    const nextRelays = ['wss://new.example:443/']
+    let transactionId = ''
+    let stageAttempts = 0
+    let activated = false
+    let committed = false
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: oldRelays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'stage_network_config') {
+        stageAttempts++
+        const request = params as { transaction_id: string; base_revision: number; patch: Record<string, unknown> }
+        expect(request.base_revision).toBe(12)
+        expect(request.patch).toEqual({
+          mode: 'wifi',
+          ssid: 'Away',
+          relays: nextRelays,
+          password: { action: 'set', value: 'new-network-secret' },
+        })
+        expect(request.patch).not.toHaveProperty('op_mgmt')
+        if (!transactionId) transactionId = request.transaction_id
+        expect(request.transaction_id).toBe(transactionId)
+        throw new Error('timeout waiting for device (stage_network_config)')
+      }
+      if (method === 'activate_network_config') {
+        expect(params).toEqual({ transaction_id: transactionId, revision: 13 })
+        expect(pendingNetworkHandoff(pubHex)).toEqual(expect.objectContaining({
+          transactionId,
+          revision: 13,
+          oldRelays,
+          candidateRelays: nextRelays,
+        }))
+        activated = true
+        return { transaction_id: transactionId, revision: 13, rebooting: true }
+      }
+      if (method === 'get_network_config') {
+        if (!transactionId) {
+          return {
+            revision: 12,
+            active: { mode: 'wifi', ssid: 'Home', relays: oldRelays, password_set: true },
+            trial: null,
+          }
+        }
+        if (committed) {
+          return {
+            revision: 13,
+            active: { mode: 'wifi', ssid: 'Away', relays: nextRelays, password_set: true },
+            trial: null,
+            last_result: { transaction_id: transactionId, revision: 13, outcome: 'committed' },
+          }
+        }
+        if (!activated) {
+          return {
+            revision: 13,
+            active: { mode: 'wifi', ssid: 'Home', relays: oldRelays, password_set: true },
+            trial: {
+              transaction_id: transactionId,
+              phase: 'staged',
+              attempted: 0,
+              mode: 'wifi',
+              ssid: 'Away',
+              relays: nextRelays,
+              password_set: true,
+            },
+          }
+        }
+        return {
+          revision: 13,
+          active: { mode: 'wifi', ssid: 'Home', relays: oldRelays, password_set: true },
+          trial: {
+            transaction_id: transactionId,
+            phase: 'trying',
+            attempted: 1,
+            mode: 'wifi',
+            ssid: 'Away',
+            relays: nextRelays,
+            password_set: true,
+          },
+        }
+      }
+      if (method === 'commit_network_config') {
+        expect(params).toEqual({ transaction_id: transactionId, revision: 13 })
+        committed = true
+        return { transaction_id: transactionId, committed: true, revision: 13 }
+      }
+      if (method === 'abort_network_config') throw new Error('abort should not run')
+      return { ok: true }
+    })
+
+    // The live transport may be wider than firmware's committed A route after
+    // an earlier crash recovery. The new journal must still record exact A.
+    await connectRelay(pubHex, [...oldRelays, 'wss://stale-recovery.example'], 'remote signer')
+    try {
+      const observed = await configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Away',
+        relays: nextRelays,
+        password: { action: 'set', value: 'new-network-secret' },
+      })
+      expect(observed).toEqual(expect.objectContaining({
+        revision: 13,
+        active: { mode: 'wifi', ssid: 'Away', relays: nextRelays, password_set: true },
+        trial: null,
+        last_result: { transaction_id: transactionId, revision: 13, outcome: 'committed' },
+      }))
+
+      expect(stageAttempts).toBe(1)
+      expect(device.relays).toEqual(nextRelays)
+      expect(listKnownDevices().find((known) => known.pubHex === pubHex)?.relays).toEqual(nextRelays)
+      expect(pendingNetworkHandoff(pubHex)).toBeNull()
+      expect(relayInstances.filter((instance) => !instance.closed)).toHaveLength(1)
+      expect(relayInstances.find((instance) => !instance.closed)?.relays).toEqual(nextRelays)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('recovers a committed candidate route after a mobile page kill', async () => {
+    const { pubHex } = freshMaster()
+    const oldRelays = ['wss://old.example']
+    const nextRelays = ['wss://new.example']
+    const transactionId = '03'.repeat(16)
+    rememberDevice(pubHex, oldRelays, 'remote signer')
+    expect(savePendingNetworkHandoff({
+      devicePubHex: pubHex,
+      transactionId,
+      revision: 52,
+      oldRelays,
+      candidateRelays: nextRelays,
+    })).toBe(true)
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: nextRelays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'get_network_config') {
+        return {
+          revision: 52,
+          active: { mode: 'wifi', ssid: 'Away', relays: nextRelays, password_set: true },
+          trial: null,
+          last_result: { transaction_id: transactionId, revision: 52, outcome: 'committed' },
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, oldRelays, 'remote signer')
+    try {
+      expect(pendingNetworkHandoff(pubHex)).toBeNull()
+      expect(listKnownDevices().find((known) => known.pubHex === pubHex)?.relays).toEqual(nextRelays)
+      expect(device.relays).toEqual(nextRelays)
+      expect(relayInstances.filter((instance) => !instance.closed)).toHaveLength(1)
+      expect(relayInstances.find((instance) => !instance.closed)?.relays).toEqual(nextRelays)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it.each([
+    ['a lost commit ACK', 'timeout'],
+    ['a malformed commit ACK', 'malformed'],
+    ['an error returned after commit', 'error'],
+  ] as const)('uses durable terminal state to recover %s for a password-only change', async (_case, failure) => {
+    const { pubHex } = freshMaster()
+    const relays = ['wss://same.example']
+    let transactionId = ''
+    let commitAttempted = false
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: relays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'stage_network_config') {
+        transactionId = (params as { transaction_id: string }).transaction_id
+        return { transaction_id: transactionId, staged: true, revision: 31 }
+      }
+      if (method === 'activate_network_config') {
+        return { transaction_id: transactionId, revision: 31, rebooting: true }
+      }
+      if (method === 'commit_network_config') {
+        commitAttempted = true
+        if (failure === 'timeout') throw new Error('timeout waiting for device (commit_network_config)')
+        if (failure === 'error') throw new Error('network outcome cleanup failed')
+        return { transaction_id: transactionId, committed: false, revision: 30 }
+      }
+      if (method === 'get_network_config') {
+        if (!transactionId) {
+          return {
+            revision: 30,
+            active: { mode: 'wifi', ssid: 'Home', relays, password_set: true },
+            trial: null,
+            last_result: null,
+          }
+        }
+        if (!commitAttempted) {
+          return {
+            revision: 31,
+            active: { mode: 'wifi', ssid: 'Home', relays, password_set: true },
+            trial: {
+              transaction_id: transactionId, phase: 'trying', attempted: 1,
+              mode: 'wifi', ssid: 'Home', relays, password_set: true,
+            },
+            last_result: null,
+          }
+        }
+        return {
+          revision: 31,
+          active: { mode: 'wifi', ssid: 'Home', relays, password_set: true },
+          trial: null,
+          last_result: { transaction_id: transactionId, revision: 31, outcome: 'committed' },
+        }
+      }
+      if (method === 'abort_network_config') throw new Error('a committed transaction must not be aborted')
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, relays)
+    try {
+      await expect(configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays,
+        password: { action: 'set', value: 'rotated-secret' },
+      })).resolves.toEqual(expect.objectContaining({ revision: 31 }))
+      expect(relayRequestMock.mock.calls.some((call) => call[0] === 'abort_network_config')).toBe(false)
+      expect(device.relays).toEqual(relays)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('discards an inert staged transaction using its accepted revision', async () => {
+    const { pubHex } = freshMaster()
+    const relays = ['wss://old.example']
+    let aborted = false
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: relays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'get_network_config') {
+        return {
+          revision: 41,
+          active: { mode: 'wifi', ssid: 'Home', relays, password_set: true },
+          trial: aborted ? null : {
+            transaction_id: 'recover-me', phase: 'staged', attempted: 0,
+            mode: 'wifi', ssid: 'Future', relays: ['wss://future.example'], password_set: true,
+          },
+          last_result: aborted
+            ? { transaction_id: 'recover-me', revision: 41, outcome: 'aborted' }
+            : null,
+        }
+      }
+      if (method === 'abort_network_config') {
+        expect(params).toEqual({ transaction_id: 'recover-me', revision: 41 })
+        aborted = true
+        return { transaction_id: 'recover-me', revision: 41, aborted: true }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, relays)
+    try {
+      await expect(abortNetworkConfig('recover-me')).resolves.toEqual(expect.objectContaining({
+        revision: 41,
+        trial: null,
+        last_result: expect.objectContaining({ outcome: 'aborted' }),
+      }))
+      expect(aborted).toBe(true)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('aborts a failed commit and keeps the last committed relays remembered', async () => {
+    const { pubHex } = freshMaster()
+    const oldRelays = ['wss://old.example']
+    const nextRelays = ['wss://bad.example']
+    let transactionId = ''
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: oldRelays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'get_network_config') {
+        if (!transactionId) {
+          return {
+            revision: 20,
+            active: { mode: 'wifi', ssid: 'Good', relays: oldRelays, password_set: true },
+            trial: null,
+          }
+        }
+        return {
+          revision: 21,
+          active: { mode: 'wifi', ssid: 'Good', relays: oldRelays, password_set: true },
+          trial: {
+            transaction_id: transactionId, phase: 'trying', attempted: 1,
+            mode: 'wifi', ssid: 'Bad', relays: nextRelays, password_set: false,
+          },
+        }
+      }
+      if (method === 'stage_network_config') {
+        transactionId = (params as { transaction_id: string }).transaction_id
+        return { transaction_id: transactionId, staged: true, revision: 21 }
+      }
+      if (method === 'activate_network_config') return { transaction_id: transactionId, revision: 21, rebooting: true }
+      if (method === 'commit_network_config') throw new Error('commit denied')
+      if (method === 'abort_network_config') return { transaction_id: transactionId, revision: 21, aborted: true }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, oldRelays, 'remote signer')
+    try {
+      await expect(configureNetworkRemotely({
+        mode: 'wifi', ssid: 'Bad', relays: nextRelays, password: { action: 'clear' },
+      })).rejects.toThrow('commit denied')
+      expect(relayRequestMock).toHaveBeenCalledWith(
+        'abort_network_config',
+        { transaction_id: transactionId, revision: 21 },
+        8_000,
+      )
+      expect(device.relays).toEqual(oldRelays)
+      expect(listKnownDevices().find((known) => known.pubHex === pubHex)?.relays).toEqual(oldRelays)
+      expect(relayInstances.filter((instance) => !instance.closed)).toHaveLength(1)
+      expect(relayInstances.find((instance) => !instance.closed)?.relays).toEqual(oldRelays)
+    } finally {
+      await disconnect()
+    }
   })
 })
 
@@ -483,15 +1119,137 @@ describe('identity card auto-sync on serial master list', () => {
       if (method === 'get_status') {
         return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
       }
-      if (method === 'list_clients') return { clients: [] }
-      if (method === 'client_uri') return { bunker_uri: 'bunker://abc?relay=wss%3A%2F%2Fr&secret=secret' }
+      if (method === 'list_clients') return { clients: [{
+        slot_index: 3,
+        label: 'pending',
+        allowed_methods: ['get_public_key'],
+        allowed_kinds: [],
+        secret_fingerprint: SLOT_FP,
+      }] }
+      if (method === 'client_uri') return {
+        slot_index: 3,
+        secret_fingerprint: SLOT_FP,
+        bunker_uri: 'bunker://abc?relay=wss%3A%2F%2Fr&secret=secret',
+      }
       return { ok: true }
     })
 
     await connectRelay(pubHex, ['wss://r.example'])
     try {
-      await expect(mgmtClientUri(3)).resolves.toBe('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
-      expect(relayRequestMock).toHaveBeenCalledWith('client_uri', { slot_index: 3 }, 35_000)
+      await expect(mgmtClientUri(3, SLOT_FP)).resolves.toBe('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
+      expect(relayRequestMock).toHaveBeenCalledWith('client_uri', {
+        slot_index: 3,
+        expected_secret_fingerprint: SLOT_FP,
+      }, 35_000)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('creates a relay client with one versioned exact-policy request', async () => {
+    const { pubHex } = freshMaster()
+    const policy = fullClientPolicy()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'create_client_v2') {
+        expect(params).toEqual({ label: 'Damus', policy })
+        return {
+          slot_index: 4,
+          bunker_uri: 'bunker://abc?relay=wss%3A%2F%2Fr&secret=sek',
+          secret: 'sek',
+          signing_approved: true,
+          secret_fingerprint: SLOT_FP,
+          policy_version: 2,
+          ...policy,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtCreateClient('Damus', policy)).resolves.toEqual(expect.objectContaining({ slot_index: 4 }))
+      expect(relayRequestMock).toHaveBeenCalledWith('create_client_v2', { label: 'Damus', policy }, 35_000)
+      expect(device.slotUris[4]).toBeUndefined()
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('refreshes the slot list before surfacing a cross-manager mutation conflict', async () => {
+    const { pubHex } = freshMaster()
+    let clientReads = 0
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') {
+        clientReads += 1
+        return {
+          clients: [{
+            slot_index: 1,
+            label: clientReads === 1 ? 'old occupant' : 'replacement occupant',
+            allowed_methods: [],
+            allowed_kinds: [],
+          }],
+        }
+      }
+      if (method === 'update_client') {
+        throw new Error('Another phone or manager changed this signer first. Nothing from this request was applied; refresh the device state and try again.')
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      expect(device.slots[0]?.label).toBe('old occupant')
+      await expect(mgmtUpdateClient(1, { label: 'unsafe stale edit' }, SLOT_FP))
+        .rejects.toThrow(/Another phone or manager/)
+      expect(clientReads).toBe(2)
+      expect(device.slots[0]?.label).toBe('replacement occupant')
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('revokes a relay client and hides its link when effective policy mismatches', async () => {
+    const { pubHex } = freshMaster()
+    const policy = fullClientPolicy()
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'create_client_v2') {
+        return {
+          slot_index: 5,
+          bunker_uri: 'bunker://abc?secret=must-not-leak',
+          secret: 'must-not-leak',
+          secret_fingerprint: SLOT_FP,
+          signing_approved: true,
+          policy_version: 2,
+          allowed_methods: ['get_public_key'],
+          allowed_kinds: [],
+          auto_approve: true,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtCreateClient('bad echo', policy)).rejects.toThrow(/did not confirm the exact app policy/)
+      expect(relayRequestMock).toHaveBeenCalledWith('revoke_client', {
+        slot_index: 5,
+        expected_secret_fingerprint: SLOT_FP,
+      }, 35_000)
+      expect(device.slotUris[5]).toBeUndefined()
     } finally {
       await disconnect()
     }

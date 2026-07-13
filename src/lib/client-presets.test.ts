@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  PERMISSION_PRESETS, presetById, resolveKinds, isRestricted, type PresetId,
+  PERMISSION_PRESETS, presetById, resolveKinds, resolvePolicy, isRestricted, type PresetId,
 } from './client-presets.js'
 
 describe('permission presets', () => {
@@ -42,8 +42,8 @@ describe('resolveKinds', () => {
     expect(kinds).not.toContain(3) // contacts
   })
 
-  it('messaging allows DM and gift wrap only', () => {
-    expect(resolveKinds('messaging')).toEqual([4, 1059])
+  it('messaging covers signed DM envelopes but not unsigned NIP-17 rumors', () => {
+    expect(resolveKinds('messaging')).toEqual([4, 13, 1059])
   })
 
   it('custom uses the supplied kinds, de-duplicated and sorted', () => {
@@ -56,6 +56,23 @@ describe('resolveKinds', () => {
 
   it('custom drops negative / non-integer kinds', () => {
     expect(resolveKinds('custom', [1, -3, 2.5 as number, 9])).toEqual([1, 9])
+  })
+})
+
+describe('resolvePolicy', () => {
+  it('posting grants signing but no encryption methods', () => {
+    expect(resolvePolicy('posting')).toEqual({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1, 5, 6, 7, 30023, 30078],
+      auto_approve: true,
+    })
+  })
+
+  it('everything explicitly grants every supported method and all signing kinds', () => {
+    const policy = resolvePolicy('everything')
+    expect(policy.allowed_methods).toContain('sign_event')
+    expect(policy.allowed_methods).toContain('nip44_decrypt')
+    expect(policy.allowed_kinds).toEqual([])
   })
 })
 

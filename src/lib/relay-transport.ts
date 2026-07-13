@@ -30,9 +30,100 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>
 }
 
-/** A short request id; only needs to be unique per in-flight request. */
-function newId(): string {
-  return 'm' + Math.random().toString(36).slice(2, 10)
+interface ManagementAttempt {
+  method: string
+  params: Record<string, unknown>
+  timeoutMs: number
+  mutationChallenge?: string
+}
+
+type ManagementSender = (attempt: ManagementAttempt) => Promise<Record<string, unknown>>
+
+const READ_ONLY_MANAGEMENT_METHODS = new Set([
+  'get_management_challenge',
+  'get_network_config',
+  'list_clients',
+  'list_identities',
+  'get_status',
+])
+
+/** Unknown future methods fail closed as mutations unless explicitly reviewed
+ * and added to the read-only set on both Sapwood and firmware. */
+export function requiresManagementMutationChallenge(method: string): boolean {
+  return !READ_ONLY_MANAGEMENT_METHODS.has(method)
+}
+
+/**
+ * Attach a fresh device-issued one-time challenge to a mutation. This helper is
+ * exported for pure protocol tests; RelayTransport serializes calls around it.
+ * A stale challenge is never retried automatically because another manager may
+ * have revoked/recreated the referenced slot in the meantime.
+ */
+export async function sendReplaySafeManagementRequest(
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number,
+  send: ManagementSender,
+): Promise<Record<string, unknown>> {
+  if (!requiresManagementMutationChallenge(method)) {
+    return send({ method, params, timeoutMs })
+  }
+
+  let discovered: Record<string, unknown>
+  try {
+    discovered = await send({
+      method: 'get_management_challenge',
+      params: {},
+      timeoutMs,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/unknown method.*get_management_challenge/i.test(message)) {
+      throw new Error('This signer firmware is too old for replay-safe remote changes. Update it over USB before changing clients or network settings remotely.')
+    }
+    throw error
+  }
+
+  const challenge = typeof discovered.challenge === 'string'
+    ? discovered.challenge.toLowerCase()
+    : ''
+  if (discovered.version !== 1 || !/^[0-9a-f]{64}$/.test(challenge)) {
+    throw new Error('The signer did not return a valid replay-safe management challenge; nothing was changed.')
+  }
+
+  try {
+    return await send({ method, params, timeoutMs, mutationChallenge: challenge })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/stale_management_challenge/i.test(message)) {
+      throw new Error('Another phone or manager changed this signer first. Nothing from this request was applied; refresh the device state and try again.')
+    }
+    throw error
+  }
+}
+
+/**
+ * Unpredictable 128-bit request id. Firmware keeps recent ids in RAM to suppress
+ * duplicate delivery across live relays. A separate device-issued one-time NVS
+ * challenge is the durable mutation boundary across eviction and reboot.
+ */
+export function newManagementRequestId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export function managementRequestPayload(
+  id: string,
+  method: string,
+  params: Record<string, unknown>,
+  mutationChallenge?: string,
+): Record<string, unknown> {
+  return {
+    id,
+    method,
+    params,
+    ...(mutationChallenge ? { mutation_challenge: mutationChallenge } : {}),
+  }
 }
 
 export class RelayTransport {
@@ -44,6 +135,7 @@ export class RelayTransport {
   readonly devicePub: string
   readonly relays: string[]
   private readonly pending = new Map<string, Pending>()
+  private mutationQueue: Promise<void> = Promise.resolve()
   private closed = false
 
   constructor(devicePubHex: string, relays: string[], opSkHex: string) {
@@ -115,10 +207,38 @@ export class RelayTransport {
     // have arrived reports a false "timeout waiting for device".
     timeoutMs = 35_000,
   ): Promise<Record<string, unknown>> {
+    if (!requiresManagementMutationChallenge(method)) {
+      return this.requestRaw(method, params, timeoutMs)
+    }
+
+    const run = () => sendReplaySafeManagementRequest(
+      method,
+      params,
+      timeoutMs,
+      (attempt) => this.requestRaw(
+        attempt.method,
+        attempt.params,
+        attempt.timeoutMs,
+        attempt.mutationChallenge,
+      ),
+    )
+    const result = this.mutationQueue.then(run, run)
+    this.mutationQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private requestRaw(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number,
+    mutationChallenge?: string,
+  ): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error('transport closed'))
     if (!this.sub) return Promise.reject(new Error('not connected'))
-    const id = newId()
-    const content = encrypt(JSON.stringify({ id, method, params }), this.ck)
+    const id = newManagementRequestId()
+    const content = encrypt(JSON.stringify(
+      managementRequestPayload(id, method, params, mutationChallenge),
+    ), this.ck)
     const event = finalizeEvent(
       {
         kind: MGMT_KIND,

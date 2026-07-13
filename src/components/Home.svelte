@@ -24,6 +24,7 @@
   import PhoneHandoff from './PhoneHandoff.svelte'
   import KindPermissions from './KindPermissions.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
+  import type { ConnectSlot } from '../lib/types.js'
 
   type AdvancedTab = 'apps' | 'identity' | 'device' | 'logs'
   interface Props {
@@ -76,23 +77,23 @@
     editing = false
   }
 
-  async function approve(slotIndex: number) {
-    busySlot = slotIndex
-    try { await mgmtApproveSigning(slotIndex) }
+  async function approve(slot: ConnectSlot) {
+    busySlot = slot.slot_index
+    try { await mgmtApproveSigning(slot.slot_index, slot.secret_fingerprint) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Approve failed' }
     finally { busySlot = null }
   }
 
-  async function revoke(slotIndex: number) {
-    busySlot = slotIndex
-    try { await mgmtRevokeClient(slotIndex) }
+  async function revoke(slot: ConnectSlot) {
+    busySlot = slot.slot_index
+    try { await mgmtRevokeClient(slot.slot_index, slot.secret_fingerprint) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Disconnect failed' }
     finally { busySlot = null }
   }
 
-  async function updatePermissions(slotIndex: number, kinds: number[] | null) {
-    updatingSlot = slotIndex
-    try { await mgmtUpdateClient(slotIndex, { allowed_kinds: kinds ?? [] }) }
+  async function updatePermissions(slot: ConnectSlot, kinds: number[] | null) {
+    updatingSlot = slot.slot_index
+    try { await mgmtUpdateClient(slot.slot_index, { allowed_kinds: kinds ?? [] }, slot.secret_fingerprint) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Update failed' }
     finally { updatingSlot = null }
   }
@@ -100,9 +101,9 @@
   // Auto-approve vs ask-each-time. This is also what lets an app read messages:
   // the signer refuses decrypt for an "ask each time" app (it can't safely
   // button-gate a stream of decryptions), so a DM-reading app needs this on.
-  async function setAuto(slotIndex: number, auto: boolean) {
-    updatingSlot = slotIndex
-    try { await mgmtUpdateClient(slotIndex, { auto_approve: auto }) }
+  async function setAuto(slot: ConnectSlot, auto: boolean) {
+    updatingSlot = slot.slot_index
+    try { await mgmtUpdateClient(slot.slot_index, { auto_approve: auto }, slot.secret_fingerprint) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Update failed' }
     finally { updatingSlot = null }
   }
@@ -110,12 +111,12 @@
   // Re-hand an app its connection link before it has connected. Over USB the
   // firmware re-issues it; over WiFi it comes from this session's cache.
   let copiedSlot = $state<number | null>(null)
-  async function copyAppLink(slotIndex: number) {
+  async function copyAppLink(slot: ConnectSlot) {
     try {
-      const uri = await mgmtClientUri(slotIndex)
+      const uri = await mgmtClientUri(slot.slot_index, slot.secret_fingerprint)
       if (await copyText(uri)) {
-        copiedSlot = slotIndex
-        setTimeout(() => { if (copiedSlot === slotIndex) copiedSlot = null }, 1800)
+        copiedSlot = slot.slot_index
+        setTimeout(() => { if (copiedSlot === slot.slot_index) copiedSlot = null }, 1800)
       }
     } catch (e) {
       device.error = e instanceof Error ? e.message : 'Could not fetch the connection link.'
@@ -316,8 +317,8 @@
           Sapwood is signing management as <code>{currentOperator}</code>. If Primal or another bunker
           app still signs, the signer's WiFi and normal NIP-46 slot are alive; this screen is failing
           on the separate Sapwood management key. Restore the operator recovery phrase created when
-          this signer was flashed, or connect by USB and save Device > Network to set this browser as
-          the management operator.
+          this signer was flashed, or connect by USB, open Operator key, and use
+          <strong>Set this browser as operator</strong>. That preserves the saved network.
         </p>
         <div class="operator-recovery-actions">
           <button class="btn btn-warn btn-sm" onclick={() => onadvanced?.('identity')}>
@@ -340,9 +341,9 @@
             same one.</li>
           <li><strong>Operator-key mismatch.</strong> The signer only accepts management from the
             operator key set when it was flashed. If it was flashed from a different browser or
-            computer, this browser's key differs and the signer ignores it silently. Plug in by USB
-            and save Device > Network if you want to replace the signer's management key with this
-            browser's key.</li>
+            computer, this browser's key differs and the signer ignores it silently. Plug in by USB,
+            open Operator key, and use <strong>Set this browser as operator</strong>; network credentials
+            are preserved.</li>
         </ul>
       </details>
 
@@ -480,6 +481,8 @@
               <span class="app-state">
                 {#if !slot.current_pubkey}
                   Waiting for the app to connect with the link.
+                {:else if slot.strict_permissions && !(slot.allowed_methods ?? []).includes('sign_event')}
+                  Connected with an exact policy that does not include signing.
                 {:else if !slot.signing_approved}
                   Connected, but not allowed to sign yet.
                 {:else if slot.auto_approve}
@@ -490,17 +493,19 @@
               </span>
             </div>
             <div class="app-actions">
-              <button class="btn btn-secondary btn-sm" onclick={() => copyAppLink(slot.slot_index)}>
+              <button class="btn btn-secondary btn-sm" onclick={() => copyAppLink(slot)}>
                 {copiedSlot === slot.slot_index ? 'Link copied ✓' : 'Copy link'}
               </button>
-              {#if slot.current_pubkey && !slot.signing_approved && canApprove}
-                <button class="btn btn-secondary btn-sm allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot.slot_index)}>
+              {#if slot.current_pubkey && !slot.signing_approved && canApprove && !slot.strict_permissions}
+                <button class="btn btn-secondary btn-sm allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot)}>
                   {busySlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
                 </button>
+              {:else if slot.strict_permissions && !(slot.allowed_methods ?? []).includes('sign_event')}
+                <span class="tag" title="Signing is outside this app's exact policy">NO SIGNING</span>
               {/if}
               {#if slot.current_pubkey && slot.signing_approved && canManageInline}
                 <button class="btn btn-secondary btn-sm" disabled={updatingSlot === slot.slot_index}
-                  onclick={() => setAuto(slot.slot_index, !slot.auto_approve)}>
+                  onclick={() => setAuto(slot, !slot.auto_approve)}>
                   {updatingSlot === slot.slot_index ? 'Saving…' : slot.auto_approve ? 'Ask each time' : 'Make automatic'}
                 </button>
               {/if}
@@ -511,7 +516,7 @@
                 busyLabel="Disconnecting…"
                 busy={busySlot === slot.slot_index}
                 buttonClass="btn btn-danger btn-sm borderless"
-                onconfirm={() => revoke(slot.slot_index)}
+                onconfirm={() => revoke(slot)}
               />
             </div>
           </div>
@@ -521,8 +526,11 @@
               allowedKinds={slot.allowed_kinds}
               unrestricted={slot.allowed_kinds.length === 0}
               signingApproved={slot.signing_approved}
+              autoApprove={slot.auto_approve}
+              strictPermissions={slot.strict_permissions ?? false}
+              signingIncluded={(slot.allowed_methods ?? []).includes('sign_event')}
               updating={updatingSlot === slot.slot_index}
-              onchange={(kinds) => updatePermissions(slot.slot_index, kinds)}
+              onchange={(kinds) => updatePermissions(slot, kinds)}
             />
           {/if}
         </div>

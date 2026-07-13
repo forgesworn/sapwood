@@ -17,6 +17,16 @@ export type SerialEvent =
 
 export type SerialListener = (event: SerialEvent) => void
 
+interface SerialRequest {
+  frameBytes: Uint8Array
+  expectedTypes: FrameTypeValue[]
+  timeoutMs: number
+  resolve: (frame: Frame) => void
+  reject: (error: Error) => void
+  /** Installed only while this request owns the response listener. */
+  cancel?: (error: Error) => void
+}
+
 // Write pacing for frames that could overrun a UART board's 4KB driver ring
 // (identity-card avatars ~8KB, OTA chunks 4KB). Two phases, measured against a
 // live T-Display (v0.9.10) in wifi mode: its relay loop polls USB as rarely as
@@ -41,6 +51,15 @@ export class SerialTransport {
   // writes — e.g. refreshMasters racing refreshSlots on connect — would otherwise
   // fail with "Cannot create writer when WritableStream is locked".
   private writeChain: Promise<void> = Promise.resolve()
+
+  // A frame has no request id, and most mutations share the same ACK/NACK
+  // response types. Serialising writes alone is therefore insufficient: two
+  // overlapping sendAndReceive calls would both observe one ACK and both report
+  // success. Keep exactly one response listener active and queue complete
+  // request/response lifecycles behind it.
+  private requestQueue: SerialRequest[] = []
+  private activeRequest: SerialRequest | null = null
+  private requestDraining = false
 
   // Buffer for accumulating incoming bytes.
   private buffer = new Uint8Array(0)
@@ -91,6 +110,7 @@ export class SerialTransport {
       // 'disconnected' emit, so the UI transitions straight into the new session
       // instead of flashing back to the picker.
       if (this.port) {
+        this.cancelRequests(new Error('Disconnected'))
         this.running = false
         try { await this.reader?.cancel() } catch { /* ignore */ }
         try { this.reader?.releaseLock() } catch { /* ignore */ }
@@ -138,6 +158,7 @@ export class SerialTransport {
       // portless. Reflect that so the UI drops to a clean "connect" state rather
       // than appearing connected with no working port.
       if (!this.port) {
+        this.cancelRequests(new Error('Disconnected'))
         this.running = false
         this.emit({ kind: 'disconnected' })
       }
@@ -147,6 +168,10 @@ export class SerialTransport {
   /** Disconnect from the serial port. Always resets state — even if close()
    *  throws (e.g. a stream still locked) — so a fresh connect can recover. */
   async disconnect(): Promise<void> {
+    // Reject the active round trip and every queued caller immediately. Merely
+    // resetting a promise chain would leave queued operations alive, allowing
+    // them to write to a later connection after this disconnect completes.
+    this.cancelRequests(new Error('Disconnected'))
     this.running = false
     try {
       if (this.reader) {
@@ -225,30 +250,87 @@ export class SerialTransport {
     expectedTypes: FrameTypeValue[],
     timeoutMs = 30_000,
   ): Promise<Frame> {
+    if (!this.connected) return Promise.reject(new Error('Not connected'))
     return new Promise<Frame>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        unsub()
-        reject(new Error("No response from the device. If you just flashed it, press the RESET button on the board so it starts the new firmware, then reconnect."))
-      }, timeoutMs)
-
-      const unsub = this.on((event) => {
-        if (event.kind === 'frame' && expectedTypes.includes(event.frame.type)) {
-          clearTimeout(timeout)
-          unsub()
-          resolve(event.frame)
-        } else if (event.kind === 'disconnected') {
-          clearTimeout(timeout)
-          unsub()
-          reject(new Error('Disconnected'))
-        }
+      this.requestQueue.push({
+        frameBytes,
+        expectedTypes: [...expectedTypes],
+        timeoutMs,
+        resolve,
+        reject: (error) => reject(error),
       })
+      void this.drainRequests()
+    })
+  }
 
-      this.write(frameBytes).catch((e) => {
+  /** Run queued round trips in FIFO order, with only one response listener. */
+  private async drainRequests(): Promise<void> {
+    if (this.requestDraining) return
+    this.requestDraining = true
+    try {
+      while (this.requestQueue.length > 0) {
+        const request = this.requestQueue.shift()!
+        if (!this.connected) {
+          request.reject(new Error('Disconnected'))
+          continue
+        }
+        this.activeRequest = request
+        try {
+          request.resolve(await this.runRequest(request))
+        } catch (error) {
+          request.reject(error instanceof Error ? error : new Error(String(error)))
+        } finally {
+          request.cancel = undefined
+          if (this.activeRequest === request) this.activeRequest = null
+        }
+      }
+    } finally {
+      this.requestDraining = false
+      // A request can be added after the while condition but before the guard
+      // drops. Ensure it cannot be stranded waiting for another enqueue.
+      if (this.requestQueue.length > 0) void this.drainRequests()
+    }
+  }
+
+  /** Execute one request after it reaches the head of the FIFO. */
+  private runRequest(request: SerialRequest): Promise<Frame> {
+    return new Promise<Frame>((resolve, reject) => {
+      let settled = false
+      let unsub = () => {}
+      const finish = (result: { frame: Frame } | { error: Error }) => {
+        if (settled) return
+        settled = true
         clearTimeout(timeout)
         unsub()
-        reject(e)
+        request.cancel = undefined
+        if ('frame' in result) resolve(result.frame)
+        else reject(result.error)
+      }
+
+      const timeout = setTimeout(() => {
+        finish({ error: new Error("No response from the device. If you just flashed it, press the RESET button on the board so it starts the new firmware, then reconnect.") })
+      }, request.timeoutMs)
+
+      unsub = this.on((event) => {
+        if (event.kind === 'frame' && request.expectedTypes.includes(event.frame.type)) {
+          finish({ frame: event.frame })
+        } else if (event.kind === 'disconnected') {
+          finish({ error: new Error('Disconnected') })
+        }
+      })
+      request.cancel = (error) => finish({ error })
+
+      this.write(request.frameBytes).catch((error) => {
+        finish({ error: error instanceof Error ? error : new Error(String(error)) })
       })
     })
+  }
+
+  /** Cancel the active owner and reject/remove every request not yet written. */
+  private cancelRequests(error: Error): void {
+    this.activeRequest?.cancel?.(error)
+    const queued = this.requestQueue.splice(0)
+    for (const request of queued) request.reject(error)
   }
 
   // --- Internal read loop ---
@@ -276,6 +358,7 @@ export class SerialTransport {
 
     if (this.running) {
       // Port closed unexpectedly.
+      this.cancelRequests(new Error('Disconnected'))
       this.running = false
       this.port = null
       this.emit({ kind: 'disconnected' })

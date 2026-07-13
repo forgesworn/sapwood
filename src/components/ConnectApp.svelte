@@ -6,15 +6,16 @@
   // and client-presets.ts (both pure + unit-tested); this holds the reactive UI.
   import { encodeQR } from '@paulmillr/qr'
   import {
-    device, mgmtCreateClient, mgmtUpdateClient, mgmtCanApproveSigning, mgmtNostrconnect,
+    device, mgmtCreateClient, mgmtNostrconnect,
   } from '../lib/device.svelte.js'
   import { COMMON_KINDS, kindLabel } from '../lib/kinds.js'
   import { nameError, canCreate, type ConnectStep } from '../lib/connect-flow.js'
   import {
-    parseNostrConnectURI, isValidNostrConnect, permsToAllowedKinds, sharesRelay,
+    parseNostrConnectURI, isValidNostrConnect, permissionsToClientPolicy,
+    describeNostrConnectPermissions, sharesRelay,
   } from '../lib/nostrconnect.js'
   import {
-    PERMISSION_PRESETS, resolveKinds, isRestricted, type PresetId,
+    PERMISSION_PRESETS, resolvePolicy, type PresetId,
   } from '../lib/client-presets.js'
   import { copyText } from '../lib/clipboard.js'
   import { bunkerHasRelay } from '../lib/bunker.js'
@@ -34,7 +35,6 @@
   let customKindError = $state<string | null>(null)
   let creating = $state(false)
   let error = $state<string | null>(null)
-  let permNote = $state<string | null>(null)
 
   // The created connection — the one time the bunker URI/secret is shown.
   let created = $state<{ bunker_uri: string; secret: string } | null>(null)
@@ -53,6 +53,7 @@
   let ncError = $state<string | null>(null)
   let ncPaired = $state<{ appName: string } | null>(null)
   const ncReq = $derived(isValidNostrConnect(ncUri) ? parseNostrConnectURI(ncUri.trim()) : null)
+  const ncPermissions = $derived(ncReq ? permissionsToClientPolicy(ncReq.perms) : null)
   const ncRelayShared = $derived(!!ncReq && sharesRelay(ncReq.relays, device.relays))
   // No overlap is no longer fatal: the signer can dial the app's relay and keep
   // it as a pinned session. It only refuses when it is already at capacity.
@@ -67,7 +68,6 @@
     customKindInput = ''
     customKindError = null
     error = null
-    permNote = null
     created = null
     ncUri = ''
     ncError = null
@@ -119,24 +119,10 @@
     }
     creating = true
     error = null
-    permNote = null
     try {
-      // Over relay we hold operator authority, so pre-approve signing; over USB
-      // the first sign is approved by a physical button press instead.
-      const res = await mgmtCreateClient(name.trim(), mgmtCanApproveSigning())
-
-      // Apply the permission preset (skip when "everything" — unrestricted).
-      if (isRestricted(presetId, customKinds)) {
-        const kinds = resolveKinds(presetId, customKinds)!
-        try {
-          await mgmtUpdateClient(res.slot_index, { allowed_kinds: kinds })
-        } catch (e) {
-          // The connection still exists; only the limit failed to apply.
-          permNote = overUsb
-            ? 'Connection made, but applying the limit needs a button press on the device. Set it under Advanced › Apps.'
-            : `Connection made, but the permission limit could not be applied: ${e instanceof Error ? e.message : 'unknown error'}.`
-        }
-      }
+      // The complete method + kind ceiling is committed before a usable secret
+      // is returned, so a failed restriction can never become a broad link.
+      const res = await mgmtCreateClient(name.trim(), resolvePolicy(presetId, customKinds))
 
       created = { bunker_uri: res.bunker_uri, secret: res.secret }
       step = 'result'
@@ -157,7 +143,7 @@
   }
 
   async function pairNostrconnect() {
-    if (!ncReq) return
+    if (!ncReq || !ncPermissions || ncPermissions.issues.length > 0) return
     ncPairing = true
     ncError = null
     try {
@@ -165,8 +151,7 @@
         clientPubkey: ncReq.clientPubkey,
         secret: ncReq.secret,
         label: ncReq.appName,
-        approveSigning: mgmtCanApproveSigning(),
-        allowedKinds: permsToAllowedKinds(ncReq.perms),
+        policy: ncPermissions.policy,
         ...(ncJoinRelay ? { relay: ncJoinRelay } : {}),
       })
       ncJoined = res.joined_relay
@@ -312,7 +297,6 @@
           <code class="inline-secret">{created.secret}</code>.
         </p>
       {/if}
-      {#if permNote}<p class="hint-sm flow-note">{permNote}</p>{/if}
       <div class="flow-actions">
         <button class="btn btn-primary" onclick={finish}>Done</button>
       </div>
@@ -343,12 +327,18 @@
           {:else}
             <p class="warn-text">This link names no usable relay, so the pairing cannot reach the app.</p>
           {/if}
+          {#if ncPermissions}
+            <p class="hint-sm"><strong>Automatic access:</strong> {describeNostrConnectPermissions(ncPermissions)}.</p>
+            {#each ncPermissions.issues as issue}
+              <p class="warn-text">{issue}</p>
+            {/each}
+          {/if}
         </div>
       {/if}
       {#if ncError}<p class="error-text">{ncError}</p>{/if}
       <div class="flow-actions">
         <button class="btn btn-ghost" onclick={() => { step = 'name'; ncError = null }} disabled={ncPairing}>Back</button>
-        <button class="btn btn-primary" disabled={!ncReq || (!ncRelayShared && !ncJoinRelay) || ncPairing} onclick={pairNostrconnect}>
+        <button class="btn btn-primary" disabled={!ncReq || !ncPermissions || ncPermissions.issues.length > 0 || (!ncRelayShared && !ncJoinRelay) || ncPairing} onclick={pairNostrconnect}>
           {ncPairing ? 'Pairing…' : 'Pair this app'}
         </button>
       </div>

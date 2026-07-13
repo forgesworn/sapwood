@@ -2,19 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/svelte'
 import ConnectApp from './ConnectApp.svelte'
 import {
-  mgmtCreateClient, mgmtUpdateClient, mgmtCanApproveSigning, device,
+  mgmtCreateClient, mgmtNostrconnect, device,
 } from '../lib/device.svelte.js'
 
 // Mock the transport layer; the flow logic (connect-flow + client-presets) is real.
 vi.mock('../lib/device.svelte.js', () => ({
-  device: { mode: 'relay', connected: true, error: null },
-  mgmtCanApproveSigning: vi.fn(() => true),
+  device: { mode: 'relay', connected: true, error: null, relays: ['wss://relay.trotters.cc'] },
   mgmtCreateClient: vi.fn(),
-  mgmtUpdateClient: vi.fn(),
+  mgmtNostrconnect: vi.fn(),
 }))
 
 const mockCreate = vi.mocked(mgmtCreateClient)
-const mockUpdate = vi.mocked(mgmtUpdateClient)
+const mockNostrconnect = vi.mocked(mgmtNostrconnect)
 
 const RESULT = {
   bunker_uri: 'bunker://abcdef?relay=wss%3A%2F%2Fr&secret=deadbeef',
@@ -25,8 +24,7 @@ const RESULT = {
 
 beforeEach(() => {
   mockCreate.mockReset().mockResolvedValue(RESULT)
-  mockUpdate.mockReset().mockResolvedValue(undefined)
-  vi.mocked(mgmtCanApproveSigning).mockReturnValue(true)
+  mockNostrconnect.mockReset().mockResolvedValue({ slot_index: 3, joined_relay: false })
   ;(device as { mode: string }).mode = 'relay'
 })
 
@@ -52,10 +50,13 @@ describe('ConnectApp — happy path', () => {
     expect(await screen.findByText('Connection ready')).toBeTruthy()
     expect(container.querySelector('.qr svg')).toBeTruthy()
 
-    // Created once, pre-approving signing (relay authority), then restricted to posting kinds.
+    // One atomic create carries the full method + kind policy.
     expect(mockCreate).toHaveBeenCalledTimes(1)
-    expect(mockCreate).toHaveBeenCalledWith('Damus on my phone', true)
-    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [1, 5, 6, 7, 30023, 30078] })
+    expect(mockCreate).toHaveBeenCalledWith('Damus on my phone', {
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1, 5, 6, 7, 30023, 30078],
+      auto_approve: true,
+    })
   })
 
   it('applies a kind limit when a restricting preset is chosen', async () => {
@@ -68,7 +69,11 @@ describe('ConnectApp — happy path', () => {
     await fireEvent.click(screen.getByText('Create connection'))
 
     await screen.findByText('Connection ready')
-    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [4, 1059] })
+    expect(mockCreate).toHaveBeenCalledWith('chat app', {
+      allowed_methods: ['get_public_key', 'nip44_encrypt', 'nip44_decrypt', 'nip04_encrypt', 'nip04_decrypt', 'sign_event'],
+      allowed_kinds: [4, 13, 1059],
+      auto_approve: true,
+    })
   })
 
   it('lets custom permissions include a numeric kind', async () => {
@@ -84,7 +89,11 @@ describe('ConnectApp — happy path', () => {
     await fireEvent.click(screen.getByText('Create connection'))
 
     await screen.findByText('Connection ready')
-    expect(mockUpdate).toHaveBeenCalledWith(RESULT.slot_index, { allowed_kinds: [1, 999999] })
+    expect(mockCreate).toHaveBeenCalledWith('custom app', {
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1, 999999],
+      auto_approve: true,
+    })
   })
 
   it('does not let an empty custom preset become unrestricted', async () => {
@@ -98,7 +107,6 @@ describe('ConnectApp — happy path', () => {
 
     expect(screen.getByText('Choose at least one kind, or choose Everything.')).toBeTruthy()
     expect(mockCreate).not.toHaveBeenCalled()
-    expect(mockUpdate).not.toHaveBeenCalled()
   })
 
   it('surfaces a creation failure without advancing', async () => {
@@ -111,5 +119,38 @@ describe('ConnectApp — happy path', () => {
 
     expect(await screen.findByText('slots full')).toBeTruthy()
     expect(screen.queryByText('Connection ready')).toBeNull()
+  })
+
+  it('shows and forwards exact nostrconnect permissions', async () => {
+    const { container } = render(ConnectApp)
+    await fireEvent.click(screen.getByText('Connect an app'))
+    await fireEvent.click(screen.getByText(/Have a connect link/))
+    const uri = `nostrconnect://${'a'.repeat(64)}?relay=wss%3A%2F%2Frelay.trotters.cc&secret=sek&name=Chat&perms=nip44_decrypt%2Csign_event%3A13%2Csign_event%3A1059`
+    await fireEvent.input(container.querySelector('textarea')!, { target: { value: uri } })
+
+    expect(await screen.findByText(/sign event kinds 13, 1059; NIP-44 decrypt/)).toBeTruthy()
+    await fireEvent.click(screen.getByText('Pair this app'))
+    expect(mockNostrconnect).toHaveBeenCalledWith({
+      clientPubkey: 'a'.repeat(64),
+      secret: 'sek',
+      label: 'Chat',
+      policy: {
+        allowed_methods: ['get_public_key', 'nip44_decrypt', 'sign_event'],
+        allowed_kinds: [13, 1059],
+        auto_approve: true,
+      },
+    })
+  })
+
+  it('blocks a nostrconnect link with an unknown permission', async () => {
+    const { container } = render(ConnectApp)
+    await fireEvent.click(screen.getByText('Connect an app'))
+    await fireEvent.click(screen.getByText(/Have a connect link/))
+    const uri = `nostrconnect://${'a'.repeat(64)}?relay=wss%3A%2F%2Frelay.trotters.cc&secret=sek&perms=delete_everything`
+    await fireEvent.input(container.querySelector('textarea')!, { target: { value: uri } })
+
+    expect(await screen.findByText('Unknown permission “delete_everything”.')).toBeTruthy()
+    expect((screen.getByText('Pair this app') as HTMLButtonElement).disabled).toBe(true)
+    expect(mockNostrconnect).not.toHaveBeenCalled()
   })
 })

@@ -8,9 +8,8 @@
   import { encodeQR } from '@paulmillr/qr'
   import { onDestroy } from 'svelte'
   import { device } from '../lib/device.svelte.js'
-  import { getOrCreateOperator } from '../lib/op-mgmt.js'
+  import { findStoredOperatorByPubHex, type Operator } from '../lib/op-mgmt.js'
   import { buildHandoffLink, buildProtectedHandoffLink, encryptOperator } from '../lib/import-link.svelte.js'
-  import { listKnownDevices } from '../lib/known-devices.js'
   import { nip19 } from 'nostr-tools'
   import { copyText } from '../lib/clipboard.js'
 
@@ -35,20 +34,35 @@
     return ''
   }
 
-  /** Relays this device listens on: from the remembered device, else last flash. */
-  function relaysFor(hex: string): string[] {
-    const known = listKnownDevices().find((d) => d.pubHex === hex)
-    if (known?.relays.length) return known.relays
-    try {
-      const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-      if (Array.isArray(saved) && saved.length) return saved
-    } catch { /* none */ }
+  /** Relays proven by this exact live target, never browser-global defaults. */
+  function provenRelays(): string[] {
+    if (device.mode === 'relay' && device.relayStatus) return [...(device.relays ?? [])]
+    const state = device.mode === 'serial' ? device.usbNetworkState : null
+    if (state?.configured && state.recovery_ok && state.mode === 'wifi') return [...(state.relays ?? [])]
     return []
   }
 
+  function provenOperator(): Operator | null {
+    if (device.mode === 'relay' && device.relayStatus && device.operatorPub) {
+      return findStoredOperatorByPubHex(device.operatorPub)
+    }
+    const state = device.mode === 'serial' ? device.usbNetworkState : null
+    if (state?.configured && state.recovery_ok && state.mode === 'wifi' && state.op_mgmt) {
+      return findStoredOperatorByPubHex(state.op_mgmt)
+    }
+    return null
+  }
+
   const hex = $derived(deviceHex())
-  const relays = $derived(hex ? relaysFor(hex) : [])
-  const ready = $derived(!!hex && relays.length > 0)
+  const relays = $derived(hex ? provenRelays() : [])
+  // Relay proof comes from authenticated get_status. USB proof comes from the
+  // current firmware's exact device-read operator + relay state. Neither path
+  // guesses from the browser's primary key or a global relay cache.
+  const handoffOperator = $derived<Operator | null>(provenOperator())
+  const visible = $derived(
+    !!hex && (device.mode === 'serial' || device.mode === 'relay'),
+  )
+  const ready = $derived(visible && relays.length > 0 && handoffOperator !== null)
   const qr = $derived(link ? encodeQR(link, 'svg') : '')
 
   function armHideTimer() {
@@ -57,6 +71,7 @@
   }
 
   function startReveal() {
+    if (!ready) return
     reveal = true
     link = ''
     pin = ''
@@ -64,13 +79,19 @@
   }
 
   async function showProtected() {
-    if (pin.length < MIN_PIN || !hex || !relays.length) return
+    if (pin.length < MIN_PIN || !ready) return
     building = true
     // Yield so "Protecting…" paints before the (blocking) scrypt in encryptOperator.
     await new Promise((r) => setTimeout(r, 0))
     try {
-      const eop = encryptOperator(getOrCreateOperator().skHex, pin)
-      link = buildProtectedHandoffLink(location.origin, eop, hex, relays)
+      // Re-resolve after yielding: a reconnect could have selected a different
+      // candidate while the PIN step was open. Never reuse a stale authority.
+      const operator = provenOperator()
+      const currentHex = deviceHex()
+      const currentRelays = currentHex ? provenRelays() : []
+      if (!operator || !currentHex || currentRelays.length === 0) return
+      const eop = encryptOperator(operator.skHex, pin)
+      link = buildProtectedHandoffLink(location.origin, eop, currentHex, currentRelays)
       protectedLink = true
       armHideTimer()
     } finally {
@@ -79,7 +100,11 @@
   }
 
   function showPlain() {
-    link = buildHandoffLink(location.origin, getOrCreateOperator().skHex, hex, relays)
+    const operator = provenOperator()
+    const currentHex = deviceHex()
+    const currentRelays = currentHex ? provenRelays() : []
+    if (!operator || !currentHex || currentRelays.length === 0) return
+    link = buildHandoffLink(location.origin, operator.skHex, currentHex, currentRelays)
     protectedLink = false
     armHideTimer()
   }
@@ -109,14 +134,33 @@
   })
 </script>
 
-{#if ready}
+{#if visible}
   <section class="card card--live handoff">
     <p class="section-title">⚲ Manage from your phone</p>
 
-    {#if !reveal}
+    {#if device.mode === 'serial' && device.usbNetworkSupport !== 'supported'}
+      {#if device.usbNetworkSupport === 'unsupported'}
+        <p class="warn-text">Update the signer firmware over USB before pairing a phone. Sapwood will not guess its operator or relays.</p>
+      {:else}
+        <p class="hint">Reading this signer's operator and relays before enabling phone pairing…</p>
+      {/if}
+    {:else if device.mode === 'serial' && device.usbNetworkState?.mode !== 'wifi'}
+      <p class="hint">Enable WiFi-standalone mode before pairing a phone for remote management.</p>
+    {:else if device.mode === 'relay' && !device.relayStatus}
+      <p class="warn-text">
+        Pairing stays locked until this signer answers an authenticated status request. Retry the WiFi
+        connection; a relay subscription alone does not prove which operator key the signer accepts.
+      </p>
+    {:else if !ready}
+      <p class="warn-text">
+        Pairing is unavailable because this browser does not have the operator key that authenticated
+        this WiFi session. Restore that exact operator key, reconnect, then pair your phone.
+      </p>
+    {:else if !reveal}
       <p class="hint">
-        Pair this signer with your phone or another browser. You'll set a PIN, then scan a QR that
-        opens the console there, already connected.
+        {device.mode === 'serial'
+          ? "The cable has proven this signer's exact operator and relays. Pair your phone now; it can connect after the signer is left online elsewhere."
+          : "Pair this signer with your phone or another browser. You'll set a PIN, then scan a QR that opens the console there, already connected."}
       </p>
       <button class="btn btn-secondary btn-sm" onclick={startReveal}>Pair a device</button>
 

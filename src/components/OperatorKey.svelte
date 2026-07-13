@@ -9,6 +9,7 @@
     importOperatorMnemonic,
   } from '../lib/op-mgmt.js'
   import { copyText } from '../lib/clipboard.js'
+  import { device, setOperatorOverUsb } from '../lib/device.svelte.js'
   import ConfirmButton from './ConfirmButton.svelte'
 
   let operator = $state(getOrCreateOperator())
@@ -18,6 +19,13 @@
   let opImportValue = $state('')
   let opPhraseImport = $state('')
   let opStatus = $state<string | null>(null)
+  let settingOperator = $state(false)
+  const signerOperator = $derived(
+    device.mode === 'serial' && device.usbNetworkState?.configured
+      ? (device.usbNetworkState.op_mgmt ?? '')
+      : '',
+  )
+  const operatorMatchesSigner = $derived(!!signerOperator && signerOperator === operator.pubHex)
 
   async function handleCopySecret() {
     opStatus = (await copyText(operator.skHex))
@@ -64,6 +72,19 @@
     opImportValue = ''
     opStatus = 'New operator key generated. Write down its recovery phrase below.'
   }
+
+  async function handleSetOperator() {
+    settingOperator = true
+    opStatus = null
+    try {
+      await setOperatorOverUsb(operator.pubHex)
+      opStatus = 'Confirmed after reboot. This signer now accepts this browser as its management operator.'
+    } catch (e) {
+      opStatus = e instanceof Error ? e.message : 'Operator change failed'
+    } finally {
+      settingOperator = false
+    }
+  }
 </script>
 
 <section class="operator" id="operator-key">
@@ -78,6 +99,35 @@
     If Sapwood reaches the relay but the signer never answers, restore the operator recovery phrase
     created when that signer was flashed. After restoring, disconnect and reconnect over WiFi.
   </p>
+
+  {#if device.mode === 'serial'}
+    <div class="card operator-binding" class:operator-binding--ok={operatorMatchesSigner}>
+      <strong>Operator trusted by this signer</strong>
+      {#if device.usbNetworkSupport === 'unknown'}
+        <p class="hint-sm">Reading the public operator binding from the device…</p>
+      {:else if device.usbNetworkSupport === 'unsupported'}
+        <p class="hint-sm">This firmware cannot expose or rotate the operator safely. Update it over USB first; Sapwood will not rewrite the network as a workaround.</p>
+      {:else if !device.usbNetworkState?.configured}
+        <p class="hint-sm">No network/operator configuration is stored yet. Initial setup establishes it.</p>
+      {:else}
+        <p class="mono binding-key">{signerOperator || 'none configured'}</p>
+        {#if operatorMatchesSigner}
+          <p class="hint-sm success-text">This browser has the matching operator key.</p>
+        {:else}
+          <p class="hint-sm error-text">This browser's key does not match. Restore the matching operator phrase above if you have it. Deliberately replacing it requires the signer in your hand.</p>
+          <ConfirmButton
+            label="Set this browser as operator"
+            question="Replace only this signer's management operator? Its WiFi password and relays are preserved."
+            confirmLabel="Yes, show device confirmation"
+            busyLabel="Waiting for the signer…"
+            busy={settingOperator}
+            buttonClass="btn btn-warn btn-sm"
+            onconfirm={handleSetOperator}
+          />
+        {/if}
+      {/if}
+    </div>
+  {/if}
   <table class="kv-table"><tbody>
     <tr><td class="label">Pubkey</td><td class="mono">{operator.pubHex}</td></tr>
     <tr>
@@ -180,6 +230,10 @@
   .inline-form { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
   .inline-form input { flex: 1; min-width: 12rem; padding: 0.4rem 0.6rem; font-size: 0.82rem; }
   .status { color: var(--text-dim); }
+  .operator-binding { display: flex; flex-direction: column; gap: 0.5rem; }
+  .operator-binding p { margin: 0; }
+  .operator-binding--ok { border-color: var(--green); }
+  .binding-key { overflow-wrap: anywhere; }
 
   @media (max-width: 640px) {
     .kv-table td.label { width: auto; }

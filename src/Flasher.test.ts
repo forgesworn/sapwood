@@ -66,12 +66,13 @@ describe('Flasher — happy path', () => {
 
     // Flashed once, with the board + a wifi config carrying an operator key
     expect(mockFlash).toHaveBeenCalledTimes(1)
-    const [board, cfg] = mockFlash.mock.calls[0]
+    const [board, cfg, handlers] = mockFlash.mock.calls[0]
     expect(board.id).toBe('heltec-v4')
     expect(cfg.ssid).toBe('home-wifi')
     expect(cfg.mode).toBe('wifi')
     expect(cfg.password).toBe('hunter2hunter2')
     expect(cfg.op_mgmt).toMatch(/^[0-9a-f]{64}$/)
+    expect(handlers?.writeConfig).toBe(true)
   })
 
   it('reveals and re-hides the wifi password via the eye toggle', async () => {

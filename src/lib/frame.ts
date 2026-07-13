@@ -27,6 +27,10 @@ export const FrameType = {
   FIRMWARE_INFO:         0x59,
   FIRMWARE_INFO_RESPONSE: 0x5a,
   SET_IDENTITY_META:     0x5b,
+  GET_NET_CONFIG:        0x5c,
+  GET_NET_CONFIG_RESPONSE: 0x5d,
+  PATCH_NET_CONFIG:      0x5e,
+  SET_OPERATOR:          0x5f,
   ENCRYPTED_REQUEST:     0x10,
   ENCRYPTED_RESPONSE:    0x11,
   NACK:                  0x15,
@@ -232,10 +236,44 @@ export interface NetConfig {
   op_mgmt?: string
 }
 
+export interface LocalNetConfigPatch {
+  mode?: 'usb' | 'wifi'
+  ssid?: string
+  relays?: string[]
+  password?: { action: 'keep' | 'set' | 'clear'; value?: string }
+}
+
 /** Build a SET_NET_CONFIG frame. Payload: JSON-encoded NetConfig. */
 export function buildSetNetConfig(cfg: NetConfig): Uint8Array {
   const payload = new TextEncoder().encode(JSON.stringify(cfg))
   return buildFrame(FrameType.SET_NET_CONFIG, payload)
+}
+
+/** Read password-redacted network/operator state over a locally attached USB cable. */
+export function buildGetNetConfig(): Uint8Array {
+  return buildFrame(FrameType.GET_NET_CONFIG)
+}
+
+/** Physically confirmed partial network update. It cannot rotate op_mgmt. */
+export function buildPatchNetConfig(baseRevision: number, patch: LocalNetConfigPatch): Uint8Array {
+  if (!Number.isInteger(baseRevision) || baseRevision < 0 || baseRevision > 0xffffffff) {
+    throw new Error('base network revision must be a uint32')
+  }
+  const payload = new TextEncoder().encode(JSON.stringify({ base_revision: baseRevision, patch }))
+  return buildFrame(FrameType.PATCH_NET_CONFIG, payload)
+}
+
+/** Physically confirmed management-operator rotation.
+ * Payload: observed network revision (u32 BE) + x-only pubkey (32 bytes). */
+export function buildSetOperator(baseRevision: number, operatorPubHex: string): Uint8Array {
+  if (!Number.isInteger(baseRevision) || baseRevision < 0 || baseRevision > 0xffffffff) {
+    throw new Error('base network revision must be a uint32')
+  }
+  const pubkey = hexToBytes32(operatorPubHex)
+  const payload = new Uint8Array(36)
+  new DataView(payload.buffer).setUint32(0, baseRevision, false)
+  payload.set(pubkey, 4)
+  return buildFrame(FrameType.SET_OPERATOR, payload)
 }
 
 /**
@@ -252,6 +290,9 @@ export function buildSessionAuth(hexSecret: string): Uint8Array {
 }
 
 function hexToBytes32(hexSecret: string): Uint8Array {
+  if (!/^[0-9a-f]{64}$/i.test(hexSecret)) {
+    throw new Error('expected 64 hexadecimal characters')
+  }
   const bytes = new Uint8Array(32)
   for (let i = 0; i < 32; i++) {
     bytes[i] = parseInt(hexSecret.slice(i * 2, i * 2 + 2), 16)

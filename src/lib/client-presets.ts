@@ -8,6 +8,9 @@
 // Pure data + mapping functions so the logic is exhaustively unit-testable with
 // no UI. Tone: plain, no jargon, no exclamation marks (house voice).
 
+import { CONNECT_METHODS, SIGNING_METHODS, exactClientPolicy } from './client-policy.js'
+import type { ExactClientPolicy } from './types.js'
+
 export type PresetId = 'posting' | 'everything' | 'messaging' | 'custom'
 
 export interface PermissionPreset {
@@ -20,6 +23,8 @@ export interface PermissionPreset {
    * this is null and the UI lets the operator pick the kinds by hand.
    */
   kinds: number[] | null
+  /** Exact NIP-46 methods this preset may run automatically. */
+  methods: readonly string[]
 }
 
 export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
@@ -28,24 +33,30 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     label: 'Posting only',
     description: 'Notes, reactions, reposts, articles and app settings. Keeps an app away from your profile and contacts.',
     kinds: [1, 5, 6, 7, 30023, 30078],
+    methods: ['get_public_key', 'sign_event'],
   },
   {
     id: 'everything',
     label: 'Everything',
     description: 'Sign anything this app asks for. Use only for a personal app you trust with profile, contacts and relay-list changes.',
     kinds: null,
+    methods: SIGNING_METHODS,
   },
   {
     id: 'messaging',
     label: 'Messages only',
     description: 'Direct messages only. Good for a chat app.',
-    kinds: [4, 1059],
+    // Legacy NIP-04 plus signed NIP-17 seals/gift wraps. Kinds 14/15 are
+    // deliberately absent: NIP-17 message rumors are unsigned.
+    kinds: [4, 13, 1059],
+    methods: [...CONNECT_METHODS, 'sign_event'],
   },
   {
     id: 'custom',
     label: 'Let me choose',
     description: 'Pick exactly which kinds of event this app may sign.',
     kinds: null,
+    methods: ['get_public_key', 'sign_event'],
   },
 ] as const
 
@@ -72,4 +83,10 @@ export function resolveKinds(id: PresetId, customKinds: number[] = []): number[]
 /** True when a preset restricts signing (i.e. needs an allowed_kinds update). */
 export function isRestricted(id: PresetId, customKinds: number[] = []): boolean {
   return resolveKinds(id, customKinds) !== null
+}
+
+/** Resolve a preset to the complete v2 policy installed atomically on device. */
+export function resolvePolicy(id: PresetId, customKinds: number[] = []): ExactClientPolicy {
+  const preset = presetById(id)
+  return exactClientPolicy(preset.methods, resolveKinds(id, customKinds) ?? [])
 }

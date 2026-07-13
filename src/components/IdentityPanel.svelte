@@ -64,7 +64,8 @@
         <div class="restore-callout">
           <strong>If Primal still signs, WiFi is alive and Sapwood is missing the management key.</strong>
           Restore the matching recovery phrase in <a href="#operator-key">Operator key</a>, or connect
-          by USB and save Device &gt; Network to make this browser the management operator.
+          by USB and use <strong>Set this browser as operator</strong>. That physical-confirmed action
+          preserves the WiFi password and relays.
         </div>
         <details class="disclosure">
           <summary>Why this happens</summary>
@@ -75,7 +76,7 @@
             <li><strong>Operator-key mismatch.</strong> The signer only accepts management signed by the
               operator key set when it was flashed. If this browser's key differs (flashed from a
               different browser or machine, or storage was cleared), the signer silently ignores it.
-              USB-saving Network rewrites that key on the signer.</li>
+              The USB Operator key panel can replace that key with physical confirmation.</li>
           </ul>
         </details>
       </div>

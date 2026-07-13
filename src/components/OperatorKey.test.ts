@@ -3,12 +3,24 @@ import { render, fireEvent, screen } from '@testing-library/svelte'
 import OperatorKey from './OperatorKey.svelte'
 import { generateOperatorMnemonic, importOperatorMnemonic, peekOperatorPubHex } from '../lib/op-mgmt.js'
 
+const usb = vi.hoisted(() => ({ setOperator: vi.fn() }))
+
+vi.mock('../lib/device.svelte.js', () => ({
+  device: {
+    mode: 'none',
+    usbNetworkSupport: 'unknown',
+    usbNetworkState: null,
+  },
+  setOperatorOverUsb: usb.setOperator,
+}))
+
 vi.mock('../lib/clipboard.js', () => ({
   copyText: vi.fn().mockResolvedValue(true),
 }))
 
 beforeEach(() => {
   localStorage.clear()
+  usb.setOperator.mockReset()
 })
 
 describe('OperatorKey', () => {
@@ -33,5 +45,25 @@ describe('OperatorKey', () => {
 
     expect(peekOperatorPubHex()).toBe(expected)
     expect(screen.getByText(/Restored from phrase/)).toBeTruthy()
+  })
+
+  it('separates physical operator recovery from network editing', async () => {
+    const { device } = await import('../lib/device.svelte.js')
+    const current = importOperatorMnemonic(generateOperatorMnemonic())
+    ;(device as { mode: string }).mode = 'serial'
+    ;(device as { usbNetworkSupport: string }).usbNetworkSupport = 'supported'
+    ;(device as { usbNetworkState: unknown }).usbNetworkState = {
+      configured: true,
+      op_mgmt: 'f'.repeat(64),
+    }
+    usb.setOperator.mockResolvedValue({ configured: true, op_mgmt: current.pubHex })
+
+    render(OperatorKey)
+    expect(screen.getByText(/This browser's key does not match/)).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Set this browser as operator' }))
+    expect(screen.getByText(/WiFi password and relays are preserved/i)).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Yes, show device confirmation' }))
+
+    expect(usb.setOperator).toHaveBeenCalledWith(current.pubHex)
   })
 })

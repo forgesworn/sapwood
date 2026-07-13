@@ -16,6 +16,7 @@
   import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
   import { copyText } from '../lib/clipboard.js'
   import { bunkerHasRelay } from '../lib/bunker.js'
+  import { exactPolicyFromSlot, fullClientPolicy } from '../lib/client-policy.js'
 
   const overBridge = $derived(device.mode === 'http')
   const overUsb = $derived(device.mode === 'serial')
@@ -83,7 +84,7 @@
         }
         created = { bunker_uri: uri, secret: result.secret as string | undefined }
       } else {
-        const res = await mgmtCreateClient(label, canApprove && preApprove)
+        const res = await mgmtCreateClient(label, fullClientPolicy(canApprove && preApprove))
         created = { bunker_uri: res.bunker_uri, secret: res.secret, signing_approved: res.signing_approved }
       }
       newLabel = ''
@@ -99,9 +100,9 @@
     refreshSlots()
   }
 
-  async function handleApprove(slotIndex: number) {
-    approvingSlot = slotIndex
-    try { await mgmtApproveSigning(slotIndex) }
+  async function handleApprove(slot: ConnectSlot) {
+    approvingSlot = slot.slot_index
+    try { await mgmtApproveSigning(slot.slot_index, slot.secret_fingerprint) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Approve failed' }
     finally { approvingSlot = null }
   }
@@ -113,7 +114,7 @@
         await httpTransport.revokeSlot(device.selectedSlot, slot.slot_index)
         await refreshSlots()
       } else {
-        await mgmtRevokeClient(slot.slot_index)
+        await mgmtRevokeClient(slot.slot_index, slot.secret_fingerprint)
       }
     } catch (e) {
       device.error = e instanceof Error ? e.message : 'Disconnect failed'
@@ -131,7 +132,11 @@
       } else {
         // The mgmt layer expects an explicit list; empty means unrestricted.
         const mapped = { ...changes, ...(changes.allowed_kinds !== undefined ? { allowed_kinds: changes.allowed_kinds ?? [] } : {}) }
-        await mgmtUpdateClient(slot.slot_index, mapped as { label?: string; allowed_kinds?: number[]; auto_approve?: boolean })
+        await mgmtUpdateClient(
+          slot.slot_index,
+          mapped as { label?: string; allowed_kinds?: number[]; auto_approve?: boolean },
+          slot.secret_fingerprint,
+        )
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Update failed'
@@ -166,7 +171,7 @@
     uriForSlot = slot.slot_index
     uriValue = ''
     uriError = null
-    try { uriValue = await mgmtClientUri(slot.slot_index) }
+    try { uriValue = await mgmtClientUri(slot.slot_index, slot.secret_fingerprint) }
     catch {
       // Older WiFi firmware may not be able to re-show a link after a reload.
       // Current firmware can reissue it because the slot secret is reusable.
@@ -185,13 +190,9 @@
     uriError = null
     try {
       const label = slot.label || `app ${slot.slot_index}`
-      const res = await mgmtCreateClient(label, canApprove && (slot.signing_approved ?? false))
-      if (slot.allowed_kinds.length) {
-        try { await mgmtUpdateClient(res.slot_index, { allowed_kinds: slot.allowed_kinds }) }
-        catch { /* the link still works; the kind limit just needs re-applying below */ }
-      }
+      const res = await mgmtCreateClient(label, exactPolicyFromSlot(slot))
       // Best-effort: drop the stale pending slot so it doesn't linger.
-      try { await mgmtRevokeClient(slot.slot_index) } catch { /* leave the orphan */ }
+      try { await mgmtRevokeClient(slot.slot_index, slot.secret_fingerprint) } catch { /* leave the orphan */ }
       created = { bunker_uri: res.bunker_uri, secret: res.secret, signing_approved: res.signing_approved }
       uriForSlot = null
       await refreshSlots()
@@ -304,7 +305,7 @@
         {#if canApprove}
           <label class="approve-toggle">
             <input type="checkbox" bind:checked={preApprove} disabled={creating} />
-            <span>Allow signing straight away, so no approval is needed once the app connects</span>
+            <span>Allow any event to be signed straight away (unrestricted). Use the guided connection above for a narrower policy.</span>
           </label>
         {:else}
           <p class="hint-sm usb-note">Over USB the first management action, and each app's first signature,
@@ -388,22 +389,26 @@
             <div class="app-actions">
               {#if slot.signing_approved}
                 <span class="tag tag--blue" title="This app is allowed to sign">CAN SIGN</span>
-              {:else if canApprove}
-                <button class="btn btn-secondary btn-sm allow" disabled={approvingSlot === slot.slot_index} onclick={() => handleApprove(slot.slot_index)}>
+              {:else if canApprove && !slot.strict_permissions}
+                <button class="btn btn-secondary btn-sm allow" disabled={approvingSlot === slot.slot_index} onclick={() => handleApprove(slot)}>
                   {approvingSlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
                 </button>
+              {:else if slot.strict_permissions && !(slot.allowed_methods ?? []).includes('sign_event')}
+                <span class="tag" title="Signing is outside this app's exact policy">NO SIGNING</span>
               {:else if !overBridge}
                 <span class="tag" title="First signature approved by a press of the button on the device">BUTTON</span>
               {/if}
-              <button
-                class="tag"
-                class:tag--green={slot.auto_approve}
-                title={slot.auto_approve ? 'Signs without asking. Click to require the button per signature' : 'Each signature needs the button. Click to sign automatically'}
-                disabled={updatingSlot === slot.slot_index}
-                onclick={() => handleUpdate(slot, { auto_approve: !slot.auto_approve })}
-              >
-                {slot.auto_approve ? 'AUTO' : 'MANUAL'}
-              </button>
+              {#if slot.signing_approved || !slot.strict_permissions}
+                <button
+                  class="tag"
+                  class:tag--green={slot.auto_approve}
+                  title={slot.auto_approve ? 'Signs without asking. Click to require the button per signature' : 'Each signature needs the button. Click to sign automatically'}
+                  disabled={updatingSlot === slot.slot_index}
+                  onclick={() => handleUpdate(slot, { auto_approve: !slot.auto_approve })}
+                >
+                  {slot.auto_approve ? 'AUTO' : 'MANUAL'}
+                </button>
+              {/if}
               <button class="btn btn-secondary btn-sm" onclick={() => toggleUri(slot)}>
                 {uriForSlot === slot.slot_index ? 'Hide link' : 'Link'}
               </button>
@@ -446,6 +451,9 @@
             allowedKinds={slot.allowed_kinds}
             unrestricted={slot.allowed_kinds.length === 0}
             signingApproved={slot.signing_approved ?? true}
+            autoApprove={slot.auto_approve}
+            strictPermissions={slot.strict_permissions ?? false}
+            signingIncluded={(slot.allowed_methods ?? []).includes('sign_event')}
             updating={updatingSlot === slot.slot_index}
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />

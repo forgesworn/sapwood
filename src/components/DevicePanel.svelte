@@ -128,7 +128,7 @@
         // Revoke highest slot first so indices stay stable as the list shrinks.
         const slots = [...device.slots].sort((a, b) => b.slot_index - a.slot_index)
         for (const slot of slots) {
-          await mgmtRevokeClient(slot.slot_index)
+          await mgmtRevokeClient(slot.slot_index, slot.secret_fingerprint)
           done++
         }
       }
@@ -197,6 +197,9 @@
       <h3 class="sub-title">Boot PIN</h3>
       <p class="hint">Locks the device at boot. It must be unlocked before it signs anything.
         The device asks for its button to confirm.</p>
+      <p class="warn-text">For an unattended signer in another location, leave the boot PIN clear.
+        After any reboot or power cut it requires a local USB unlock, so automatic signing and remote
+        management cannot resume; the signer also refuses remote network activation in this mode.</p>
       <div class="inline-form">
         <div class="pw-wrap">
           <input

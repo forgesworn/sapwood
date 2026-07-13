@@ -13,6 +13,19 @@ export interface ConnectSlot {
   allowed_kinds: number[]
   auto_approve: boolean
   signing_approved: boolean
+  /** New exact-policy slots deny requests outside their method/kind ceiling. */
+  strict_permissions?: boolean
+  /** Non-secret SHA-256 commitment to this slot's credential. Relay management
+   * binds every index-sensitive request to it so a compacted/reused numeric slot
+   * cannot be edited or reissued from a stale phone screen. */
+  secret_fingerprint?: string
+}
+
+/** Complete automatic authority sent to Heartwood's versioned management API. */
+export interface ExactClientPolicy {
+  allowed_methods: string[]
+  allowed_kinds: number[]
+  auto_approve: boolean
 }
 
 /**

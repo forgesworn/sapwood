@@ -1,21 +1,28 @@
 <script lang="ts">
   import { COMMON_KINDS, kindLabel, type KindInfo } from '../lib/kinds.js'
 
-  // Three-state permission model per kind (when signing_approved is true):
-  //   'auto'   = kind in allowed_kinds → sign immediately (green)
-  //   'prompt' = kind NOT in allowed_kinds → ESP32 shows on OLED, waits for button press (amber)
-  //
-  // When signing_approved is false (TOFU state): no signing possible yet.
+  // Effective permission model per kind (when signing_approved is true):
+  // strict v2: listed = automatic/button according to auto_approve; unlisted = denied.
+  // legacy:    listed = automatic/button; unlisted falls back to the device button.
+  // When signing_approved is false (TOFU state), no signing is possible yet.
 
   interface Props {
     allowedKinds: number[]
     unrestricted: boolean
     signingApproved: boolean
+    autoApprove?: boolean
+    strictPermissions?: boolean
+    /** Whether the exact method ceiling includes sign_event at all. */
+    signingIncluded?: boolean
     updating: boolean
     onchange: (kinds: number[] | null) => void
   }
 
-  let { allowedKinds, unrestricted, signingApproved, updating, onchange }: Props = $props()
+  let {
+    allowedKinds, unrestricted, signingApproved,
+    autoApprove = true, strictPermissions = false, signingIncluded = true,
+    updating, onchange,
+  }: Props = $props()
 
   let expanded = $state(false)
   let customKind = $state('')
@@ -61,7 +68,9 @@
       // Remove from allowed — kind will now require button press.
       const next = allowedKinds.filter(k => k !== kind)
       if (next.length === 0) {
-        permissionNote = 'To prompt for every kind, use Ask each time.'
+        permissionNote = strictPermissions
+          ? 'An empty kind list means Allow all. Keep at least one allowed kind.'
+          : 'To prompt for every kind, use Ask each time.'
         return
       }
       onchange(next)
@@ -111,17 +120,35 @@
     unrestricted ? 0 : COMMON_KINDS.filter(k => !allowedKinds.includes(k.kind)).length
   )
 
-  const summaryText = $derived(
-    unrestricted
-      ? 'All kinds auto-signed'
-      : promptCount > 0
-        ? `${allowedKinds.length} auto-signed, ${promptCount} prompted`
-        : `${allowedKinds.length} auto-signed, unknown prompted`
-  )
+  type EffectiveKindState = 'auto' | 'button' | 'denied'
+
+  function effectiveState(kind: number): EffectiveKindState {
+    const listed = isAllowed(kind)
+    if (!listed && strictPermissions) return 'denied'
+    return listed && autoApprove ? 'auto' : 'button'
+  }
+
+  const summaryText = $derived.by(() => {
+    if (unrestricted) return autoApprove ? 'All kinds auto-signed' : 'All kinds require button'
+    if (strictPermissions) {
+      return autoApprove
+        ? `${allowedKinds.length} auto-signed, ${promptCount} denied`
+        : `${allowedKinds.length} button-approved, ${promptCount} denied`
+    }
+    if (!autoApprove) return 'Every signature needs button'
+    return promptCount > 0
+      ? `${allowedKinds.length} auto-signed, ${promptCount} prompted`
+      : `${allowedKinds.length} auto-signed, unknown prompted`
+  })
 </script>
 
 <div class="perms">
-  {#if !signingApproved}
+  {#if strictPermissions && !signingIncluded}
+    <div class="perms-no-signing">
+      <span class="perms-tofu-label">Signing is not included in this app's exact policy.</span>
+      <span class="perms-guidance">Reconnect it with a signing preset that names the event kinds it may sign; legacy “Allow signing” would be unrestricted.</span>
+    </div>
+  {:else if !signingApproved}
     <div class="perms-tofu">
       <span class="perms-tofu-dot"></span>
       <span class="perms-tofu-label">Awaiting first approval on device</span>
@@ -146,32 +173,38 @@
       <div class="perms-note" class:warn={unrestricted}>
         {unrestricted
           ? 'Allow all includes unknown and future kinds.'
-          : 'Unknown or unlisted kinds prompt on the signer.'}
+          : strictPermissions
+            ? 'Unknown or unlisted kinds are denied by this exact policy.'
+            : 'Unknown or unlisted kinds prompt on the signer.'}
       </div>
 
       <div class="perms-grid">
         {#each categories as cat}
           {#each cat.kinds as ki}
             {@const allowed = isAllowed(ki.kind)}
+            {@const state = effectiveState(ki.kind)}
             <button
               class="kind-chip"
               class:allowed
-              class:prompt={!allowed}
+              class:prompt={state === 'button'}
+              class:denied={state === 'denied'}
               onclick={() => toggle(ki.kind)}
-              title="{ki.label} (kind {ki.kind}): {allowed ? 'auto-sign' : 'prompt (button)'}"
+              title="{ki.label} (kind {ki.kind}): {state === 'auto' ? 'auto-sign' : state === 'button' ? 'button required' : 'denied (exact policy)'}"
             >
-              <span class="chip-dot" style="background: {allowed ? 'var(--green)' : 'var(--amber)'}"></span>
+              <span class="chip-dot" style="background: {state === 'auto' ? 'var(--green)' : state === 'button' ? 'var(--amber)' : 'var(--red)'}"></span>
               {ki.label}
             </button>
           {/each}
         {/each}
         {#each customAllowedKinds as kind}
+          {@const state = effectiveState(kind)}
           <button
             class="kind-chip allowed"
+            class:prompt={state === 'button'}
             onclick={() => toggle(kind)}
-            title="{kindLabel(kind)}: auto-sign"
+            title="{kindLabel(kind)}: {state === 'auto' ? 'auto-sign' : 'button required'}"
           >
-            <span class="chip-dot" style="background: var(--green)"></span>
+            <span class="chip-dot" style="background: {state === 'auto' ? 'var(--green)' : 'var(--amber)'}"></span>
             {kindLabel(kind)}
           </button>
         {/each}
@@ -198,8 +231,13 @@
       {/if}
 
       <div class="perms-legend">
-        <span class="legend-item"><span class="legend-dot" style="background: var(--green)"></span>Auto-sign</span>
-        <span class="legend-item"><span class="legend-dot" style="background: var(--amber)"></span>Prompt (button)</span>
+        {#if autoApprove}
+          <span class="legend-item"><span class="legend-dot" style="background: var(--green)"></span>Auto-sign</span>
+        {/if}
+        <span class="legend-item"><span class="legend-dot" style="background: var(--amber)"></span>Button required</span>
+        {#if strictPermissions && !unrestricted}
+          <span class="legend-item"><span class="legend-dot" style="background: var(--red)"></span>Denied</span>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -233,6 +271,8 @@
     color: var(--text-muted);
     font-style: italic;
   }
+  .perms-no-signing { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.4rem 0; }
+  .perms-guidance { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
 
   /* Collapsible toggle */
   .perms-header {
@@ -326,6 +366,7 @@
   .kind-chip:hover { border-color: #444; background: var(--surface-hover); }
   .kind-chip.allowed { border-color: #1a3a22; }
   .kind-chip.prompt { border-color: #3a2a00; opacity: 0.7; }
+  .kind-chip.denied { border-color: #3a1515; opacity: 0.55; }
 
   .chip-dot {
     width: 7px;

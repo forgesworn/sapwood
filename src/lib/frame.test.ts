@@ -10,6 +10,9 @@ import {
   buildProvisionList,
   buildFactoryReset,
   buildSetNetConfig,
+  buildGetNetConfig,
+  buildPatchNetConfig,
+  buildSetOperator,
   buildWifiScan,
 } from './frame.js'
 
@@ -190,6 +193,43 @@ describe('network config frame', () => {
     const frame = parseFrame(bytes)
     expect(frame.type).toBe(FrameType.SET_NET_CONFIG)
     expect(JSON.parse(new TextDecoder().decode(frame.payload))).toEqual(cfg)
+  })
+
+  it('USB redacted-state, patch, and operator values match Rust 0x5c-0x5f', () => {
+    expect(FrameType.GET_NET_CONFIG).toBe(0x5c)
+    expect(FrameType.GET_NET_CONFIG_RESPONSE).toBe(0x5d)
+    expect(FrameType.PATCH_NET_CONFIG).toBe(0x5e)
+    expect(FrameType.SET_OPERATOR).toBe(0x5f)
+  })
+
+  it('buildGetNetConfig has an empty payload', () => {
+    const frame = parseFrame(buildGetNetConfig())
+    expect(frame.type).toBe(FrameType.GET_NET_CONFIG)
+    expect(frame.payload).toHaveLength(0)
+  })
+
+  it('buildPatchNetConfig binds the observed revision and never adds op_mgmt', () => {
+    const frame = parseFrame(buildPatchNetConfig(7, {
+      relays: ['wss://new.example'],
+      password: { action: 'keep' },
+    }))
+    expect(frame.type).toBe(FrameType.PATCH_NET_CONFIG)
+    const body = JSON.parse(new TextDecoder().decode(frame.payload))
+    expect(body).toEqual({
+      base_revision: 7,
+      patch: { relays: ['wss://new.example'], password: { action: 'keep' } },
+    })
+    expect(JSON.stringify(body)).not.toContain('op_mgmt')
+  })
+
+  it('buildSetOperator uses u32 big-endian revision plus exactly 32 pubkey bytes', () => {
+    const frame = parseFrame(buildSetOperator(0x01020304, 'ab'.repeat(32)))
+    expect(frame.type).toBe(FrameType.SET_OPERATOR)
+    expect(frame.payload).toHaveLength(36)
+    expect([...frame.payload.slice(0, 4)]).toEqual([1, 2, 3, 4])
+    expect([...frame.payload.slice(4)]).toEqual(new Array(32).fill(0xab))
+    expect(() => buildSetOperator(1, 'aa')).toThrow(/64 hexadecimal/)
+    expect(() => buildSetOperator(-1, 'ab'.repeat(32))).toThrow(/uint32/)
   })
 })
 

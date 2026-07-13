@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  parseNostrConnectURI, isValidNostrConnect, permsToAllowedKinds, sharesRelay,
+  parseNostrConnectURI, isValidNostrConnect, permissionsToClientPolicy,
+  describeNostrConnectPermissions, sharesRelay,
 } from './nostrconnect.js'
 
 const PK = 'a'.repeat(64)
@@ -51,11 +52,48 @@ describe('parseNostrConnectURI', () => {
   })
 })
 
-describe('permsToAllowedKinds', () => {
-  it('extracts sign_event kinds, ignoring other methods', () => {
-    expect(permsToAllowedKinds(['sign_event:1', 'get_public_key', 'sign_event:0'])).toEqual([1, 0])
-    expect(permsToAllowedKinds(['nip44_encrypt'])).toEqual([])
-    expect(permsToAllowedKinds([])).toEqual([])
+describe('permissionsToClientPolicy', () => {
+  it('normalises exact methods and sorted, de-duplicated signing kinds', () => {
+    const result = permissionsToClientPolicy([
+      'nip44_encrypt', 'sign_event:1059', 'get_public_key', 'sign_event:13', 'sign_event:13',
+    ])
+    expect(result.issues).toEqual([])
+    expect(result.signing).toBe('kinds')
+    expect(result.policy).toEqual({
+      allowed_methods: ['get_public_key', 'nip44_encrypt', 'sign_event'],
+      allowed_kinds: [13, 1059],
+      auto_approve: true,
+    })
+  })
+
+  it('treats bare sign_event as all kinds even alongside narrower entries', () => {
+    const result = permissionsToClientPolicy(['sign_event:1', 'sign_event'])
+    expect(result.issues).toEqual([])
+    expect(result.signing).toBe('all')
+    expect(result.policy.allowed_methods).toContain('sign_event')
+    expect(result.policy.allowed_kinds).toEqual([])
+  })
+
+  it('keeps omitted and crypto-only permissions non-signing', () => {
+    expect(permissionsToClientPolicy([]).policy).toEqual({
+      allowed_methods: ['get_public_key'],
+      allowed_kinds: [],
+      auto_approve: true,
+    })
+    const crypto = permissionsToClientPolicy(['nip44_decrypt'])
+    expect(crypto.policy.allowed_methods).toEqual(['get_public_key', 'nip44_decrypt'])
+    expect(crypto.policy.allowed_methods).not.toContain('sign_event')
+    expect(describeNostrConnectPermissions(crypto)).toContain('NIP-44 decrypt')
+  })
+
+  it('surfaces every malformed, unknown or unsupported permission', () => {
+    for (const permission of [
+      'sign_event:', 'sign_event:-1', 'sign_event:1.5', 'sign_event:9007199254740992',
+      'nip44_encrypt:thing', 'switch_relays', 'delete_everything',
+    ]) {
+      const result = permissionsToClientPolicy([permission])
+      expect(result.issues.length, permission).toBeGreaterThan(0)
+    }
   })
 })
 

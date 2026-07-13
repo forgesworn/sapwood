@@ -52,6 +52,13 @@ function transportWith(port: SerialPort): SerialTransport {
   return t
 }
 
+function emitFrame(t: SerialTransport, type: typeof FrameType.ACK | typeof FrameType.NACK) {
+  ;(t as unknown as { emit: (event: unknown) => void }).emit({
+    kind: 'frame',
+    frame: { type, payload: new Uint8Array(0) },
+  })
+}
+
 // We can't instantiate SerialTransport in tests (no navigator.serial),
 // so we test the buffer processing logic by extracting it into a testable
 // helper. For now, test the frame building/parsing that the transport depends on.
@@ -223,6 +230,70 @@ describe('write serialisation', () => {
     ;(t as unknown as { port: SerialPort }).port = good.port
     await t.write(new Uint8Array([9]))
     expect(good.writes.map((w) => w[0])).toEqual([9])
+  })
+})
+
+describe('request/response serialisation', () => {
+  it('keeps a generic ACK/NACK response bound to exactly one request', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+
+    const first = t.sendAndReceive(
+      new Uint8Array([1]),
+      [FrameType.ACK, FrameType.NACK],
+      1_000,
+    )
+    const second = t.sendAndReceive(
+      new Uint8Array([2]),
+      [FrameType.ACK, FrameType.NACK],
+      1_000,
+    )
+
+    await vi.waitFor(() => expect(fake.writes.map((write) => write[0])).toEqual([1]))
+    emitFrame(t, FrameType.NACK)
+    await expect(first).resolves.toMatchObject({ type: FrameType.NACK })
+
+    // The second frame is written only after the first response listener has
+    // been removed; the first NACK therefore cannot resolve both callers.
+    await vi.waitFor(() => expect(fake.writes.map((write) => write[0])).toEqual([1, 2]))
+    emitFrame(t, FrameType.ACK)
+    await expect(second).resolves.toMatchObject({ type: FrameType.ACK })
+  })
+
+  it('continues with the next request after the active request times out', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    const first = t.sendAndReceive(new Uint8Array([1]), [FrameType.ACK], 20)
+    const second = t.sendAndReceive(new Uint8Array([2]), [FrameType.ACK], 1_000)
+
+    await expect(first).rejects.toThrow(/No response/)
+    await vi.waitFor(() => expect(fake.writes.map((write) => write[0])).toEqual([1, 2]))
+    emitFrame(t, FrameType.ACK)
+    await expect(second).resolves.toMatchObject({ type: FrameType.ACK })
+  })
+
+  it('disconnect rejects the active and queued requests without writing queued work later', async () => {
+    const firstPort = makeFakePort()
+    const t = transportWith(firstPort.port)
+    const first = t.sendAndReceive(new Uint8Array([1]), [FrameType.ACK], 30_000)
+    const queued = t.sendAndReceive(new Uint8Array([2]), [FrameType.ACK], 30_000)
+
+    await vi.waitFor(() => expect(firstPort.writes.map((write) => write[0])).toEqual([1]))
+    const firstRejected = expect(first).rejects.toThrow('Disconnected')
+    const queuedRejected = expect(queued).rejects.toThrow('Disconnected')
+    await t.disconnect()
+    await Promise.all([firstRejected, queuedRejected])
+    expect(firstPort.writes.map((write) => write[0])).toEqual([1])
+
+    // Simulate a fresh connection. The cancelled second frame must not leak
+    // into it; only a newly submitted request may write to the new port.
+    const nextPort = makeFakePort()
+    ;(t as unknown as { port: SerialPort; running: boolean }).port = nextPort.port
+    ;(t as unknown as { running: boolean }).running = true
+    const fresh = t.sendAndReceive(new Uint8Array([3]), [FrameType.ACK], 1_000)
+    await vi.waitFor(() => expect(nextPort.writes.map((write) => write[0])).toEqual([3]))
+    emitFrame(t, FrameType.ACK)
+    await expect(fresh).resolves.toMatchObject({ type: FrameType.ACK })
   })
 })
 

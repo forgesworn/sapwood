@@ -154,6 +154,9 @@
     try {
       await flashDevice(board!, cfg, {
         fullErase: data.fullErase,
+        // This surface is explicitly the setup/reconfigure wizard: unlike a
+        // firmware-only reflash, it must install the settings entered above.
+        writeConfig: true,
         onLog: appendLog,
         onProgress: (p, label) => { pct = p; rawStage = label },
       }, flashBackend())

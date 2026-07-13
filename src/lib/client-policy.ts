@@ -1,0 +1,67 @@
+import type { ConnectSlot, ExactClientPolicy } from './types.js'
+
+export const CONNECT_METHODS = [
+  'get_public_key',
+  'nip44_encrypt',
+  'nip44_decrypt',
+  'nip04_encrypt',
+  'nip04_decrypt',
+] as const
+
+export const SIGNING_METHODS = ['sign_event', ...CONNECT_METHODS] as const
+
+const SUPPORTED = new Set<string>(SIGNING_METHODS)
+
+/** Build a canonical full-policy payload. `sign_event` is the only method for
+ * which an empty kind list means "all"; without it the list is always cleared. */
+export function exactClientPolicy(
+  allowedMethods: readonly string[],
+  allowedKinds: readonly number[] = [],
+  autoApprove = true,
+): ExactClientPolicy {
+  const methods = [...new Set(['get_public_key', ...allowedMethods])]
+    .filter((method) => SUPPORTED.has(method))
+  const canSign = methods.includes('sign_event')
+  const kinds = canSign
+    ? [...new Set(allowedKinds)]
+      .filter((kind) => Number.isSafeInteger(kind) && kind >= 0)
+      .sort((a, b) => a - b)
+    : []
+  return {
+    allowed_methods: methods,
+    allowed_kinds: kinds,
+    auto_approve: autoApprove,
+  }
+}
+
+/** Broad legacy-equivalent policy used only when the operator explicitly asks
+ * an advanced connection to sign anything. */
+export function fullClientPolicy(allowSigning = true): ExactClientPolicy {
+  return exactClientPolicy(allowSigning ? SIGNING_METHODS : CONNECT_METHODS)
+}
+
+/** Preserve an existing slot while converting a replacement link to the exact
+ * v2 policy model. Never infer signing from kinds alone. */
+export function exactPolicyFromSlot(slot: ConnectSlot): ExactClientPolicy {
+  const methods = (slot.allowed_methods ?? []).filter((method) =>
+    method !== 'sign_event' || slot.signing_approved,
+  )
+  return exactClientPolicy(methods, slot.allowed_kinds, slot.auto_approve)
+}
+
+export function policiesEqual(
+  expected: ExactClientPolicy,
+  actual: { allowed_methods?: unknown; allowed_kinds?: unknown; auto_approve?: unknown },
+): boolean {
+  if (!Array.isArray(actual.allowed_methods) || !actual.allowed_methods.every((value) => typeof value === 'string')) return false
+  if (!Array.isArray(actual.allowed_kinds) || !actual.allowed_kinds.every((value) => typeof value === 'number')) return false
+  const expectedMethods = [...new Set(expected.allowed_methods)].sort()
+  const actualMethods = [...new Set(actual.allowed_methods as string[])].sort()
+  const expectedKinds = [...new Set(expected.allowed_kinds)].sort((a, b) => a - b)
+  const actualKinds = [...new Set(actual.allowed_kinds as number[])].sort((a, b) => a - b)
+  return actual.auto_approve === expected.auto_approve
+    && expectedMethods.length === actualMethods.length
+    && expectedMethods.every((method, index) => method === actualMethods[index])
+    && expectedKinds.length === actualKinds.length
+    && expectedKinds.every((kind, index) => kind === actualKinds[index])
+}

@@ -10,6 +10,9 @@
 // only means anything when the app's relay is one the signer already serves —
 // the UI checks that before handing the request to the device.
 
+import { exactClientPolicy } from './client-policy.js'
+import type { ExactClientPolicy } from './types.js'
+
 export interface NostrConnectRequest {
   /** The app's ephemeral pubkey (64-char hex) — the slot binds to this. */
   clientPubkey: string
@@ -99,15 +102,110 @@ export function isValidNostrConnect(uri: string): boolean {
   return parseNostrConnectURI(uri.trim()) !== null
 }
 
-/** The per-kind signing limit implied by the perms list (its sign_event:<kind>
- *  entries). Empty means no per-kind limit was requested (unrestricted). */
-export function permsToAllowedKinds(perms: string[]): number[] {
+export interface NostrConnectPermissionResult {
+  /** Complete fail-closed policy. Never infer signing from an empty kind list. */
+  policy: ExactClientPolicy
+  /** Any issue blocks pairing; nothing is silently ignored. */
+  issues: string[]
+  supplied: boolean
+  signing: 'none' | 'all' | 'kinds'
+  requestedMethods: string[]
+}
+
+const SUPPORTED_PERMISSION_METHODS = new Set([
+  'get_public_key',
+  'nip04_encrypt',
+  'nip04_decrypt',
+  'nip44_encrypt',
+  'nip44_decrypt',
+])
+const STANDARD_BUT_UNSUPPORTED = new Set(['switch_relays', 'logout'])
+const MAX_PERMISSIONS = 64
+
+/** Parse NIP-46's current `method[:params]` permission grammar into the exact
+ * Heartwood policy. Only sign_event defines a parameter today (the event kind).
+ * Unknown/malformed/unsupported entries are surfaced and block pairing. */
+export function permissionsToClientPolicy(perms: string[]): NostrConnectPermissionResult {
+  const issues: string[] = []
+  const methods = new Set<string>()
+  const requestedMethods = new Set<string>()
   const kinds = new Set<number>()
-  for (const p of perms) {
-    const m = /^sign_event:(\d+)$/.exec(p)
-    if (m) kinds.add(Number(m[1]))
+  let signAll = false
+
+  if (perms.length > MAX_PERMISSIONS) {
+    issues.push(`The app requested more than ${MAX_PERMISSIONS} permissions.`)
   }
-  return [...kinds]
+
+  for (const raw of perms.slice(0, MAX_PERMISSIONS)) {
+    const token = raw.trim()
+    const colon = token.indexOf(':')
+    const method = colon < 0 ? token : token.slice(0, colon)
+    const param = colon < 0 ? null : token.slice(colon + 1)
+    requestedMethods.add(method)
+
+    if (method === 'sign_event') {
+      if (param === null) {
+        methods.add('sign_event')
+        signAll = true
+        continue
+      }
+      if (!/^\d+$/.test(param)) {
+        issues.push(`Invalid event kind in permission “${raw}”.`)
+        continue
+      }
+      const kind = Number(param)
+      if (!Number.isSafeInteger(kind)) {
+        issues.push(`Event kind in permission “${raw}” is too large.`)
+        continue
+      }
+      methods.add('sign_event')
+      kinds.add(kind)
+      continue
+    }
+
+    if (SUPPORTED_PERMISSION_METHODS.has(method)) {
+      if (param !== null) {
+        issues.push(`Permission “${raw}” uses parameters Heartwood cannot safely interpret.`)
+      } else {
+        methods.add(method)
+      }
+      continue
+    }
+
+    // Ping is implemented and always harmless; it does not need a stored slot
+    // grant. Keep it in the human-readable request but not the policy payload.
+    if (method === 'ping' && param === null) continue
+
+    if (STANDARD_BUT_UNSUPPORTED.has(method)) {
+      issues.push(`This signer does not support the requested “${method}” permission yet.`)
+    } else {
+      issues.push(`Unknown permission “${raw}”.`)
+    }
+  }
+
+  const signing = !methods.has('sign_event') ? 'none' : signAll ? 'all' : 'kinds'
+  const allowedKinds = signAll ? [] : [...kinds]
+  return {
+    policy: exactClientPolicy([...methods], allowedKinds),
+    issues,
+    supplied: perms.length > 0,
+    signing,
+    requestedMethods: [...requestedMethods],
+  }
+}
+
+/** Plain confirmation copy for the security boundary shown before pairing. */
+export function describeNostrConnectPermissions(result: NostrConnectPermissionResult): string {
+  const actions: string[] = []
+  if (result.signing === 'all') actions.push('sign any event')
+  if (result.signing === 'kinds') actions.push(`sign event kinds ${result.policy.allowed_kinds.join(', ')}`)
+  if (result.policy.allowed_methods.includes('nip44_encrypt')) actions.push('NIP-44 encrypt')
+  if (result.policy.allowed_methods.includes('nip44_decrypt')) actions.push('NIP-44 decrypt')
+  if (result.policy.allowed_methods.includes('nip04_encrypt')) actions.push('NIP-04 encrypt')
+  if (result.policy.allowed_methods.includes('nip04_decrypt')) actions.push('NIP-04 decrypt')
+  return actions.length
+    ? actions.join('; ')
+    : 'connect and read your public key only; no automatic signing or decryption'
 }
 
 /** Whether any of the app's relays is one the signer serves — the pairing only
