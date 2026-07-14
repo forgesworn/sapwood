@@ -3,6 +3,31 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.11.3 — 2026-07-14
+
+Remote phone management now survives signer reconnect timing and reports the
+real connection stage, while bundled Heartwood firmware gives clear on-device
+feedback throughout a network change.
+
+### Fixed
+
+- Protected phone handoff republishes a fresh, idempotent authenticated status
+  read every five seconds until the signer answers or the 45-second deadline
+  expires, covering both missed requests and lost responses without ever
+  retrying a mutation.
+- Pairing QR codes export only the active relay route read back from the exact
+  signer. In-progress network trials and stale browser routes fail closed.
+- The mobile connection screen reports relay opening, signed request publish,
+  signer wait, and authenticated response stages without exposing relay URLs,
+  keys, or device identifiers. Older iPhone WebKit no longer depends on
+  `Promise.any` or `AbortSignal.throwIfAborted`.
+- Mobile WebKit handoff coverage now runs in CI alongside Chromium.
+- **Bundled Heartwood firmware → v0.12.1.** Network confirmation is a neutral
+  device screen instead of a red error; Saving, Joining WiFi, Opening relay,
+  Online, failure, cancellation, and rollback each redraw a clean full frame.
+  WPA3-capable networks are supported without dropping WPA2 compatibility, and
+  stalled WebSocket upgrades now fail over on an absolute deadline.
+
 ## 0.11.2 — 2026-07-13
 
 Cellular handoff now proves a real relay path and survives mobile network

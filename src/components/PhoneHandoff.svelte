@@ -15,10 +15,14 @@
 
   let copied = $state(false)
   let reveal = $state(false)
+  let revealAuthorityKey = $state('')
   let pin = $state('')
   let building = $state(false)
   let link = $state('') // the built handoff link (protected or plain)
+  let linkAuthorityKey = $state('')
   let protectedLink = $state(false)
+  let observedAuthorityKey = $state<string | null>(null)
+  let revealEpoch = $state(0)
   let hideTimer: ReturnType<typeof setTimeout> | null = null
 
   const MIN_PIN = 6
@@ -36,9 +40,11 @@
 
   /** Relays proven by this exact live target, never browser-global defaults. */
   function provenRelays(): string[] {
-    if (device.mode === 'relay' && device.relayStatus) return [...(device.relays ?? [])]
+    if (device.mode === 'relay' && device.relayStatus) return [...(device.relayConfiguredRelays ?? [])]
     const state = device.mode === 'serial' ? device.usbNetworkState : null
-    if (state?.configured && state.recovery_ok && state.mode === 'wifi') return [...(state.relays ?? [])]
+    if (state?.configured && state.recovery_ok && state.mode === 'wifi' && state.trial === null) {
+      return [...(state.relays ?? [])]
+    }
     return []
   }
 
@@ -47,10 +53,40 @@
       return findStoredOperatorByPubHex(device.operatorPub)
     }
     const state = device.mode === 'serial' ? device.usbNetworkState : null
-    if (state?.configured && state.recovery_ok && state.mode === 'wifi' && state.op_mgmt) {
+    if (state?.configured && state.recovery_ok && state.mode === 'wifi'
+      && state.trial === null && state.op_mgmt) {
       return findStoredOperatorByPubHex(state.op_mgmt)
     }
     return null
+  }
+
+  /** Bind generated material to the exact authority proof that produced it.
+   * Relay order is deliberately part of the tuple: any device-read change,
+   * including a reordered route, requires a fresh user reveal. */
+  function authorityTupleKey(
+    devicePubHex: string,
+    operator: Operator | null,
+    exactRelays: string[],
+  ): string {
+    if (!devicePubHex || !operator || exactRelays.length === 0) return ''
+    return JSON.stringify([
+      devicePubHex.toLowerCase(),
+      operator.pubHex.toLowerCase(),
+      exactRelays,
+    ])
+  }
+
+  function currentAuthority(): {
+    devicePubHex: string
+    operator: Operator
+    exactRelays: string[]
+    key: string
+  } | null {
+    const devicePubHex = deviceHex()
+    const operator = provenOperator()
+    const exactRelays = devicePubHex ? provenRelays() : []
+    const key = authorityTupleKey(devicePubHex, operator, exactRelays)
+    return operator && key ? { devicePubHex, operator, exactRelays, key } : null
   }
 
   const hex = $derived(deviceHex())
@@ -63,7 +99,28 @@
     !!hex && (device.mode === 'serial' || device.mode === 'relay'),
   )
   const ready = $derived(visible && relays.length > 0 && handoffOperator !== null)
-  const qr = $derived(link ? encodeQR(link, 'svg') : '')
+  const authorityKey = $derived(
+    ready ? authorityTupleKey(hex, handoffOperator, relays) : '',
+  )
+  // The key check closes the render-time gap before the invalidation effect
+  // runs, so old QR material cannot flash when proof A changes to B.
+  const activeLink = $derived(
+    authorityKey && linkAuthorityKey === authorityKey ? link : '',
+  )
+  const qr = $derived(activeLink ? encodeQR(activeLink, 'svg') : '')
+
+  $effect(() => {
+    const current = authorityKey
+    if (observedAuthorityKey === null) {
+      observedAuthorityKey = current
+      return
+    }
+    if (current === observedAuthorityKey) return
+    observedAuthorityKey = current
+    // This also covers A -> unavailable -> A: once proof disappears, an old
+    // reveal must never resurrect merely because the same tuple returns.
+    hidePairing()
+  })
 
   function armHideTimer() {
     if (hideTimer) clearTimeout(hideTimer)
@@ -72,26 +129,42 @@
 
   function startReveal() {
     if (!ready) return
+    revealEpoch += 1
     reveal = true
+    revealAuthorityKey = authorityKey
     link = ''
+    linkAuthorityKey = ''
     pin = ''
     copied = false
   }
 
   async function showProtected() {
-    if (pin.length < MIN_PIN || !ready) return
+    if (building || pin.length < MIN_PIN || !ready) return
+    const buildEpoch = revealEpoch
+    const buildAuthorityKey = revealAuthorityKey
+    const buildPin = pin
+    if (!buildAuthorityKey || buildAuthorityKey !== authorityKey) return
     building = true
     // Yield so "Protecting…" paints before the (blocking) scrypt in encryptOperator.
     await new Promise((r) => setTimeout(r, 0))
     try {
-      // Re-resolve after yielding: a reconnect could have selected a different
-      // candidate while the PIN step was open. Never reuse a stale authority.
-      const operator = provenOperator()
-      const currentHex = deviceHex()
-      const currentRelays = currentHex ? provenRelays() : []
-      if (!operator || !currentHex || currentRelays.length === 0) return
-      const eop = encryptOperator(operator.skHex, pin)
-      link = buildProtectedHandoffLink(location.origin, eop, currentHex, currentRelays)
+      // Re-resolve after yielding: a reconnect could have changed or removed
+      // the proof while the PIN step was open. Never reuse a stale authority or
+      // complete work after the reveal was invalidated.
+      const authority = currentAuthority()
+      if (!reveal || revealEpoch !== buildEpoch || !authority
+        || buildPin.length < MIN_PIN || pin !== buildPin
+        || authority.key !== buildAuthorityKey
+        || authorityKey !== buildAuthorityKey
+        || revealAuthorityKey !== buildAuthorityKey) return
+      const eop = encryptOperator(authority.operator.skHex, buildPin)
+      linkAuthorityKey = authority.key
+      link = buildProtectedHandoffLink(
+        location.origin,
+        eop,
+        authority.devicePubHex,
+        authority.exactRelays,
+      )
       protectedLink = true
       armHideTimer()
     } finally {
@@ -100,18 +173,26 @@
   }
 
   function showPlain() {
-    const operator = provenOperator()
-    const currentHex = deviceHex()
-    const currentRelays = currentHex ? provenRelays() : []
-    if (!operator || !currentHex || currentRelays.length === 0) return
-    link = buildHandoffLink(location.origin, operator.skHex, currentHex, currentRelays)
+    const authority = currentAuthority()
+    if (!reveal || !authority || authority.key !== authorityKey
+      || authority.key !== revealAuthorityKey) return
+    linkAuthorityKey = authority.key
+    link = buildHandoffLink(
+      location.origin,
+      authority.operator.skHex,
+      authority.devicePubHex,
+      authority.exactRelays,
+    )
     protectedLink = false
     armHideTimer()
   }
 
   function hidePairing() {
+    revealEpoch += 1
     reveal = false
+    revealAuthorityKey = ''
     link = ''
+    linkAuthorityKey = ''
     pin = ''
     copied = false
     protectedLink = false
@@ -122,15 +203,18 @@
   }
 
   async function copyLink() {
-    if (!link) return
-    if (await copyText(link)) {
+    if (!activeLink) return
+    if (await copyText(activeLink)) {
       copied = true
       setTimeout(() => (copied = false), 1500)
     }
   }
 
   onDestroy(() => {
-    if (hideTimer) clearTimeout(hideTimer)
+    // A zero-delay protected build may still be waiting to resume. Tear-down
+    // is an authority boundary too: invalidate that continuation and remove
+    // the PIN/link material, not merely the long-lived hide timer.
+    hidePairing()
   })
 </script>
 
@@ -144,12 +228,24 @@
       {:else}
         <p class="hint">Reading this signer's operator and relays before enabling phone pairing…</p>
       {/if}
+    {:else if device.mode === 'serial' && device.usbNetworkState?.trial}
+      <p class="warn-text">
+        Phone pairing stays locked while this signer is trying a network change. Wait for it to
+        finish or roll back; Sapwood will not export the previous relay route.
+      </p>
     {:else if device.mode === 'serial' && device.usbNetworkState?.mode !== 'wifi'}
       <p class="hint">Enable WiFi-standalone mode before pairing a phone for remote management.</p>
     {:else if device.mode === 'relay' && !device.relayStatus}
       <p class="warn-text">
         Pairing stays locked until this signer answers an authenticated status request. Retry the WiFi
         connection; a relay subscription alone does not prove which operator key the signer accepts.
+      </p>
+    {:else if device.mode === 'relay' && device.relayConfiguredRelays === null}
+      <p class="hint">Reading this signer's active configured relays before enabling phone pairing…</p>
+    {:else if device.mode === 'relay' && (device.relayConfiguredRelays?.length ?? 0) === 0}
+      <p class="warn-text">
+        This signer did not report an active relay route, so pairing stays locked. Sapwood will not
+        export cached relay addresses.
       </p>
     {:else if !ready}
       <p class="warn-text">
@@ -164,7 +260,7 @@
       </p>
       <button class="btn btn-secondary btn-sm" onclick={startReveal}>Pair a device</button>
 
-    {:else if !link}
+    {:else if !activeLink}
       <p class="hint">
         Set a PIN. You enter it on the phone to unlock the link, so a photo or a saved copy of the QR
         is useless without it. A short phrase is stronger than digits.
@@ -183,7 +279,9 @@
           spellcheck="false"
           data-1p-ignore
           data-lpignore="true"
-          onkeydown={(e) => { if (e.key === 'Enter' && pin.length >= MIN_PIN) showProtected() }}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' && pin.length >= MIN_PIN && !building) showProtected()
+          }}
         />
       </label>
       <div class="handoff-actions">

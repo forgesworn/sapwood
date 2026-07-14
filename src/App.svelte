@@ -8,6 +8,7 @@
     importNotice, pendingImport, confirmPendingImport, dismissPendingImport,
     pendingPin, submitPin, dismissPin,
     handoffConnection, retryHandoffConnection, dismissHandoffConnection,
+    type HandoffFailure, type HandoffProgressStage,
   } from './lib/import-link.svelte.js'
   import { nip19 } from 'nostr-tools'
 
@@ -53,6 +54,30 @@
   $effect(() => { if (!device.connected) view = 'home' })
 
   const showBottomNav = $derived(device.connected && view === 'advanced')
+
+  const handoffProgress: Array<{ stage: HandoffProgressStage; label: string }> = [
+    { stage: 'opening-relays', label: 'Opening secure relay connection' },
+    { stage: 'request-published', label: 'Signed status request sent to relays' },
+    { stage: 'waiting-for-signer', label: 'Waiting for the signer to answer' },
+    { stage: 'response-authenticated', label: 'Signer response authenticated' },
+  ]
+
+  function handoffProgressIndex(stage: HandoffProgressStage): number {
+    return handoffProgress.findIndex((step) => step.stage === stage)
+  }
+
+  function handoffStageLabel(stage: HandoffProgressStage): string {
+    return handoffProgress[handoffProgressIndex(stage)]?.label ?? 'Connecting remotely'
+  }
+
+  function handoffFailureTitle(failure: HandoffFailure): string {
+    if (failure === 'relay-open-failed') return 'Phone paired, but no relay connection opened'
+    if (failure === 'request-publish-failed') return 'Phone paired, but the signed request was not accepted'
+    if (failure === 'signer-response-timeout') return 'Phone paired, but the signer did not answer'
+    if (failure === 'credential-unavailable') return 'This pairing credential is no longer available'
+    if (failure === 'connection-lost') return 'Phone paired, but the relay connection closed'
+    return 'Phone paired, but the remote connection stopped'
+  }
 </script>
 
 <main class:has-bottom-nav={showBottomNav}>
@@ -137,10 +162,12 @@
     <div class="import-banner" role="status">
       <span>
         {handoffConnection.phase === 'connecting'
-          ? 'Phone paired. Connecting remotely…'
+          ? `Phone paired. ${handoffStageLabel(handoffConnection.stage)}…`
           : handoffConnection.phase === 'error'
             ? 'Phone paired. The operator key is saved; retry the internet connection below.'
-          : 'Operator key loaded. You can manage this signer from here.'}
+          : handoffConnection.phase === 'connected'
+            ? 'Phone paired. Signer response authenticated; remote management is ready.'
+            : 'Operator key loaded. You can manage this signer from here.'}
       </span>
       <button class="import-dismiss" onclick={() => (importNotice.shown = false)} aria-label="Dismiss">×</button>
     </div>
@@ -148,28 +175,50 @@
 
   <!-- On the connected Home the signer card owns the connection state + Disconnect,
        so the picker only shows when disconnected or in the Advanced cockpit. -->
-  {#if !device.connected && handoffConnection.phase === 'connecting'}
-    <section class="card card--raised handoff-connect" role="status" data-testid="handoff-connect-state">
-      <span class="handoff-spinner" aria-hidden="true"></span>
+  {#if !device.connected && (handoffConnection.phase === 'connecting' || handoffConnection.phase === 'error')}
+    <section
+      class="card card--raised handoff-connect"
+      class:handoff-connect--error={handoffConnection.phase === 'error'}
+      role={handoffConnection.phase === 'error' ? 'alert' : 'status'}
+      data-testid="handoff-connect-state"
+    >
+      {#if handoffConnection.phase === 'connecting'}
+        <span class="handoff-spinner" aria-hidden="true"></span>
+      {/if}
       <div>
-        <h2>Connecting to your signer over the internet…</h2>
-        <p>
-          Your phone can use mobile data or Wi-Fi. The signer can stay powered on anywhere;
-          this authenticated check stops after 45 seconds and then offers a retry.
-        </p>
-      </div>
-    </section>
-  {:else if !device.connected && handoffConnection.phase === 'error'}
-    <section class="card card--raised handoff-connect handoff-connect--error" role="alert" data-testid="handoff-connect-state">
-      <div>
-        <h2>Phone paired, but the signer did not answer over the internet</h2>
-        <p>
-          Your phone can use mobile data or Wi-Fi. {handoffConnection.error}
-        </p>
-        <div class="handoff-connect-actions">
-          <button class="btn btn-primary" onclick={retryHandoffConnection}>Retry connection</button>
-          <button class="btn btn-ghost" onclick={dismissHandoffConnection}>Connect another signer</button>
-        </div>
+        {#if handoffConnection.phase === 'connecting'}
+          <h2>Connecting to your signer over the internet…</h2>
+          <p>
+            Your phone can use mobile data or Wi-Fi. The signer can stay powered on anywhere;
+            this authenticated check stops after 45 seconds and then offers a retry.
+          </p>
+        {:else}
+          <h2>{handoffFailureTitle(handoffConnection.failure)}</h2>
+          <p>This connection runs over the internet; your phone can use mobile data or Wi-Fi. {handoffConnection.error}</p>
+        {/if}
+
+        <ol class="handoff-progress" aria-label="Remote connection progress">
+          {#each handoffProgress as step, index}
+            <li
+              class:handoff-progress--done={index < handoffProgressIndex(handoffConnection.stage)}
+              class:handoff-progress--active={index === handoffProgressIndex(handoffConnection.stage) && handoffConnection.phase === 'connecting'}
+              class:handoff-progress--failed={index === handoffProgressIndex(handoffConnection.stage) && handoffConnection.phase === 'error'}
+              aria-current={index === handoffProgressIndex(handoffConnection.stage) ? 'step' : undefined}
+            >
+              <span class="handoff-progress-marker" aria-hidden="true">
+                {index < handoffProgressIndex(handoffConnection.stage) ? '✓' : index + 1}
+              </span>
+              <span>{step.label}</span>
+            </li>
+          {/each}
+        </ol>
+
+        {#if handoffConnection.phase === 'error'}
+          <div class="handoff-connect-actions">
+            <button class="btn btn-primary" onclick={retryHandoffConnection}>Retry connection</button>
+            <button class="btn btn-ghost" onclick={dismissHandoffConnection}>Connect another signer</button>
+          </div>
+        {/if}
       </div>
     </section>
   {:else if !device.connected || view === 'advanced'}
@@ -239,6 +288,38 @@
     animation: handoff-spin 0.9s linear infinite;
   }
   .handoff-connect--error { border-color: var(--amber); }
+  .handoff-progress {
+    list-style: none;
+    display: grid;
+    gap: 0.45rem;
+    margin: 1rem 0 0;
+    padding: 0;
+  }
+  .handoff-progress li {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+  .handoff-progress-marker {
+    width: 1.3rem;
+    height: 1.3rem;
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid var(--text-dim);
+    border-radius: 50%;
+    font-size: 0.68rem;
+  }
+  .handoff-progress--done,
+  .handoff-progress--active { color: var(--green) !important; }
+  .handoff-progress--done .handoff-progress-marker,
+  .handoff-progress--active .handoff-progress-marker { border-color: var(--green); }
+  .handoff-progress--active .handoff-progress-marker { box-shadow: var(--green-glow); }
+  .handoff-progress--failed { color: var(--amber) !important; }
+  .handoff-progress--failed .handoff-progress-marker { border-color: var(--amber); }
   .handoff-connect-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
   @keyframes handoff-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .handoff-spinner { animation: none; } }

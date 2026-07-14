@@ -28,9 +28,34 @@ interface Pending {
   resolve: (result: Record<string, unknown>) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
+  republishTimer: ReturnType<typeof setInterval> | null
+  /** Every fresh read attempt belongs to this one logical operation. A reply
+   * to any alias settles it and removes every alias atomically. */
+  ids: Set<string>
+}
+
+export interface ReadRepublishProgress {
+  /** A signed event was successfully handed to the relay pool. */
+  onPublishSubmitted?: () => void
+  /** At least one relay acknowledged the event. */
+  onPublishAccepted?: () => void
 }
 
 type RelayPool = Pick<SimplePool, 'ensureRelay' | 'subscribe' | 'publish' | 'destroy'>
+
+/** nostr-tools pingpong uses Promise.any internally. Keep reconnect enabled on
+ * older WebKit, but disable only optional ping health checks when that ES2021
+ * API is missing. Core connection/publish selection uses firstFulfilled below. */
+export function relayPoolCompatibilityOptions(): { enablePing: boolean; enableReconnect: true } {
+  return {
+    enablePing: typeof (Promise as unknown as { any?: unknown }).any === 'function',
+    enableReconnect: true,
+  }
+}
+
+function defaultRelayPool(): SimplePool {
+  return new SimplePool(relayPoolCompatibilityOptions())
+}
 
 const RELAY_CONNECT_TIMEOUT_MS = 10_000
 
@@ -38,6 +63,43 @@ function abortError(signal?: AbortSignal): Error {
   return signal?.reason instanceof Error
     ? signal.reason
     : new DOMException('relay connection aborted', 'AbortError')
+}
+
+/** Safari gained AbortSignal.throwIfAborted later than AbortController itself.
+ * Keep the mobile handoff on the older, widely-supported `aborted` contract. */
+export function throwIfSignalAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError(signal)
+}
+
+/** First fulfilled promise without relying on ES2021 Promise.any. Older iPhone
+ * WebKit can run Sapwood while lacking that static method entirely. */
+export class FirstFulfilledError extends Error {
+  readonly errors: unknown[]
+
+  constructor(errors: unknown[]) {
+    super('every promise was rejected')
+    this.name = 'FirstFulfilledError'
+    this.errors = errors
+  }
+}
+
+export function firstFulfilled<T>(values: Iterable<PromiseLike<T> | T>): Promise<T> {
+  const entries = Array.from(values)
+  return new Promise<T>((resolve, reject) => {
+    if (entries.length === 0) {
+      reject(new FirstFulfilledError([]))
+      return
+    }
+    const errors = new Array<unknown>(entries.length)
+    let rejected = 0
+    entries.forEach((entry, index) => {
+      Promise.resolve(entry).then(resolve, (error) => {
+        errors[index] = error
+        rejected += 1
+        if (rejected === entries.length) reject(new FirstFulfilledError(errors))
+      })
+    })
+  })
 }
 
 interface ManagementAttempt {
@@ -154,7 +216,7 @@ export class RelayTransport {
     devicePubHex: string,
     relays: string[],
     opSkHex: string,
-    pool: RelayPool = new SimplePool({ enablePing: true, enableReconnect: true }),
+    pool: RelayPool = defaultRelayPool(),
   ) {
     if (!/^[0-9a-f]{64}$/i.test(devicePubHex)) throw new Error('device pubkey must be 64 hex chars')
     if (!relays.length) throw new Error('at least one relay is required')
@@ -173,7 +235,7 @@ export class RelayTransport {
   async connect(signal?: AbortSignal): Promise<void> {
     if (this.closed) throw new Error('transport closed')
     if (this.sub) return
-    signal?.throwIfAborted()
+    throwIfSignalAborted(signal)
 
     if (signal) {
       this.abortSignal = signal
@@ -182,11 +244,11 @@ export class RelayTransport {
     }
 
     try {
-      await Promise.any(this.relays.map((relay) => this.pool.ensureRelay(relay, {
+      await firstFulfilled(this.relays.map((relay) => this.pool.ensureRelay(relay, {
         connectionTimeout: RELAY_CONNECT_TIMEOUT_MS,
         abort: signal,
       })))
-      signal?.throwIfAborted()
+      throwIfSignalAborted(signal)
     } catch (error) {
       this.unbindAbort()
       if (signal?.aborted) throw abortError(signal)
@@ -223,11 +285,19 @@ export class RelayTransport {
   }
 
   private rejectPending(error: Error): void {
-    for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timer)
-      this.pending.delete(id)
-      pending.reject(error)
+    for (const id of [...this.pending.keys()]) {
+      this.removePending(id)?.reject(error)
     }
+  }
+
+  private removePending(id: string): Pending | undefined {
+    const pending = this.pending.get(id)
+    if (!pending) return undefined
+    clearTimeout(pending.timer)
+    if (pending.republishTimer) clearInterval(pending.republishTimer)
+    for (const alias of pending.ids) this.pending.delete(alias)
+    pending.ids.clear()
+    return pending
   }
 
   private routeEvent(ev: { pubkey: string; content: string }): void {
@@ -245,10 +315,8 @@ export class RelayTransport {
       console.warn('[hw] relay: a reply from the signer could not be decrypted (operator-key mismatch?)')
       return
     }
-    const p = this.pending.get(resp.id)
+    const p = this.removePending(resp.id)
     if (!p) { console.warn(`[hw] relay: reply id ${resp.id} matched no pending request`); return }
-    clearTimeout(p.timer)
-    this.pending.delete(resp.id)
     if (resp.error) p.reject(new Error(resp.error))
     else p.resolve(resp.result ?? {})
   }
@@ -283,50 +351,126 @@ export class RelayTransport {
     return result
   }
 
+  /** Retry one idempotent read while waiting for its reply.
+   * This exists for protected phone handoff: the signer may reconnect just
+   * after the phone's first ephemeral management event was delivered, or its
+   * first response may be lost. Each retry gets a fresh inner request id,
+   * NIP-44 ciphertext, and signed Nostr event. All ids share one deadline and
+   * cleanup owner, so a valid response to any attempt settles the operation.
+   * Mutations and unknown future methods are rejected here rather than ever
+   * gaining automatic retry semantics. */
+  requestReadWithRepublish(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = 35_000,
+    republishIntervalMs = 5_000,
+    progress: ReadRepublishProgress = {},
+  ): Promise<Record<string, unknown>> {
+    if (requiresManagementMutationChallenge(method)) {
+      return Promise.reject(new Error('automatic republish is restricted to reviewed read-only management methods'))
+    }
+    if (!Number.isFinite(republishIntervalMs) || republishIntervalMs <= 0) {
+      return Promise.reject(new Error('republish interval must be positive'))
+    }
+    return this.requestRaw(method, params, timeoutMs, undefined, republishIntervalMs, progress)
+  }
+
   private requestRaw(
     method: string,
     params: Record<string, unknown>,
     timeoutMs: number,
     mutationChallenge?: string,
+    republishIntervalMs?: number,
+    progress?: ReadRepublishProgress,
   ): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error('transport closed'))
     if (!this.sub) return Promise.reject(new Error('not connected'))
-    const id = newManagementRequestId()
-    const content = encrypt(JSON.stringify(
-      managementRequestPayload(id, method, params, mutationChallenge),
-    ), this.ck)
-    const event = finalizeEvent(
-      {
-        kind: MGMT_KIND,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [['p', this.devicePub]],
-        content,
-      },
-      this.sk,
-    )
+    const firstId = newManagementRequestId()
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id)
+        if (!this.removePending(firstId)) return
         console.warn(`[hw] relay: ${method} timed out after ${timeoutMs}ms — the signer never replied (offline, wrong relay, or operator-key mismatch)`)
         reject(new Error(`timeout waiting for device (${method})`))
       }, timeoutMs)
-      this.pending.set(id, { resolve, reject, timer })
-      // publish returns one promise per relay; a single accept is enough. In
-      // nostr-tools 2.x a failed ensureRelay can resolve with a
-      // "connection failure:" string, so turn that false success back into a
-      // rejection before Promise.any selects it.
-      const publishes = this.pool.publish(this.relays, event).map((published) =>
-        published.then((reason) => {
-          if (/^connection failure:/i.test(reason)) throw new Error(reason)
-          return reason
-        }))
-      Promise.any(publishes).catch(() => {
-        if (!this.pending.has(id)) return
-        clearTimeout(timer)
-        this.pending.delete(id)
+      const pending: Pending = {
+        resolve,
+        reject,
+        timer,
+        republishTimer: null,
+        ids: new Set([firstId]),
+      }
+      this.pending.set(firstId, pending)
+      let publishSubmittedReported = false
+      let publishAcceptedReported = false
+
+      const publishFailed = () => {
+        if (!this.pending.has(firstId)) return
+        // A protected read handoff keeps the logical operation pending and
+        // retries with a fresh id. Its overall timeout/AbortSignal still owns
+        // cleanup. Ordinary reads preserve their fail-fast behaviour.
+        if (republishIntervalMs) return
+        this.removePending(firstId)
         console.warn(`[hw] relay: ${method} could not be published to any relay ${JSON.stringify(this.relays)}`)
         reject(new Error('failed to publish to any relay'))
-      })
+      }
+      const publish = (requestId: string) => {
+        if (!this.pending.has(firstId)) return
+        try {
+          // Fresh inner and outer ids are both essential. The signer suppresses
+          // a repeated inner id after processing it, so reusing one could never
+          // recover when only the first response was lost.
+          const payload = JSON.stringify(managementRequestPayload(
+            requestId,
+            method,
+            params,
+            mutationChallenge,
+          ))
+          const event = finalizeEvent(
+            {
+              kind: MGMT_KIND,
+              created_at: Math.floor(Date.now() / 1000),
+              tags: [['p', this.devicePub]],
+              content: encrypt(payload, this.ck),
+            },
+            this.sk,
+          )
+          // publish returns one promise per relay; a single accept is enough.
+          // nostr-tools 2.x can resolve a failed connection with a
+          // "connection failure:" string, so turn that false success back into
+          // a rejection before the first-fulfilled selector accepts it.
+          const publishes = this.pool.publish(this.relays, event).map((published) =>
+            published.then((reason) => {
+              if (/^connection failure:/i.test(reason)) throw new Error(reason)
+              return reason
+            }))
+          if (publishes.length === 0) {
+            publishFailed()
+            return
+          }
+          if (!publishSubmittedReported) {
+            publishSubmittedReported = true
+            try { progress?.onPublishSubmitted?.() } catch { /* progress is advisory */ }
+          }
+          void firstFulfilled(publishes).then(() => {
+            if (!this.pending.has(firstId) || publishAcceptedReported) return
+            publishAcceptedReported = true
+            try { progress?.onPublishAccepted?.() } catch { /* progress is advisory */ }
+          }, publishFailed)
+        } catch {
+          publishFailed()
+        }
+      }
+
+      if (republishIntervalMs) {
+        pending.republishTimer = setInterval(() => {
+          if (!this.pending.has(firstId)) return
+          const retryId = newManagementRequestId()
+          pending.ids.add(retryId)
+          this.pending.set(retryId, pending)
+          publish(retryId)
+        }, republishIntervalMs)
+      }
+      publish(firstId)
     })
   }
 

@@ -15,7 +15,12 @@ import { policiesEqual } from './client-policy.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
-import { RelayTransport } from './relay-transport.js'
+import {
+  FirstFulfilledError,
+  firstFulfilled,
+  RelayTransport,
+  throwIfSignalAborted,
+} from './relay-transport.js'
 import { getOperatorCandidates } from './op-mgmt.js'
 import {
   clearPendingNetworkHandoff, networkRecoveryRelays, pendingNetworkHandoff,
@@ -75,6 +80,19 @@ export interface UsbNetworkState {
   password_set?: boolean
   op_mgmt?: string
   recovery_ok: boolean
+  /** A non-null value means the stored active route is not proof of the route
+   * this boot is actually trying. Phone handoff must remain locked until the
+   * firmware reports a terminal state. */
+  trial: {
+    transaction_id: string
+    revision: number
+    phase: 'staged' | 'trying' | 'committed'
+    mode: 'usb' | 'wifi'
+    ssid: string
+    relays: string[]
+    password_set: boolean
+    attempted: boolean
+  } | null
 }
 
 export type RemotePasswordChange =
@@ -149,6 +167,10 @@ export const device = $state({
   /** Relay: the relays this signer is reachable on (set on a relay connect). A
    *  nostrconnect app can only pair when it shares one of these. */
   relays: [] as string[],
+  /** Relay: exact active relays read back through authenticated management.
+   * `relays` may temporarily be an A+B recovery union; only this device-proven
+   * set is safe to export in a phone handoff. Null means not proven yet. */
+  relayConfiguredRelays: null as string[] | null,
   /** Relay: the operator pubkey Sapwood signs management with (must match the device's baked op_mgmt). */
   operatorPub: '',
   /** Exact relay-management target, independent of the display/master response. */
@@ -512,6 +534,7 @@ const MGMT_WRITE_TIMEOUT_MS = 35_000
  * up to ~10s of connect timeout on top of the normal management round trip. */
 const MGMT_DIAL_TIMEOUT_MS = 50_000
 const RELAY_STATUS_TIMEOUT_MS = 75_000
+const HANDOFF_STATUS_REPUBLISH_MS = 5_000
 const RELAY_POLL_MS = 4_000
 let lastRelayRefreshLog = ''
 const SLOT_FINGERPRINT_RE = /^[0-9a-f]{64}$/
@@ -549,6 +572,13 @@ interface RelaySelection {
   status?: Record<string, unknown>
 }
 
+export type RelayConnectProgress =
+  | 'opening-relays'
+  | 'relay-opened'
+  | 'request-published'
+  | 'waiting-for-signer'
+  | 'response-authenticated'
+
 function closeRelayTransports(transports: RelayTransport[], keep: RelayTransport): void {
   for (const t of transports) {
     if (t !== keep) t.close()
@@ -560,6 +590,7 @@ async function selectRelayTransport(
   relays: string[],
   requiredOperatorPubHex?: string,
   signal?: AbortSignal,
+  onProgress?: (stage: RelayConnectProgress) => void,
 ): Promise<RelaySelection> {
   const operators = getOperatorCandidates()
   if (requiredOperatorPubHex) {
@@ -569,11 +600,22 @@ async function selectRelayTransport(
     const transport = new RelayTransport(devicePubHex, relays, operator.skHex)
     try {
       await transport.connect(signal)
-      signal?.throwIfAborted()
+      throwIfSignalAborted(signal)
+      onProgress?.('relay-opened')
       // A phone handoff is not complete merely because a relay subscription
       // opened. Require an authenticated reply from this exact signer/operator.
-      const status = await transport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
-      signal?.throwIfAborted()
+      const status = await transport.requestReadWithRepublish(
+        'get_status',
+        {},
+        RELAY_STATUS_TIMEOUT_MS,
+        HANDOFF_STATUS_REPUBLISH_MS,
+        {
+          onPublishSubmitted: () => onProgress?.('request-published'),
+          onPublishAccepted: () => onProgress?.('waiting-for-signer'),
+        },
+      )
+      throwIfSignalAborted(signal)
+      onProgress?.('response-authenticated')
       return { transport, status }
     } catch (error) {
       transport.close()
@@ -590,7 +632,7 @@ async function selectRelayTransport(
   console.log(`[hw] relay connect → signer ${devicePubHex.slice(0, 8)}… on [${relays.join(', ')}] trying ${operators.length} saved operator keys`)
   const transports = operators.map((op) => new RelayTransport(devicePubHex, relays, op.skHex))
   try {
-    const selection = await Promise.any(transports.map(async (transport): Promise<RelaySelection> => {
+    const selection = await firstFulfilled(transports.map(async (transport): Promise<RelaySelection> => {
       await transport.connect()
       const status = await transport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
       return { transport, status }
@@ -600,7 +642,7 @@ async function selectRelayTransport(
     return selection
   } catch (e) {
     transports.forEach((t) => t.close())
-    if (e instanceof AggregateError) {
+    if (e instanceof FirstFulfilledError) {
       const first = e.errors.find((err) => err instanceof Error) as Error | undefined
       throw first ?? new Error('timeout waiting for device (get_status)')
     }
@@ -649,23 +691,27 @@ export async function connectRelay(
   label?: string,
   requiredOperatorPubHex?: string,
   signal?: AbortSignal,
+  onProgress?: (stage: RelayConnectProgress) => void,
 ) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   // A killed/reloaded mobile tab may have left an activated handoff whose
   // terminal route is not known yet. Subscribe to B + A from the password-free
   // journal so either commit or rollback remains reachable.
   const recoveryRelays = networkRecoveryRelays(devicePubHex, relays)
+  onProgress?.('opening-relays')
   const { transport: t, status } = await selectRelayTransport(
     devicePubHex,
     recoveryRelays,
     requiredOperatorPubHex,
     signal,
+    onProgress,
   )
   if (signal?.aborted) {
     t.close()
-    signal.throwIfAborted()
+    throwIfSignalAborted(signal)
   }
   relayTransport = t
+  resetRelayRefreshGuard()
   device.connectionGeneration += 1
   device.connected = true
   device.mode = 'relay'
@@ -677,6 +723,7 @@ export async function connectRelay(
   device.slots = []
   device.signerActivity = []
   device.relays = recoveryRelays
+  device.relayConfiguredRelays = null
   device.relayStatus = null
   lastRelayAuditSeq = 0
   rememberDevice(devicePubHex, relays, label)
@@ -700,13 +747,57 @@ export async function connectRelay(
  *  and piling more requests onto a struggling connection only makes it worse, so
  *  a tick that finds one already in flight simply skips. */
 let relayRefreshing = false
+let relayRefreshRun = 0
+let relayNetworkConfigUnsupported = false
+let relayAuthorityEpoch = 0
+
+function resetRelayRefreshGuard(): void {
+  relayRefreshRun += 1
+  relayRefreshing = false
+  relayNetworkConfigUnsupported = false
+  relayAuthorityEpoch += 1
+}
+
+function invalidateRelayAuthorityReads(): void {
+  relayAuthorityEpoch += 1
+}
+
+function relayRefreshIsCurrent(
+  current: RelayTransport,
+  generation: number,
+  authorityEpoch: number,
+): boolean {
+  return relayTransport === current
+    && device.connected
+    && device.mode === 'relay'
+    && device.connectionGeneration === generation
+    && relayAuthorityEpoch === authorityEpoch
+}
+
 async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
   if (!relayTransport || relayRefreshing) return
+  const current = relayTransport
+  const generation = device.connectionGeneration
+  const authorityEpoch = relayAuthorityEpoch
+  const run = ++relayRefreshRun
   relayRefreshing = true
   try {
-    const raw = prefetchedStatus ?? await relayTransport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
+    const raw = prefetchedStatus ?? await current.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS)
+    if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     applyRelayStatus(raw)
-    const res = await relayTransport.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
+    const configuredRead = await readRelayConfiguredRelays(current)
+    if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
+    if (configuredRead.unsupported) relayNetworkConfigUnsupported = true
+    const configuredRelays = configuredRead.relays
+    const previousConfiguredRelays = device.relayConfiguredRelays
+    device.relayConfiguredRelays = configuredRelays
+    if (configuredRelays?.length
+      && (!previousConfiguredRelays
+        || !sameRelayList(previousConfiguredRelays, configuredRelays))) {
+      replaceDeviceRelays(current.devicePub, configuredRelays)
+    }
+    const res = await current.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
+    if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     const clients = (res.clients as Array<Record<string, unknown>>) ?? []
     // Slot URIs are reusable credentials and numeric indices compact on revoke.
     // Never carry an index-keyed cache across a fresh authoritative listing;
@@ -731,14 +822,52 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         : undefined,
     }))
     await recoverPendingNetworkRoute()
+    if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     device.error = null
     lastRelayRefreshLog = ''
   } catch (e) {
+    if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     const message = e instanceof Error ? e.message : 'Relay request failed'
+    // A failed authenticated cycle cannot leave its preceding status/route
+    // masquerading as current authority for phone pairing.
+    device.relayStatus = null
+    device.relayConfiguredRelays = null
     device.error = message
     logRelayRefreshIssue(message)
   } finally {
-    relayRefreshing = false
+    if (relayRefreshRun === run) relayRefreshing = false
+  }
+}
+
+/** Resolve the exact configured relay route from the same authenticated signer
+ * session used for status. Cached/imported addresses only locate the signer;
+ * they are never exported to another phone as if the device had confirmed
+ * them. A live network trial remains intentionally unproven until terminal. */
+interface RelayConfiguredRead {
+  relays: string[] | null
+  unsupported: boolean
+}
+
+async function readRelayConfiguredRelays(current: RelayTransport): Promise<RelayConfiguredRead> {
+  if (relayNetworkConfigUnsupported) return { relays: [], unsupported: true }
+  try {
+    const state = await getNetworkConfigFrom(current, NETWORK_PROBE_TIMEOUT_MS)
+    // Active A is not current-route proof while firmware is serving a live B
+    // trial. Returning null explicitly invalidates any prior poll's A proof.
+    if (state.trial) return { relays: null, unsupported: false }
+    return {
+      relays: state.active.mode === 'wifi' ? [...state.active.relays] : [],
+      unsupported: false,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    // Old firmware cannot provide an authenticated route. Mark the read as
+    // terminally unavailable so the 4s poll does not hammer an unknown method;
+    // the handoff UI remains failed closed with upgrade guidance.
+    if (/unknown method.*get_network_config/i.test(message)) {
+      return { relays: [], unsupported: true }
+    }
+    throw error
   }
 }
 
@@ -753,11 +882,14 @@ let recoveringNetworkRoute = false
 async function recoverPendingNetworkRoute(): Promise<void> {
   const current = relayTransport
   if (!current || recoveringNetworkRoute) return
+  const generation = device.connectionGeneration
+  const authorityEpoch = relayAuthorityEpoch
   const pending = pendingNetworkHandoff(current.devicePub)
   if (!pending) return
   recoveringNetworkRoute = true
   try {
     const state = await getNetworkConfigFrom(current, NETWORK_PROBE_TIMEOUT_MS)
+    if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     const terminal = state.last_result?.transaction_id === pending.transactionId
       && state.last_result.revision === pending.revision
       ? state.last_result.outcome
@@ -785,6 +917,9 @@ async function recoverPendingNetworkRoute(): Promise<void> {
 
     // Narrow this live session too. Failure is non-destructive: the current
     // union remains connected, while the next reload uses the proven route.
+    let liveTransport = current
+    let liveGeneration = generation
+    let liveAuthorityEpoch = authorityEpoch
     if (!sameRelayList(current.relays, terminalRelays)) {
       const operators = getOperatorCandidates()
       const operator = operators.find((candidate) => candidate.pubHex === current.operatorPub)
@@ -793,20 +928,31 @@ async function recoverPendingNetworkRoute(): Promise<void> {
         const narrowed = new RelayTransport(current.devicePub, terminalRelays, operator.skHex)
         try {
           await narrowed.connect()
-          await narrowed.request('get_status', {}, NETWORK_PROBE_TIMEOUT_MS)
-          if (relayTransport === current) {
-            relayTransport = narrowed
-            current.close()
-          } else {
+          if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) {
             narrowed.close()
+            return
           }
+          await narrowed.request('get_status', {}, NETWORK_PROBE_TIMEOUT_MS)
+          if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) {
+            narrowed.close()
+            return
+          }
+          relayTransport = narrowed
+          resetRelayRefreshGuard()
+          device.connectionGeneration += 1
+          liveTransport = narrowed
+          liveGeneration = device.connectionGeneration
+          liveAuthorityEpoch = relayAuthorityEpoch
+          current.close()
         } catch {
           narrowed.close()
         }
       }
     }
+    if (!relayRefreshIsCurrent(liveTransport, liveGeneration, liveAuthorityEpoch)) return
     device.relays = [...terminalRelays]
-    device.portInfo = `${npubShort(current.devicePub)} · ${relaySummary(terminalRelays)}`
+    device.relayConfiguredRelays = [...terminalRelays]
+    device.portInfo = `${npubShort(liveTransport.devicePub)} · ${relaySummary(terminalRelays)}`
     addLog(`Recovered network transaction ${pending.transactionId}; using its ${terminal === 'committed' ? 'committed' : 'last known-good'} relay route.`)
   } catch {
     // Still pending/offline: keep A+B and retry after the next successful poll.
@@ -1013,13 +1159,16 @@ export async function disconnect() {
   device.slotUris = {} // session-only links; don't carry them to the next signer
   device.wifiJoinError = null
   if (device.mode === 'serial') {
+    // Any late mutation continuation is generation-stale and must not be able
+    // to read/publish authority from a subsequently attached signer.
+    usbAuthorityMutationToken = null
     await serialTransport.disconnect()
   } else if (device.mode === 'http') {
     await httpTransport.disconnect()
   } else if (device.mode === 'relay') {
     relayTransport?.close()
     relayTransport = null
-    relayRefreshing = false // let the next connection's first refresh run
+    resetRelayRefreshGuard() // let the next connection's first refresh run
     lastRelayAuditSeq = 0
     lastRelayRefreshLog = ''
     device.connected = false
@@ -1029,6 +1178,7 @@ export async function disconnect() {
     device.masters = []
     device.slots = []
     device.relays = []
+    device.relayConfiguredRelays = null
     device.signerActivity = []
     device.relayStatus = null
   }
@@ -1172,7 +1322,9 @@ export async function abortNetworkConfig(transactionId: string): Promise<RemoteN
     || response.aborted !== true) {
     throw new Error('The signer did not confirm that the staged network change was discarded.')
   }
-  return getNetworkConfigFrom(relayTransport)
+  const after = await getNetworkConfigFrom(relayTransport)
+  if (!after.trial) device.relayConfiguredRelays = [...after.active.relays]
+  return after
 }
 
 function cleanRelaySet(
@@ -1380,6 +1532,7 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
     // authenticated active config is the exact committed A route and the
     // default candidate relay set for a password/SSID-only patch.
     originalRelays = cleanRelaySet(before.active.relays)
+    device.relayConfiguredRelays = before.trial ? null : [...originalRelays]
     nextRelays = safePatch.relays ?? originalRelays
     validateRemoteCandidateSerializedSize(
       { ...before.active, relays: originalRelays },
@@ -1476,6 +1629,10 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
 
     // Stage is inert and power-loss safe. Only this second authenticated call
     // asks firmware to try the candidate and schedule a reboot after replying.
+    // From this point either route may become current, so phone pairing stays
+    // locked until commit/rollback proves one exact terminal relay set.
+    invalidateRelayAuthorityReads()
+    device.relayConfiguredRelays = null
     try {
       const activation = await originalTransport.request(
         'activate_network_config',
@@ -1501,7 +1658,7 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
 
     relayTransport = handoff
     switched = true
-    relayRefreshing = false
+    resetRelayRefreshGuard()
     // Keep the original old-relays-only transport subscribed but idle until
     // commit. It is the clean rollback route if the candidate cannot prove
     // itself; the union handoff is used only to issue the abort.
@@ -1607,6 +1764,7 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
     handoff.close()
     originalTransport.close()
     device.relays = [...nextRelays]
+    device.relayConfiguredRelays = [...nextRelays]
     device.portInfo = `${npubShort(originalTransport.devicePub)} · ${relaySummary(nextRelays)}`
     device.error = null
     addLog(`Network transaction ${transactionId} committed after reconnecting on the staged route.`)
@@ -1631,6 +1789,7 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
       device.relayDevicePub = ''
       device.portInfo = ''
       device.relays = []
+      device.relayConfiguredRelays = null
       throw new Error(`The network change was committed, but Sapwood could not reopen its final relay connection: ${error instanceof Error ? error.message : String(error)}`)
     }
     if (stageAttempted) {
@@ -1658,11 +1817,13 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
       relayTransport = handoff
       const recoveryRelays = networkRecoveryRelays(originalTransport.devicePub, originalRelays)
       device.relays = recoveryRelays
+      device.relayConfiguredRelays = null
       device.portInfo = `${npubShort(originalTransport.devicePub)} · ${relaySummary(recoveryRelays)}`
     } else if (!switched) {
       handoff.close()
       candidateProof.close()
       relayTransport = originalTransport
+      device.relayConfiguredRelays = before.trial ? null : [...originalRelays]
     } else {
       // Return management to the old-relays-only subscription while firmware
       // rolls back. Do not keep publishing subsequent commands to candidate B.
@@ -1670,6 +1831,7 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
       candidateProof.close()
       relayTransport = originalTransport
       device.relays = [...originalRelays]
+      device.relayConfiguredRelays = null
       device.portInfo = `${npubShort(originalTransport.devicePub)} · ${relaySummary(originalRelays)}`
     }
     throw error
@@ -1802,13 +1964,44 @@ function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {
     || !Number.isInteger(value.revision) || Number(value.revision) < 0
     || Number(value.revision) > 0xffffffff || typeof value.recovery_ok !== 'boolean') return null
 
+  let trial: UsbNetworkState['trial'] = null
+  if (value.trial !== null && value.trial !== undefined) {
+    const candidate = record(value.trial)
+    if (!candidate
+      || typeof candidate.transaction_id !== 'string'
+      || !/^[0-9a-f]{32}$/i.test(candidate.transaction_id)
+      || !Number.isInteger(candidate.revision)
+      || Number(candidate.revision) !== Number(value.revision)
+      || (candidate.phase !== 'staged' && candidate.phase !== 'trying' && candidate.phase !== 'committed')
+      || (candidate.mode !== 'usb' && candidate.mode !== 'wifi')
+      || typeof candidate.ssid !== 'string' || candidate.ssid.length > 32
+      || !Array.isArray(candidate.relays) || candidate.relays.length > 8
+      || !candidate.relays.every((relay) => typeof relay === 'string' && relay.startsWith('wss://'))
+      || typeof candidate.password_set !== 'boolean'
+      || (typeof candidate.attempted !== 'boolean'
+        && (!Number.isInteger(candidate.attempted) || Number(candidate.attempted) < 0))) return null
+    trial = {
+      transaction_id: candidate.transaction_id.toLowerCase(),
+      revision: Number(candidate.revision),
+      phase: candidate.phase,
+      mode: candidate.mode,
+      ssid: candidate.ssid,
+      relays: [...candidate.relays] as string[],
+      password_set: candidate.password_set,
+      attempted: typeof candidate.attempted === 'boolean'
+        ? candidate.attempted
+        : Number(candidate.attempted) > 0,
+    }
+  }
+
   const base: UsbNetworkState = {
     version: 1,
     configured: value.configured,
     revision: Number(value.revision),
     recovery_ok: value.recovery_ok,
+    trial,
   }
-  if (!value.configured) return base
+  if (!value.configured) return trial === null ? base : null
   if (value.mode !== 'usb' && value.mode !== 'wifi') return null
   if (typeof value.ssid !== 'string' || value.ssid.length > 32) return null
   if (!Array.isArray(value.relays) || value.relays.length > 8
@@ -1826,10 +2019,29 @@ function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {
   }
 }
 
+let usbAuthorityMutationToken: symbol | null = null
+
+interface UsbNetworkReadOptions {
+  /** The one in-flight mutation allowed to read while public refreshes are
+   * suppressed, preventing an unrelated probe from resurrecting old proof. */
+  mutationToken?: symbol
+  /** Preflight reads obtain a revision without making phone handoff ready. */
+  publishAuthority?: boolean
+}
+
+function usbNetworkReadAllowed(mutationToken?: symbol): boolean {
+  return mutationToken === undefined
+    ? usbAuthorityMutationToken === null
+    : usbAuthorityMutationToken === mutationToken
+}
+
 /** Read this exact signer's redacted USB state. NACK proves old firmware; a
  * timeout remains unknown because the board may merely be rebooting. */
-export async function refreshUsbNetworkState(): Promise<UsbNetworkState | null> {
+async function readUsbNetworkState(
+  { mutationToken, publishAuthority = true }: UsbNetworkReadOptions = {},
+): Promise<UsbNetworkState | null> {
   if (device.mode !== 'serial') return null
+  if (!usbNetworkReadAllowed(mutationToken)) return null
   const generation = device.connectionGeneration
   try {
     const resp = await serialTransport.sendAndReceive(
@@ -1837,7 +2049,8 @@ export async function refreshUsbNetworkState(): Promise<UsbNetworkState | null> 
       [FrameType.GET_NET_CONFIG_RESPONSE, FrameType.NACK],
       20_000,
     )
-    if (generation !== device.connectionGeneration || device.mode !== 'serial') return null
+    if (generation !== device.connectionGeneration || device.mode !== 'serial'
+      || !usbNetworkReadAllowed(mutationToken)) return null
     if (resp.type === FrameType.NACK) {
       device.usbNetworkSupport = 'unsupported'
       device.usbNetworkState = null
@@ -1846,92 +2059,160 @@ export async function refreshUsbNetworkState(): Promise<UsbNetworkState | null> 
     const state = parseUsbNetworkState(resp.payload)
     if (!state) throw new Error('The signer returned malformed network state.')
     device.usbNetworkSupport = 'supported'
-    device.usbNetworkState = state
-    const masterHex = firstMasterHex()
-    if (state.configured && state.mode === 'wifi' && state.relays?.length && masterHex) {
-      replaceDeviceRelays(masterHex, state.relays)
+    if (publishAuthority) {
+      device.usbNetworkState = state
+      const masterHex = firstMasterHex()
+      if (state.configured && state.mode === 'wifi' && state.trial === null
+        && state.relays?.length && masterHex) {
+        replaceDeviceRelays(masterHex, state.relays)
+      }
     }
     return state
   } catch (error) {
     if (generation === device.connectionGeneration && device.mode === 'serial'
+      && usbNetworkReadAllowed(mutationToken)
       && error instanceof Error && /malformed network state/.test(error.message)) {
+      // A stale previously-terminal route must not remain usable when the
+      // signer now reports an unparseable trial/state shape. Lose proof rather
+      // than letting phone pairing export old A.
+      device.usbNetworkState = null
+      device.usbNetworkSupport = 'unknown'
       device.error = error.message
     }
     return null
   }
 }
 
-async function readUsbStateAfterReboot(generation: number): Promise<UsbNetworkState | null> {
+export async function refreshUsbNetworkState(): Promise<UsbNetworkState | null> {
+  return readUsbNetworkState()
+}
+
+async function readUsbStateAfterReboot(
+  generation: number,
+  mutationToken: symbol,
+): Promise<UsbNetworkState | null> {
   // Never resend an ambiguous mutation. Resolve only by read-back after the
   // board has had time to reset into its startup USB service window.
   await new Promise((resolve) => setTimeout(resolve, 750))
   if (generation !== device.connectionGeneration || device.mode !== 'serial') return null
-  return refreshUsbNetworkState()
+  return readUsbNetworkState({ mutationToken })
 }
 
 export async function patchNetworkOverUsb(patch: LocalNetConfigPatch): Promise<UsbNetworkState> {
   if (device.mode !== 'serial') throw new Error('Connect the signer by USB first.')
-  const current = device.usbNetworkState ?? await refreshUsbNetworkState()
-  if (!current?.configured) throw new Error('This firmware cannot safely patch its network settings. Update it over USB first.')
-  const generation = device.connectionGeneration
-  device.awaitingButton = 'Check the signer screen, then hold its confirmation button to change the network.'
-  let acknowledged = false
+  if (usbAuthorityMutationToken) throw new Error('Another USB authority change is already in progress.')
+  const mutationToken = Symbol('patch-network-over-usb')
+  usbAuthorityMutationToken = mutationToken
+  const cached = device.usbNetworkState
+  // Capture then invalidate synchronously. From here until a token-authorised
+  // fresh readback, PhoneHandoff has no operator/relay authority to export.
+  device.usbNetworkState = null
   try {
-    const resp = await serialTransport.sendAndReceive(
-      buildPatchNetConfig(current.revision, patch),
-      [FrameType.ACK, FrameType.NACK],
-      60_000,
-    )
-    if (resp.type === FrameType.NACK) {
-      throw new Error(new TextDecoder().decode(resp.payload) || 'The device rejected the network change.')
+    const current = cached ?? await readUsbNetworkState({
+      mutationToken,
+      publishAuthority: false,
+    })
+    if (!current?.configured) throw new Error('This firmware cannot safely patch its network settings. Update it over USB first.')
+    const frame = buildPatchNetConfig(current.revision, patch)
+    const generation = device.connectionGeneration
+    device.awaitingButton = 'Check the signer screen, then hold its confirmation button to change the network.'
+    let acknowledged = false
+    let explicitFailure: unknown
+    let hasExplicitFailure = false
+    try {
+      const resp = await serialTransport.sendAndReceive(
+        frame,
+        [FrameType.ACK, FrameType.NACK],
+        60_000,
+      )
+      if (resp.type === FrameType.NACK) {
+        explicitFailure = new Error(new TextDecoder().decode(resp.payload) || 'The device rejected the network change.')
+        hasExplicitFailure = true
+      } else {
+        acknowledged = true
+      }
+    } catch (error) {
+      // A reset can race the ACK. Read-back below is the only ambiguity resolver.
+      if (!(error instanceof Error) || !/timeout|disconnect|closed|response/i.test(error.message)) {
+        explicitFailure = error
+        hasExplicitFailure = true
+      }
+    } finally {
+      device.awaitingButton = null
     }
-    acknowledged = true
-  } catch (error) {
-    // A reset can race the ACK. Read-back below is the only ambiguity resolver.
-    if (!(error instanceof Error) || !/timeout|disconnect|closed|response/i.test(error.message)) throw error
+    if (hasExplicitFailure) {
+      // A rejection/cancel is safe to read immediately, but the captured object
+      // is never restored. Only this fresh device response can re-enable QR.
+      await readUsbNetworkState({ mutationToken })
+      throw explicitFailure
+    }
+    const state = await readUsbStateAfterReboot(generation, mutationToken)
+    if (!state?.configured || state.revision <= current.revision) {
+      throw new Error(acknowledged
+        ? 'The signer acknowledged the network change but did not confirm it after reboot.'
+        : 'The network change outcome is unknown. Reconnect by USB and read the signer state; it was not retried.')
+    }
+    return state
   } finally {
-    device.awaitingButton = null
+    if (usbAuthorityMutationToken === mutationToken) usbAuthorityMutationToken = null
   }
-  const state = await readUsbStateAfterReboot(generation)
-  if (!state?.configured || state.revision <= current.revision) {
-    throw new Error(acknowledged
-      ? 'The signer acknowledged the network change but did not confirm it after reboot.'
-      : 'The network change outcome is unknown. Reconnect by USB and read the signer state; it was not retried.')
-  }
-  return state
 }
 
 export async function setOperatorOverUsb(operatorPubHex: string): Promise<UsbNetworkState> {
   if (device.mode !== 'serial') throw new Error('Connect the signer by USB first.')
-  const current = device.usbNetworkState ?? await refreshUsbNetworkState()
-  if (!current?.configured) throw new Error('This firmware does not support safe operator recovery. Update it over USB first.')
   const operator = operatorPubHex.toLowerCase()
   if (!/^[0-9a-f]{64}$/.test(operator)) throw new Error('Operator pubkey must be 64 hexadecimal characters.')
-  const generation = device.connectionGeneration
-  device.awaitingButton = 'Verify the new operator fingerprint on the signer, then hold its confirmation button.'
-  let acknowledged = false
+  if (usbAuthorityMutationToken) throw new Error('Another USB authority change is already in progress.')
+  const mutationToken = Symbol('set-operator-over-usb')
+  usbAuthorityMutationToken = mutationToken
+  const cached = device.usbNetworkState
+  device.usbNetworkState = null
   try {
-    const resp = await serialTransport.sendAndReceive(
-      buildSetOperator(current.revision, operator),
-      [FrameType.ACK, FrameType.NACK],
-      60_000,
-    )
-    if (resp.type === FrameType.NACK) {
-      throw new Error(new TextDecoder().decode(resp.payload) || 'The device rejected the operator change.')
+    const current = cached ?? await readUsbNetworkState({
+      mutationToken,
+      publishAuthority: false,
+    })
+    if (!current?.configured) throw new Error('This firmware does not support safe operator recovery. Update it over USB first.')
+    const frame = buildSetOperator(current.revision, operator)
+    const generation = device.connectionGeneration
+    device.awaitingButton = 'Verify the new operator fingerprint on the signer, then hold its confirmation button.'
+    let acknowledged = false
+    let explicitFailure: unknown
+    let hasExplicitFailure = false
+    try {
+      const resp = await serialTransport.sendAndReceive(
+        frame,
+        [FrameType.ACK, FrameType.NACK],
+        60_000,
+      )
+      if (resp.type === FrameType.NACK) {
+        explicitFailure = new Error(new TextDecoder().decode(resp.payload) || 'The device rejected the operator change.')
+        hasExplicitFailure = true
+      } else {
+        acknowledged = true
+      }
+    } catch (error) {
+      if (!(error instanceof Error) || !/timeout|disconnect|closed|response/i.test(error.message)) {
+        explicitFailure = error
+        hasExplicitFailure = true
+      }
+    } finally {
+      device.awaitingButton = null
     }
-    acknowledged = true
-  } catch (error) {
-    if (!(error instanceof Error) || !/timeout|disconnect|closed|response/i.test(error.message)) throw error
+    if (hasExplicitFailure) {
+      await readUsbNetworkState({ mutationToken })
+      throw explicitFailure
+    }
+    const state = await readUsbStateAfterReboot(generation, mutationToken)
+    if (!state?.configured || state.op_mgmt !== operator || state.revision <= current.revision) {
+      throw new Error(acknowledged
+        ? 'The signer acknowledged the operator change but did not confirm it after reboot.'
+        : 'The operator-change outcome is unknown. Reconnect by USB and read the signer state; it was not retried.')
+    }
+    return state
   } finally {
-    device.awaitingButton = null
+    if (usbAuthorityMutationToken === mutationToken) usbAuthorityMutationToken = null
   }
-  const state = await readUsbStateAfterReboot(generation)
-  if (!state?.configured || state.op_mgmt !== operator || state.revision <= current.revision) {
-    throw new Error(acknowledged
-      ? 'The signer acknowledged the operator change but did not confirm it after reboot.'
-      : 'The operator-change outcome is unknown. Reconnect by USB and read the signer state; it was not retried.')
-  }
-  return state
 }
 
 /** One access point the signer's own radio can see. */
@@ -2128,8 +2409,12 @@ export async function ensureBridgeAuth(): Promise<void> {
 const SERIAL_RTT_MS = 30_000
 
 function lastRelays(): string[] {
+  // During a staged/trying boot the redacted `relays` field is committed A,
+  // not proof of the route currently serving candidate B. Never fall through
+  // to browser-global guesses and embed either stale route in a client URI.
+  if (device.mode === 'serial' && device.usbNetworkState?.trial) return []
   const exact = device.mode === 'serial' && device.usbNetworkState?.configured
-    && device.usbNetworkState.mode === 'wifi'
+    && device.usbNetworkState.mode === 'wifi' && device.usbNetworkState.trial === null
     ? device.usbNetworkState.relays
     : null
   if (exact?.length) return [...exact]
@@ -2369,6 +2654,7 @@ if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: bool
       operatorPub?: string
       relayDevicePub?: string
       relays?: string[]
+      relayConfiguredRelays?: string[] | null
       relayStatus?: RelayStatus | null
       error?: string | null
     } = {},
@@ -2381,6 +2667,11 @@ if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: bool
     device.slots = opts.slots ?? []
     device.operatorPub = opts.operatorPub ?? device.operatorPub
     device.relays = opts.relays ?? (device.mode === 'relay' ? device.relays : [])
+    device.relayConfiguredRelays = device.mode === 'relay'
+      ? (opts.relayConfiguredRelays !== undefined
+        ? opts.relayConfiguredRelays
+        : (opts.relayStatus && opts.relays ? [...opts.relays] : null))
+      : null
     device.relayDevicePub = device.mode === 'relay'
       ? (opts.relayDevicePub
         ?? opts.masters?.map((master) => master.npub).find((npub) => /^[0-9a-f]{64}$/i.test(npub))?.toLowerCase()

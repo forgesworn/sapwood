@@ -15,7 +15,7 @@
 
 import { importOperator, peekOperatorPubHex, pubHexFromSecret } from './op-mgmt.js'
 import { rememberDevice } from './known-devices.js'
-import { connectRelay } from './device.svelte.js'
+import { connectRelay, type RelayConnectProgress } from './device.svelte.js'
 import { nip19 } from 'nostr-tools'
 import { encrypt as nip49Encrypt, decrypt as nip49Decrypt } from 'nostr-tools/nip49'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
@@ -24,6 +24,19 @@ import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 export const importNotice = $state<{ shown: boolean }>({ shown: false })
 
 type HandoffConnectionPhase = 'idle' | 'connecting' | 'connected' | 'error'
+export type HandoffProgressStage =
+  | 'opening-relays'
+  | 'request-published'
+  | 'waiting-for-signer'
+  | 'response-authenticated'
+export type HandoffFailure =
+  | 'none'
+  | 'relay-open-failed'
+  | 'request-publish-failed'
+  | 'signer-response-timeout'
+  | 'credential-unavailable'
+  | 'connection-lost'
+  | 'connection-stopped'
 
 export const HANDOFF_CONNECT_TIMEOUT_MS = 45_000
 
@@ -40,8 +53,18 @@ interface HandoffConnectionTarget {
 export const handoffConnection = $state<{
   phase: HandoffConnectionPhase
   target: HandoffConnectionTarget | null
+  stage: HandoffProgressStage
+  relayOpened: boolean
+  failure: HandoffFailure
   error: string
-}>({ phase: 'idle', target: null, error: '' })
+}>({
+  phase: 'idle',
+  target: null,
+  stage: 'opening-relays',
+  relayOpened: false,
+  failure: 'none',
+  error: '',
+})
 
 let handoffAttempt = 0
 let handoffController: AbortController | null = null
@@ -61,12 +84,92 @@ function abortActiveHandoff(reason: string): void {
   }
 }
 
+const HANDOFF_STAGE_ORDER: HandoffProgressStage[] = [
+  'opening-relays',
+  'request-published',
+  'waiting-for-signer',
+  'response-authenticated',
+]
+
+function updateHandoffProgress(
+  attempt: number,
+  controller: AbortController,
+  progress: RelayConnectProgress,
+): void {
+  if (attempt !== handoffAttempt
+    || controller.signal.aborted
+    || handoffConnection.phase !== 'connecting') return
+  if (progress === 'relay-opened') {
+    handoffConnection.relayOpened = true
+    return
+  }
+  const next = HANDOFF_STAGE_ORDER.indexOf(progress)
+  const current = HANDOFF_STAGE_ORDER.indexOf(handoffConnection.stage)
+  // Progress is monotonic. A late relay publish acknowledgement must never
+  // regress an already-authenticated response on a heavily scheduled phone.
+  if (next >= current) handoffConnection.stage = progress
+}
+
+function failureFromProgress(timedOut: boolean): { failure: HandoffFailure; error: string } {
+  const suffix = timedOut ? ' within 45 seconds.' : '.'
+  if (!handoffConnection.relayOpened) {
+    return {
+      failure: 'relay-open-failed',
+      error: `No secure relay connection was confirmed${suffix} Check this phone's internet access, then retry.`,
+    }
+  }
+  if (handoffConnection.stage === 'opening-relays'
+    || handoffConnection.stage === 'request-published') {
+    return {
+      failure: 'request-publish-failed',
+      error: `A secure relay connection opened, but no relay accepted the signed status request${suffix}`,
+    }
+  }
+  return {
+    failure: 'signer-response-timeout',
+    error: `A relay accepted the signed status request, but the signer did not return an authenticated response${suffix}`,
+  }
+}
+
+/** Map detailed transport failures to a small screenshot-safe vocabulary. Raw
+ * messages may contain relay URLs or implementation details and never reach
+ * the phone UI. */
+function sanitizedHandoffFailure(error: unknown): { failure: HandoffFailure; error: string } {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/imported operator credential is unavailable/i.test(message)) {
+    return {
+      failure: 'credential-unavailable',
+      error: 'The imported pairing credential is no longer available on this phone. Scan the QR again.',
+    }
+  }
+  if (/could not connect to any relay/i.test(message)) return failureFromProgress(false)
+  if (/failed to publish to any relay/i.test(message)) {
+    return {
+      failure: 'request-publish-failed',
+      error: 'A secure relay connection opened, but no relay accepted the signed status request.',
+    }
+  }
+  if (/timeout waiting for device/i.test(message)) return failureFromProgress(false)
+  if (/relay connection closed|transport closed/i.test(message)) {
+    return {
+      failure: 'connection-lost',
+      error: 'The secure relay connection closed before the signer returned an authenticated response.',
+    }
+  }
+  return {
+    failure: 'connection-stopped',
+    error: 'The remote connection stopped before the signer returned an authenticated response.',
+  }
+}
+
 function expireHandoff(attempt: number): void {
   if (attempt !== handoffAttempt || handoffConnection.phase !== 'connecting') return
   clearHandoffTimer()
   handoffDeadlineAt = 0
+  const failure = failureFromProgress(true)
   handoffConnection.phase = 'error'
-  handoffConnection.error = 'The signer did not answer within 45 seconds. Make sure it is powered on and online, then try again.'
+  handoffConnection.failure = failure.failure
+  handoffConnection.error = failure.error
   abortActiveHandoff('phone handoff timed out')
 }
 
@@ -99,6 +202,9 @@ function startHandoffConnection(target: HandoffConnectionTarget): void {
     ...target,
     relays: [...target.relays],
   }
+  handoffConnection.stage = 'opening-relays'
+  handoffConnection.relayOpened = false
+  handoffConnection.failure = 'none'
   handoffConnection.error = ''
   handoffTimer = setTimeout(() => expireHandoff(attempt), HANDOFF_CONNECT_TIMEOUT_MS)
 
@@ -108,21 +214,23 @@ function startHandoffConnection(target: HandoffConnectionTarget): void {
     undefined,
     target.operatorPubHex,
     controller.signal,
+    (stage) => updateHandoffProgress(attempt, controller, stage),
   ).then(() => {
     if (attempt !== handoffAttempt || controller.signal.aborted) return
     clearHandoffTimer()
     handoffDeadlineAt = 0
     if (handoffController === controller) handoffController = null
+    handoffConnection.stage = 'response-authenticated'
     handoffConnection.phase = 'connected'
-  }).catch(() => {
+  }).catch((error) => {
     if (attempt !== handoffAttempt || controller.signal.aborted) return
     clearHandoffTimer()
     handoffDeadlineAt = 0
     if (handoffController === controller) handoffController = null
+    const failure = sanitizedHandoffFailure(error)
     handoffConnection.phase = 'error'
-    // Do not leak relay URLs, keys or device identifiers into a screenshotable
-    // phone error. Detailed diagnostics remain available from a trusted manager.
-    handoffConnection.error = 'Make sure the signer is powered on and online, then try again.'
+    handoffConnection.failure = failure.failure
+    handoffConnection.error = failure.error
   })
 }
 
@@ -142,6 +250,9 @@ export function dismissHandoffConnection(): void {
   abortActiveHandoff('phone handoff dismissed')
   handoffConnection.phase = 'idle'
   handoffConnection.target = null
+  handoffConnection.stage = 'opening-relays'
+  handoffConnection.relayOpened = false
+  handoffConnection.failure = 'none'
   handoffConnection.error = ''
 }
 

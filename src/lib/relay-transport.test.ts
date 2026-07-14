@@ -1,9 +1,11 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { getPublicKey } from 'nostr-tools/pure'
+import { decrypt, encrypt, getConversationKey } from 'nostr-tools/nip44'
 import { hexToBytes } from '@noble/hashes/utils.js'
 import {
   newManagementRequestId,
   managementRequestPayload,
+  relayPoolCompatibilityOptions,
   RelayTransport,
   requiresManagementMutationChallenge,
   sendReplaySafeManagementRequest,
@@ -13,19 +15,81 @@ import {
 // no relay is ever contacted by these tests (they exercise the input contract
 // and the request lifecycle guards, all of which short-circuit before any I/O).
 const OP_SK_HEX = '01'.repeat(32)
-const DEVICE_PUB = getPublicKey(hexToBytes('02'.repeat(32))) // valid 64-hex x-only key
+const DEVICE_SK_HEX = '02'.repeat(32)
+const DEVICE_PUB = getPublicKey(hexToBytes(DEVICE_SK_HEX)) // valid 64-hex x-only key
 const RELAYS = ['wss://relay.example']
+
+interface TestPublishedEvent {
+  id: string
+  sig: string
+  content: string
+}
+
+interface TestSubscriptionListener {
+  onevent(event: { pubkey: string; content: string }): void
+}
 
 function fakePool() {
   const close = vi.fn()
   return {
     pool: {
       ensureRelay: vi.fn(async () => ({})),
-      subscribe: vi.fn(() => ({ close })),
-      publish: vi.fn(() => [Promise.resolve('saved')]),
+      subscribe: vi.fn((
+        _relays: string[],
+        _filter: unknown,
+        _listener: TestSubscriptionListener,
+      ) => ({ close })),
+      publish: vi.fn((_relays: string[], _event: TestPublishedEvent) => [Promise.resolve('saved')]),
       destroy: vi.fn(),
     },
     close,
+  }
+}
+
+function answerLatestRequest(
+  pool: ReturnType<typeof fakePool>['pool'],
+  result: Record<string, unknown>,
+): void {
+  const event = pool.publish.mock.calls.at(-1)?.[1]
+  if (!event) throw new Error('no request was published')
+  answerRequest(pool, event, result)
+}
+
+function answerRequest(
+  pool: ReturnType<typeof fakePool>['pool'],
+  event: TestPublishedEvent,
+  result: Record<string, unknown>,
+): void {
+  const request = decryptPublishedRequest(event)
+  const conversationKey = deviceConversationKey()
+  const listener = pool.subscribe.mock.calls[0]?.[2]
+  if (!listener) throw new Error('no response subscription was opened')
+  listener.onevent({
+    pubkey: DEVICE_PUB,
+    content: encrypt(JSON.stringify({ id: request.id, result }), conversationKey),
+  })
+}
+
+function deviceConversationKey(): Uint8Array {
+  return getConversationKey(
+    hexToBytes(DEVICE_SK_HEX),
+    getPublicKey(hexToBytes(OP_SK_HEX)),
+  )
+}
+
+function decryptPublishedRequest(event: TestPublishedEvent): {
+  id: string
+  method: string
+  params: Record<string, unknown>
+} {
+  const conversationKey = getConversationKey(
+    hexToBytes(DEVICE_SK_HEX),
+    getPublicKey(hexToBytes(OP_SK_HEX)),
+  )
+  return JSON.parse(decrypt(event.content, conversationKey)) as {
+    id: string
+    method: string
+    params: Record<string, unknown>
   }
 }
 
@@ -144,6 +208,194 @@ describe('RelayTransport request lifecycle', () => {
     const rejection = expect(request).rejects.toThrow(/timeout waiting for device/i)
     await vi.advanceTimersByTimeAsync(50)
     await rejection
+    t.close()
+  })
+
+  it('retries a read with fresh inner ids, ciphertext, and signed event ids', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    const onPublishSubmitted = vi.fn()
+    const onPublishAccepted = vi.fn()
+    pool.publish
+      .mockReturnValueOnce([Promise.reject(new Error('signer route still reconnecting'))])
+      .mockReturnValue([Promise.resolve('saved')])
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    const request = t.requestReadWithRepublish('get_status', {}, 20_000, 5_000, {
+      onPublishSubmitted,
+      onPublishAccepted,
+    })
+    await Promise.resolve()
+    expect(pool.publish).toHaveBeenCalledOnce()
+    expect(onPublishSubmitted).toHaveBeenCalledOnce()
+    expect(onPublishAccepted).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(pool.publish).toHaveBeenCalledTimes(3)
+    expect(onPublishSubmitted).toHaveBeenCalledOnce()
+    expect(onPublishAccepted).toHaveBeenCalledOnce()
+    const events = pool.publish.mock.calls.map((call) => call[1])
+    expect(new Set(events.map((event) => event.id)).size).toBe(events.length)
+    expect(new Set(events.map((event) => event.sig)).size).toBe(events.length)
+    expect(new Set(events.map((event) => event.content)).size).toBe(events.length)
+    const requests = events.map(decryptPublishedRequest)
+    expect(new Set(requests.map((inner) => inner.id)).size).toBe(requests.length)
+    expect(requests.every((inner) => inner.method === 'get_status')).toBe(true)
+    expect(requests.every((inner) => JSON.stringify(inner.params) === '{}')).toBe(true)
+
+    answerLatestRequest(pool, { master_count: 1 })
+    await expect(request).resolves.toEqual({ master_count: 1 })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(pool.publish).toHaveBeenCalledTimes(3)
+    t.close()
+  })
+
+  it('accepts a later fresh-id response when the first response was lost', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    const request = t.requestReadWithRepublish('get_status', {}, 20_000, 5_000)
+    await Promise.resolve()
+    const first = pool.publish.mock.calls[0]?.[1]
+    if (!first) throw new Error('first request was not published')
+    const firstInner = decryptPublishedRequest(first)
+
+    // The signer processed attempt one but its response never reached us.
+    await vi.advanceTimersByTimeAsync(5_000)
+    const second = pool.publish.mock.calls[1]?.[1]
+    if (!second) throw new Error('retry was not published')
+    const secondInner = decryptPublishedRequest(second)
+    expect(secondInner.id).not.toBe(firstInner.id)
+
+    answerLatestRequest(pool, { master_count: 1 })
+    await expect(request).resolves.toEqual({ master_count: 1 })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(pool.publish).toHaveBeenCalledTimes(2)
+    t.close()
+  })
+
+  it('settles every alias when an earlier attempt answers after a retry starts', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    const request = t.requestReadWithRepublish('get_status', {}, 20_000, 5_000)
+    const first = pool.publish.mock.calls[0]?.[1]
+    if (!first) throw new Error('first request was not published')
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(pool.publish).toHaveBeenCalledTimes(2)
+
+    // Attempt two is already live, but a delayed valid response to attempt one
+    // must still win and atomically cancel every alias and timer.
+    answerRequest(pool, first, { master_count: 1 })
+    await expect(request).resolves.toEqual({ master_count: 1 })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(pool.publish).toHaveBeenCalledTimes(2)
+    t.close()
+  })
+
+  it('reports submission only after a signed event reaches the relay pool', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    const onPublishSubmitted = vi.fn()
+    pool.publish
+      .mockImplementationOnce(() => { throw new Error('pool handoff failed') })
+      .mockReturnValue([Promise.resolve('saved')])
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    const request = t.requestReadWithRepublish('get_status', {}, 20_000, 5_000, {
+      onPublishSubmitted,
+    })
+    expect(onPublishSubmitted).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(onPublishSubmitted).toHaveBeenCalledOnce()
+    answerLatestRequest(pool, { master_count: 1 })
+    await expect(request).resolves.toEqual({ master_count: 1 })
+    t.close()
+  })
+
+  it('works when older WebKit has neither Promise.any nor AbortSignal.throwIfAborted', async () => {
+    const promiseConstructor = Promise as unknown as { any?: unknown }
+    const originalAny = promiseConstructor.any
+    Object.defineProperty(promiseConstructor, 'any', { value: undefined, configurable: true })
+    try {
+      const { pool } = fakePool()
+      const controller = new AbortController()
+      Object.defineProperty(controller.signal, 'throwIfAborted', {
+        value: undefined,
+        configurable: true,
+      })
+      const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+      expect(relayPoolCompatibilityOptions()).toEqual({
+        enablePing: false,
+        enableReconnect: true,
+      })
+      await expect(t.connect(controller.signal)).resolves.toBeUndefined()
+
+      const request = t.requestReadWithRepublish('get_status', {}, 20_000, 5_000)
+      answerLatestRequest(pool, { master_count: 1 })
+      await expect(request).resolves.toEqual({ master_count: 1 })
+      t.close()
+    } finally {
+      Object.defineProperty(promiseConstructor, 'any', {
+        value: originalAny,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
+
+  it('never enables automatic republish for a mutation or unknown method', async () => {
+    const { pool } = fakePool()
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    for (const method of ['update_client', 'future_method']) {
+      await expect(t.requestReadWithRepublish(method, {}, 20_000, 5_000))
+        .rejects.toThrow(/read-only/i)
+    }
+    expect(pool.publish).not.toHaveBeenCalled()
+    t.close()
+  })
+
+  it('stops republishing when the handoff AbortSignal closes the transport', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    const controller = new AbortController()
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect(controller.signal)
+
+    const request = t.requestReadWithRepublish('get_status', {}, 20_000, 5_000)
+    const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(pool.publish).toHaveBeenCalledTimes(2)
+    controller.abort(new DOMException('phone handoff timed out', 'AbortError'))
+    await rejection
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(pool.publish).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the original request deadline while republishing', async () => {
+    vi.useFakeTimers()
+    const { pool } = fakePool()
+    const t = new RelayTransport(DEVICE_PUB, RELAYS, OP_SK_HEX, pool as never)
+    await t.connect()
+
+    const request = t.requestReadWithRepublish('get_status', {}, 11_000, 5_000)
+    const rejection = expect(request).rejects.toThrow(/timeout waiting for device/i)
+    await vi.advanceTimersByTimeAsync(11_000)
+    await rejection
+    expect(pool.publish).toHaveBeenCalledTimes(3)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(pool.publish).toHaveBeenCalledTimes(3)
     t.close()
   })
 })

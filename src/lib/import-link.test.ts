@@ -195,6 +195,7 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
       undefined,
       pubHexFromSecret(HEX),
       expect.any(AbortSignal),
+      expect.any(Function),
     )
   })
 
@@ -218,7 +219,8 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
 
     rejectConnection(new Error('relay unavailable'))
     await vi.waitFor(() => expect(handoffConnection.phase).toBe('error'))
-    expect(handoffConnection.error).toMatch(/powered on and online/i)
+    expect(handoffConnection.error).toMatch(/remote connection stopped.*authenticated response/i)
+    expect(handoffConnection.failure).toBe('connection-stopped')
 
     connectRelayMock.mockResolvedValueOnce(undefined)
     expect(retryHandoffConnection()).toBe(true)
@@ -227,11 +229,67 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
     expect(connectRelayMock).toHaveBeenCalledTimes(2)
   })
 
+  it('tracks sanitized handoff progress monotonically through authenticated response', async () => {
+    let report!: (stage: string) => void
+    let finish!: () => void
+    connectRelayMock.mockImplementationOnce((...args: unknown[]) => {
+      report = args[5] as (stage: string) => void
+      return new Promise<void>((resolve) => { finish = resolve })
+    })
+    const eop = encryptOperator(HEX, 'correct horse')
+    location.hash = buildProtectedHandoffLink(
+      'https://x.dev',
+      eop,
+      DEV,
+      ['wss://private-relay.example'],
+    ).slice('https://x.dev/'.length)
+    consumeImportLink()
+    submitPin('correct horse')
+
+    expect(handoffConnection.stage).toBe('opening-relays')
+    expect(handoffConnection.relayOpened).toBe(false)
+    report('relay-opened')
+    expect(handoffConnection.relayOpened).toBe(true)
+    expect(handoffConnection.stage).toBe('opening-relays')
+    report('request-published')
+    expect(handoffConnection.stage).toBe('request-published')
+    report('waiting-for-signer')
+    expect(handoffConnection.stage).toBe('waiting-for-signer')
+    report('response-authenticated')
+    expect(handoffConnection.stage).toBe('response-authenticated')
+    report('request-published')
+    expect(handoffConnection.stage).toBe('response-authenticated')
+    finish()
+    await vi.waitFor(() => expect(handoffConnection.phase).toBe('connected'))
+  })
+
+  it('never exposes raw relay URLs, device ids, or keys in a handoff failure', async () => {
+    connectRelayMock.mockRejectedValueOnce(new Error(
+      `could not connect to any relay wss://private-relay.example/${DEV}?operator=${HEX}`,
+    ))
+    const eop = encryptOperator(HEX, 'correct horse')
+    const url = buildProtectedHandoffLink('https://x.dev', eop, DEV, ['wss://private-relay.example'])
+    location.hash = url.slice(url.indexOf('#'))
+    consumeImportLink()
+    submitPin('correct horse')
+
+    await vi.waitFor(() => expect(handoffConnection.phase).toBe('error'))
+    expect(handoffConnection.failure).toBe('relay-open-failed')
+    expect(handoffConnection.error).toMatch(/No secure relay connection was confirmed/i)
+    expect(handoffConnection.error).not.toContain('private-relay.example')
+    expect(handoffConnection.error).not.toContain(DEV)
+    expect(handoffConnection.error).not.toContain(HEX)
+  })
+
   it('abandons a never-settling attempt at the 45-second handoff deadline', async () => {
     vi.useFakeTimers()
     let signal: AbortSignal | undefined
     connectRelayMock.mockImplementationOnce((...args: unknown[]) => {
       signal = args[4] as AbortSignal
+      const report = args[5] as (stage: string) => void
+      report('relay-opened')
+      report('request-published')
+      report('waiting-for-signer')
       return new Promise<void>(() => {})
     })
     const eop = encryptOperator(HEX, 'correct horse')
@@ -246,6 +304,8 @@ describe('consumeImportLink — PIN-protected (eop)', () => {
 
     expect(signal?.aborted).toBe(true)
     expect(handoffConnection.phase).toBe('error')
+    expect(handoffConnection.failure).toBe('signer-response-timeout')
+    expect(handoffConnection.error).toMatch(/relay accepted.*authenticated response.*45 seconds/i)
     expect(handoffConnection.error).toMatch(/45 seconds/i)
   })
 

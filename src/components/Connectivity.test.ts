@@ -254,6 +254,7 @@ describe('Connectivity USB network changes', () => {
     password_set: true,
     op_mgmt: 'a'.repeat(64),
     recovery_ok: true,
+    trial: null,
   }
 
   it('prefills exact signer state and patches without password or operator replacement', async () => {
