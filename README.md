@@ -9,6 +9,7 @@ Bootstrap Heartwood over USB, then leave it online in WiFi-standalone mode and m
 ## Features
 
 - **Masters** -- view provisioned master slots, npubs, and derivation modes
+- **Key backup** -- write an imported nsec/ncryptsec out as [24 words](docs/key-backup.md) that restore the same npub, here or via the offline CLI
 - **Clients** -- remotely create, list, revoke, and update exact client policies
 - **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely
 - **Phone handoff** -- transfer the separate operator credential to a phone with a protected QR flow
