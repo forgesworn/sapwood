@@ -2,7 +2,7 @@
 
 > **This component is part of the [ForgeSworn Identity Stack](https://github.com/forgesworn/heartwood/blob/main/docs/ECOSYSTEM.md).** See the ecosystem overview for how it connects to the other components.
 
-Sapwood is a browser-based management UI for Heartwood signing devices. It provisions master identities, manages client policies, uploads firmware, and monitors logs. Connects via Web Serial (direct USB) or HTTP (bridge on the Pi). 21 KB gzipped, zero server-side dependencies.
+Sapwood is a browser-based management UI for Heartwood signing devices. It provisions master identities, manages client policies, uploads firmware, and monitors logs. Connects via Web Serial (direct USB) or HTTP (bridge). Static single-page app, zero server-side dependencies.
 
 ## Dual transport abstraction
 

@@ -49,7 +49,7 @@ npm run build     # production build to dist/
 
 ## Stack
 
-- [Svelte 5](https://svelte.dev) (runes mode) -- compiles to vanilla JS, 21KB gzipped total
+- [Svelte 5](https://svelte.dev) (runes mode) -- compiles to vanilla JS, no framework runtime shipped
 - [Vite](https://vite.dev) -- build tool
 - TypeScript (strict mode)
 - [Vitest](https://vitest.dev) -- test framework
