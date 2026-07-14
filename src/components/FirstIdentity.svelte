@@ -13,8 +13,11 @@
   import {
     type IdentityStep, nameOk, nameError, provisionLabel, friendlyLabel,
   } from '../lib/first-identity.js'
-  import { resolveRestore, isValidNsec, isValidNcryptsec, isValidPhrase } from '../lib/restore.js'
-  import { zeroize, type ProvisionMode } from '../lib/provision.js'
+  import {
+    resolveRestore, isValidNsec, isValidNcryptsec, isValidPhrase,
+    isKeyBackupCandidate, keyToWords, decryptNcryptsec,
+  } from '../lib/restore.js'
+  import { zeroize, decodeNsec, type ProvisionMode } from '../lib/provision.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import { nip19 } from 'nostr-tools'
 
@@ -51,8 +54,15 @@
   let ncryptsecInput = $state('')
   let password = $state('')
   let showPassword = $state(false)
-  // nsec / ncryptsec only: keep the key's own npub (bunker) vs derive a new tree (tree-nsec).
+  // nsec / ncryptsec / key-words only: keep the key's own npub (bunker) vs
+  // derive a new tree (tree-nsec).
   let derive = $state(false)
+  // A pasted 24-word phrase is ambiguous: the usual seed to derive from, or a
+  // key backup made here (the words are the key itself). The owner says which.
+  let phraseKind = $state<'seed' | 'key'>('seed')
+  // The optional 24-word backup of a pasted nsec/ncryptsec, shown on confirm.
+  let backupWords = $state('')
+  let showBackup = $state(false)
 
   // Held between derive-and-preview and send; zeroized after send or on cancel.
   let pendingSecret: Uint8Array | null = null
@@ -84,7 +94,9 @@
   })
 
   const usesNsecKey = $derived(mode === 'restore-nsec' || mode === 'restore-ncryptsec')
-  const keepsNpub = $derived(usesNsecKey && !derive)
+  // The pasted phrase is being treated as a key backup, not a seed.
+  const wordsAreKey = $derived(mode === 'restore-phrase' && phraseKind === 'key' && isKeyBackupCandidate(phrase))
+  const keepsNpub = $derived((usesNsecKey || wordsAreKey) && !derive)
 
   // Whether the pasted material is well-formed enough to derive from.
   const pasteValid = $derived(
@@ -97,7 +109,7 @@
   function resetInputs() {
     name = ''; saved = false; error = ''; npub = ''
     phrase = ''; passphrase = ''; nsecInput = ''; ncryptsecInput = ''; password = ''
-    derive = false; status = 'idle'
+    derive = false; phraseKind = 'seed'; backupWords = ''; showBackup = false; status = 'idle'
   }
 
   function startCreate() { mode = 'create'; resetInputs(); step = 'naming' }
@@ -170,7 +182,8 @@
     error = ''
     try {
       const resolved = await resolveRestore(
-        mode === 'restore-phrase' ? { kind: 'phrase', phrase, passphrase }
+        mode === 'restore-phrase'
+          ? (wordsAreKey ? { kind: 'key-words', phrase, derive } : { kind: 'phrase', phrase, passphrase })
         : mode === 'restore-nsec' ? { kind: 'nsec', nsec: nsecInput, derive }
         : { kind: 'ncryptsec', ncryptsec: ncryptsecInput, password, derive },
       )
@@ -202,6 +215,7 @@
       rememberProvisioned()
       // The key is on the device now — wipe the raw material from the form.
       phrase = ''; passphrase = ''; nsecInput = ''; ncryptsecInput = ''; password = ''
+      backupWords = ''; showBackup = false
       finish()
     } catch (e) {
       status = 'error'
@@ -216,8 +230,24 @@
   function cancelConfirm() {
     if (pendingSecret) { zeroize(pendingSecret); pendingSecret = null }
     pendingMode = null
+    backupWords = ''; showBackup = false
     status = 'idle'
     step = 'paste'
+  }
+
+  /** Write the pasted key out as 24 words, computed only when asked for. The
+   *  words encode the nsec itself (before any derive choice), so they restore
+   *  it exactly; the derived tree comes back by making the same choice again. */
+  function toggleBackupWords() {
+    if (!showBackup && !backupWords) {
+      try {
+        const bytes = mode === 'restore-ncryptsec'
+          ? decryptNcryptsec(ncryptsecInput, password)
+          : decodeNsec(nsecInput)
+        try { backupWords = keyToWords(bytes) } finally { zeroize(bytes) }
+      } catch { return }
+    }
+    showBackup = !showBackup
   }
 
   function finish() {
@@ -273,7 +303,7 @@
         <span class="source-body">
           <span class="source-label">12 or 24 words, pasted here</span>
           <span class="source-desc">Faster. Paste your recovery phrase into this browser; it goes to
-            the device over the cable and is never stored.</span>
+            the device over the cable and is never stored. Takes a 24-word key backup made here too.</span>
         </span>
       </button>
       <button class="source" onclick={pickNsec}>
@@ -355,15 +385,38 @@
           autocomplete="off" autocapitalize="off" spellcheck="false"
           data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></textarea>
       </label>
-      <label class="field">
-        <span class="field-label">Passphrase (optional 25th word)</span>
-        <div class="pw-wrap">
-          <input type="text" class="field-input" class:masked={!showPassphrase} bind:value={passphrase} placeholder="Optional"
-            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-            data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
-          <PasswordReveal bind:shown={showPassphrase} />
-        </div>
-      </label>
+      {#if isKeyBackupCandidate(phrase)}
+        <fieldset class="derive-choice">
+          <legend class="field-label">Which kind of words are these?</legend>
+          <label class="derive-opt" class:on={phraseKind === 'seed'}>
+            <input type="radio" name="phrase-kind" checked={phraseKind === 'seed'} onchange={() => (phraseKind = 'seed')} />
+            <span class="derive-body">
+              <span class="derive-label">A recovery phrase (seed)</span>
+              <span class="derive-desc">The usual kind. Your signer grows its key from these words,
+                the way wallets do.</span>
+            </span>
+          </label>
+          <label class="derive-opt" class:on={phraseKind === 'key'}>
+            <input type="radio" name="phrase-kind" checked={phraseKind === 'key'} onchange={() => (phraseKind = 'key')} />
+            <span class="derive-body">
+              <span class="derive-label">A key backup made here</span>
+              <span class="derive-desc">24 words written down when a key was added to a signer. The
+                words are the key itself, so it comes back exactly as it was.</span>
+            </span>
+          </label>
+        </fieldset>
+      {/if}
+      {#if phraseKind === 'seed' || !isKeyBackupCandidate(phrase)}
+        <label class="field">
+          <span class="field-label">Passphrase (optional 25th word)</span>
+          <div class="pw-wrap">
+            <input type="text" class="field-input" class:masked={!showPassphrase} bind:value={passphrase} placeholder="Optional"
+              autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+              data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
+            <PasswordReveal bind:shown={showPassphrase} />
+          </div>
+        </label>
+      {/if}
     {:else if mode === 'restore-nsec'}
       <label class="field">
         <span class="field-label">nsec</span>
@@ -392,7 +445,7 @@
       </label>
     {/if}
 
-    {#if usesNsecKey}
+    {#if usesNsecKey || wordsAreKey}
       <fieldset class="derive-choice">
         <legend class="field-label">What should the signer's address be?</legend>
         <label class="derive-opt" class:on={!derive}>
@@ -436,6 +489,30 @@
       <span class="addr-chip" class:good={keepsNpub}>{keepsNpub ? 'Same npub' : 'New npub'}</span>
       <div class="uri-box"><code>{npub}</code></div>
     </div>
+    {#if usesNsecKey}
+      <div class="backup">
+        <button class="backup-toggle" onclick={toggleBackupWords}>
+          {showBackup ? 'Hide the backup words' : 'Back up this key as 24 words first'}
+        </button>
+        {#if showBackup}
+          <p class="backup-note">
+            These 24 words are this key, written out in full and not protected by any password.
+            Anyone who has them controls the identity, so write them down and keep them offline.
+            {#if derive}
+              You chose to derive a fresh key: pick that same option when you restore these words,
+              and the same new address comes back.
+            {:else}
+              To restore, choose "12 or 24 words, pasted here" and mark them as a key backup.
+            {/if}
+          </p>
+          <ol class="backup-words">
+            {#each backupWords.split(' ') as word}
+              <li>{word}</li>
+            {/each}
+          </ol>
+        {/if}
+      </div>
+    {/if}
     {#if error}<p class="error-text">{error}</p>{/if}
     <div class="fi-actions">
       <button class="btn btn-secondary" onclick={cancelConfirm} disabled={status === 'sending'}>Back</button>
@@ -594,6 +671,25 @@
   .addr-chip.good { color: var(--green); border-color: var(--green-dim); }
 
   .confirm-addr { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.4rem; }
+
+  /* Optional 24-word backup of a pasted key, on the confirm step */
+  .backup { margin: 0.9rem 0 0.2rem; }
+  .backup-toggle {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font-family: inherit; font-size: 0.82rem; color: var(--green-dim); text-decoration: underline;
+  }
+  .backup-toggle:hover { color: var(--green); }
+  .backup-note { font-size: 0.8rem; color: var(--text-dim); line-height: 1.55; margin: 0.6rem 0 0; }
+  .backup-words {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.25rem 1.4rem;
+    margin: 0.8rem 0 0.2rem; padding: 0.8rem 1rem 0.8rem 2.4rem;
+    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
+    font-size: 0.88rem; color: var(--text);
+  }
+  .backup-words li { padding: 0.1rem 0; }
+  @media (max-width: 640px) {
+    .backup-words { grid-template-columns: repeat(2, 1fr); }
+  }
 
   /* Mask secrets without a type="password" input — a password field here makes
      the browser's manager autofill a saved WiFi credential and offer to SAVE the

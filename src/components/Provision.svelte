@@ -10,6 +10,7 @@
     zeroize,
     type ProvisionMode,
   } from '../lib/provision.js'
+  import { isKeyBackupCandidate, keyToWords, wordsToKey } from '../lib/restore.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { nip19 } from 'nostr-tools'
   import PasswordReveal from './PasswordReveal.svelte'
@@ -53,7 +54,7 @@
     },
     'bunker': {
       title: 'Existing nsec — sign as-is',
-      body: 'Use an nsec you already have directly. The device signs AS that exact identity: no derivation. Pick this if you want this signer to BE your existing key.',
+      body: 'Use an nsec you already have directly. The device signs AS that exact identity: no derivation. Pick this if you want this signer to BE your existing key. A 24-word key backup made by Sapwood pastes here too.',
       address: 'The SAME npub as your nsec.',
       addressKind: 'same',
     },
@@ -78,12 +79,14 @@
       let result
       if (mode === 'tree-mnemonic') {
         result = await deriveFromMnemonic(secret, passphrase)
-      } else if (mode === 'tree-nsec') {
-        const nsecBytes = decodeNsec(secret)
-        result = deriveFromNsec(nsecBytes)
       } else {
-        const nsecBytes = decodeNsec(secret)
-        result = useRawNsec(nsecBytes)
+        // An nsec, or the same key as the 24 backup words Sapwood writes out.
+        const nsecBytes = isKeyBackupCandidate(secret) ? wordsToKey(secret) : decodeNsec(secret)
+        try {
+          result = mode === 'tree-nsec' ? deriveFromNsec(nsecBytes) : useRawNsec(nsecBytes)
+        } finally {
+          zeroize(nsecBytes)
+        }
       }
 
       npubPreview = result.npub
@@ -100,6 +103,21 @@
   }
 
   let pendingSecret: Uint8Array | null = null
+
+  // Optional 24-word backup of a pasted nsec, offered while confirming.
+  let backupWords = $state('')
+  let showBackup = $state(false)
+
+  /** Write the entered nsec out as 24 words, computed only when asked for. */
+  function toggleBackupWords() {
+    if (!showBackup && !backupWords) {
+      try {
+        const bytes = decodeNsec(secret)
+        try { backupWords = keyToWords(bytes) } finally { zeroize(bytes) }
+      } catch { return }
+    }
+    showBackup = !showBackup
+  }
 
   async function handleSend() {
     if (!pendingSecret) return
@@ -134,6 +152,8 @@
       pendingSecret = null
       secret = ''
       passphrase = ''
+      backupWords = ''
+      showBackup = false
     }
   }
 
@@ -147,6 +167,8 @@
     npubPreview = ''
     secret = ''
     passphrase = ''
+    backupWords = ''
+    showBackup = false
     handoff = null
   }
 </script>
@@ -197,6 +219,25 @@
         {/if}
       </p>
       <div class="uri-box confirm-npub"><code class="mono">{npubPreview}</code></div>
+      {#if mode !== 'tree-mnemonic' && !isKeyBackupCandidate(secret)}
+        <div class="backup">
+          <button class="backup-toggle" onclick={toggleBackupWords}>
+            {showBackup ? 'Hide the backup words' : 'Back up this nsec as 24 words first'}
+          </button>
+          {#if showBackup}
+            <p class="backup-note">
+              These 24 words are the nsec itself, unencrypted. Anyone who has them controls the
+              identity. To restore, paste them where an nsec goes, or mark them as a key backup
+              in the guided flow.
+            </p>
+            <ol class="backup-words">
+              {#each backupWords.split(' ') as word}
+                <li>{word}</li>
+              {/each}
+            </ol>
+          {/if}
+        </div>
+      {/if}
       <div class="actions">
         <button class="btn btn-primary" onclick={handleSend}>Send to device</button>
         <button class="btn-ghost" onclick={handleCancel}>Cancel</button>
@@ -254,7 +295,7 @@
               type={showSecret ? 'text' : 'password'}
               class="field-input"
               bind:value={secret}
-              placeholder="nsec1..."
+              placeholder="nsec1... or a 24-word key backup"
               disabled={status !== 'idle'}
               autocomplete="off"
             />
@@ -289,6 +330,24 @@
   .confirm { margin: 1rem 0; }
   .confirm-npub { margin: 0.5rem 0; }
   .actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+
+  /* Optional 24-word backup of the entered nsec, while confirming */
+  .backup { margin: 0.75rem 0 0; }
+  .backup-toggle {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font-family: inherit; font-size: 0.78rem; color: var(--green-dim); text-decoration: underline;
+  }
+  .backup-toggle:hover { color: var(--green); }
+  .backup-note { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; margin: 0.5rem 0 0; }
+  .backup-words {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.2rem 1.4rem;
+    margin: 0.6rem 0 0; padding: 0.7rem 0.9rem 0.7rem 2.2rem;
+    background: #08120e; border: 1px solid var(--green-dim); border-radius: 6px;
+    font-size: 0.82rem; color: var(--text);
+  }
+  @media (max-width: 640px) {
+    .backup-words { grid-template-columns: repeat(2, 1fr); }
+  }
 
   .info { font-size: 0.8rem; color: var(--text-dim); margin: 0; }
   .info strong { color: var(--text); }

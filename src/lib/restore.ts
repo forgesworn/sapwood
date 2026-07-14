@@ -1,10 +1,13 @@
-// Restore an existing key onto the signer, from the guided Home flow. Three
+// Restore an existing key onto the signer, from the guided Home flow. Four
 // input kinds, each resolved to the exact same (secret, npub, mode) triple that
 // Advanced > Provision sends over USB via buildProvisionFrame:
 //
 //   phrase     -> a 12/24-word BIP-39 recovery phrase pasted here (tree-mnemonic)
 //   nsec       -> a bech32 nsec1... (bunker: sign as-is, or tree-nsec: derive new)
 //   ncryptsec  -> a NIP-49 password-encrypted key, decrypted here to an nsec first
+//   key words  -> a 24-word key backup made here at import: the words ARE the
+//                 key's 32 bytes (BIP-39 entropy encoding), not a seed to derive
+//                 from, so decoding them restores the identical npub
 //
 // The crypto lives in provision.ts (derivation) and nostr-tools/nip49 (NIP-49
 // decrypt); this module only validates the newcomer's input and wires it to the
@@ -16,7 +19,7 @@
 // the chip. The UI carries that distinction; this module just does the maths.
 
 import { decrypt as nip49Decrypt } from 'nostr-tools/nip49'
-import { validateMnemonic } from '@scure/bip39'
+import { validateMnemonic, entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39'
 import { wordlist } from '@scure/bip39/wordlists/english.js'
 import {
   deriveFromMnemonic, deriveFromNsec, useRawNsec, decodeNsec,
@@ -54,6 +57,34 @@ export function isValidPhrase(phrase: string): boolean {
   return validateMnemonic(normalisePhrase(phrase), wordlist)
 }
 
+/** Whether the input could be a 24-word key backup: a valid BIP-39 phrase whose
+ *  24 words carry exactly the 256 bits of a key. A 12-word phrase carries only
+ *  128 bits, so it can never spell out an existing key. */
+export function isKeyBackupCandidate(phrase: string): boolean {
+  const p = normalisePhrase(phrase)
+  return p.split(' ').length === 24 && validateMnemonic(p, wordlist)
+}
+
+/** Write a 32-byte key out as 24 BIP-39 words. The words are the key's own
+ *  bytes used as entropy, not a seed to derive from: wordsToKey gives back the
+ *  identical bytes, so the identical npub. */
+export function keyToWords(secret: Uint8Array): string {
+  if (secret.length !== 32) throw new Error('key must be 32 bytes')
+  return entropyToMnemonic(secret, wordlist)
+}
+
+/** Decode a 24-word key backup back to its 32 key bytes. Throws on a bad
+ *  checksum or a 12-word phrase (too short to hold a full key). The caller
+ *  must zeroize the returned bytes after use. */
+export function wordsToKey(phrase: string): Uint8Array {
+  const entropy = mnemonicToEntropy(normalisePhrase(phrase), wordlist)
+  if (entropy.length !== 32) {
+    entropy.fill(0)
+    throw new Error('Only a 24-word backup holds a full key')
+  }
+  return entropy
+}
+
 /** Decrypt a NIP-49 ncryptsec to its 32 secret bytes. Throws on a wrong password
  *  or malformed input. The caller must zeroize the returned bytes after use. */
 export function decryptNcryptsec(ncryptsec: string, password: string): Uint8Array {
@@ -67,6 +98,7 @@ export type RestoreSource =
   | { kind: 'phrase'; phrase: string; passphrase: string }
   | { kind: 'nsec'; nsec: string; derive: boolean }
   | { kind: 'ncryptsec'; ncryptsec: string; password: string; derive: boolean }
+  | { kind: 'key-words'; phrase: string; derive: boolean }
 
 export interface ResolvedRestore {
   /** 32-byte root secret, ready for buildProvisionFrame. Zeroize after sending. */
@@ -103,6 +135,14 @@ export async function resolveRestore(src: RestoreSource): Promise<ResolvedRestor
     }
     case 'ncryptsec': {
       const bytes = decryptNcryptsec(src.ncryptsec, src.password)
+      try {
+        return fromNsecBytes(bytes, src.derive)
+      } finally {
+        bytes.fill(0)
+      }
+    }
+    case 'key-words': {
+      const bytes = wordsToKey(src.phrase)
       try {
         return fromNsecBytes(bytes, src.derive)
       } finally {

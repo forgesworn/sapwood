@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
+import { encrypt as nip49Encrypt } from 'nostr-tools/nip49'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import FirstIdentity from './FirstIdentity.svelte'
 import { generateIdentity, restoreIdentity, provisionSecret, refreshMasters } from '../lib/device.svelte.js'
+import { keyToWords } from '../lib/restore.js'
 
 // Transport is mocked (no hardware). The DEVICE generates (or takes) the seed +
 // shows the phrase on its own screen for the on-device paths; the paste paths
@@ -169,5 +171,85 @@ describe('FirstIdentity — restore from a pasted nsec', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Send to my signer/ }))
     expect(await screen.findByText('Your signer has an identity')).toBeTruthy()
     expect(provision.mock.calls[0][2]).toBe('tree-nsec')
+  })
+
+  it('offers a 24-word backup of the pasted key on the confirm step', async () => {
+    render(FirstIdentity)
+    await fireEvent.click(screen.getByText(/Restore a key I already have/))
+    await fireEvent.click(screen.getByText(/An nsec/))
+    await fireEvent.input(screen.getByPlaceholderText('nsec1...'), { target: { value: NSEC } })
+    await fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    expect(await screen.findByText('Check the address')).toBeTruthy()
+
+    // The words appear only when asked for, and spell out this exact key.
+    expect(screen.queryByRole('listitem')).toBeNull()
+    await fireEvent.click(screen.getByText(/Back up this key as 24 words/))
+    const words = screen.getAllByRole('listitem').map((li) => li.textContent)
+    expect(words).toEqual(keyToWords(SK).split(' '))
+    expect(screen.getByText(/Anyone who has them controls the identity/)).toBeTruthy()
+  })
+
+  it('backs up an ncryptsec as the words of its decrypted key', async () => {
+    const ncryptsec = nip49Encrypt(SK, 'hunter2')
+    render(FirstIdentity)
+    await fireEvent.click(screen.getByText(/Restore a key I already have/))
+    await fireEvent.click(screen.getByText(/An encrypted key/))
+    await fireEvent.input(screen.getByPlaceholderText('ncryptsec1...'), { target: { value: ncryptsec } })
+    await fireEvent.input(screen.getByPlaceholderText('The password for this key'), { target: { value: 'hunter2' } })
+    await fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+
+    expect(await screen.findByText('Check the address')).toBeTruthy()
+    expect(screen.getByText(OWN_NPUB)).toBeTruthy()
+
+    // The backup is the key itself, out from under the password.
+    await fireEvent.click(screen.getByText(/Back up this key as 24 words/))
+    const words = screen.getAllByRole('listitem').map((li) => li.textContent)
+    expect(words).toEqual(keyToWords(SK).split(' '))
+  })
+})
+
+describe('FirstIdentity — restore from a 24-word key backup', () => {
+  const BACKUP = keyToWords(SK)
+
+  async function pasteWords(words: string) {
+    render(FirstIdentity)
+    await fireEvent.click(screen.getByText(/Restore a key I already have/))
+    await fireEvent.click(screen.getByText(/12 or 24 words, pasted here/))
+    await fireEvent.input(screen.getByPlaceholderText('12 or 24 words'), { target: { value: words } })
+  }
+
+  it('marked as a key backup, it restores the exact key and its npub', async () => {
+    await pasteWords(BACKUP)
+
+    // 24 valid words are ambiguous, so the owner says which kind they are.
+    await fireEvent.click(screen.getByText(/A key backup made here/))
+    await fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+
+    expect(await screen.findByText('Check the address')).toBeTruthy()
+    expect(screen.getByText(OWN_NPUB)).toBeTruthy()
+    expect(screen.getByText('Same npub')).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: /Send to my signer/ }))
+    expect(await screen.findByText('Your signer has an identity')).toBeTruthy()
+    expect(provision.mock.calls[0][2]).toBe('bunker')
+  })
+
+  it('left as a seed phrase, it derives a different key (the wallet way)', async () => {
+    await pasteWords(BACKUP)
+    await fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+
+    expect(await screen.findByText('Check the address')).toBeTruthy()
+    expect(screen.queryByText(OWN_NPUB)).toBeNull()
+    expect(screen.getByText('New npub')).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: /Send to my signer/ }))
+    expect(await screen.findByText('Your signer has an identity')).toBeTruthy()
+    expect(provision.mock.calls[0][2]).toBe('tree-mnemonic')
+  })
+
+  it('never offers the key-backup choice for a 12-word phrase', async () => {
+    const TWELVE = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    await pasteWords(TWELVE)
+    expect(screen.queryByText(/Which kind of words are these/)).toBeNull()
   })
 })

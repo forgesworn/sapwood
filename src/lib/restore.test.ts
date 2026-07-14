@@ -5,7 +5,7 @@ import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import {
   isValidNsec, isValidNcryptsec, isValidPhrase, normalisePhrase,
-  decryptNcryptsec, resolveRestore,
+  decryptNcryptsec, resolveRestore, isKeyBackupCandidate, keyToWords, wordsToKey,
 } from './restore.js'
 
 // A fixed, valid secp256k1 scalar (= 1) so npub assertions are reproducible.
@@ -87,5 +87,60 @@ describe('resolveRestore', () => {
     const plain = await resolveRestore({ kind: 'phrase', phrase: PHRASE, passphrase: '' })
     const salted = await resolveRestore({ kind: 'phrase', phrase: PHRASE, passphrase: 'extra' })
     expect(plain.result.npub).not.toBe(salted.result.npub)
+  })
+})
+
+describe('24-word key backup', () => {
+  it('writes a key out as 24 words and decodes back to the identical bytes', () => {
+    const words = keyToWords(SK)
+    expect(words.split(' ')).toHaveLength(24)
+    const back = wordsToKey(words)
+    expect(Array.from(back)).toEqual(Array.from(SK))
+  })
+
+  it('matches the frozen cross-implementation vector (heartwood-provision CLI)', () => {
+    // Must match test_key_backup_words_match_frozen_vector in
+    // heartwood-esp32/provision/src/main.rs, or a backup written down in the
+    // browser will not restore through the offline CLI.
+    expect(keyToWords(SK)).toBe(
+      'abandon abandon abandon abandon abandon abandon abandon abandon '
+      + 'abandon abandon abandon abandon abandon abandon abandon abandon '
+      + 'abandon abandon abandon abandon abandon abandon abandon diesel',
+    )
+  })
+
+  it('normalises case and whitespace when decoding', () => {
+    const words = keyToWords(SK)
+    const messy = `  ${words.toUpperCase().replace(/ /g, '\n ')} `
+    expect(Array.from(wordsToKey(messy))).toEqual(Array.from(SK))
+  })
+
+  it('only a 32-byte key can be written as words', () => {
+    expect(() => keyToWords(new Uint8Array(16))).toThrow()
+  })
+
+  it('rejects a 12-word phrase: too short to hold a full key', () => {
+    expect(() => wordsToKey(PHRASE)).toThrow()
+    expect(isKeyBackupCandidate(PHRASE)).toBe(false)
+  })
+
+  it('recognises a backup candidate and rejects junk', () => {
+    expect(isKeyBackupCandidate(keyToWords(SK))).toBe(true)
+    expect(isKeyBackupCandidate('abandon '.repeat(24).trim())).toBe(false) // bad checksum
+    expect(isKeyBackupCandidate(NSEC)).toBe(false)
+  })
+
+  it('restores the same npub as the nsec it backs up (bunker mode)', async () => {
+    const { result, mode } = await resolveRestore({ kind: 'key-words', phrase: keyToWords(SK), derive: false })
+    expect(mode).toBe('bunker')
+    expect(result.npub).toBe(OWN_NPUB)
+    expect(Array.from(result.secret)).toEqual(Array.from(SK))
+  })
+
+  it('derive-new from words matches derive-new from the nsec itself', async () => {
+    const viaWords = await resolveRestore({ kind: 'key-words', phrase: keyToWords(SK), derive: true })
+    const viaNsec = await resolveRestore({ kind: 'nsec', nsec: NSEC, derive: true })
+    expect(viaWords.mode).toBe('tree-nsec')
+    expect(viaWords.result.npub).toBe(viaNsec.result.npub)
   })
 })
