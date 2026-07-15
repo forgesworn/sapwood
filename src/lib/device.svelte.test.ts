@@ -1679,7 +1679,7 @@ describe('identity card auto-sync on serial master list', () => {
     try {
       await refreshRelayAudit()
       expect(relayRequestMock).toHaveBeenCalledWith('get_status', {}, 75_000)
-      expect(relayRequestMock).toHaveBeenCalledWith('list_clients', {}, 75_000)
+      expect(relayRequestMock).toHaveBeenCalledWith('list_clients', {}, 75_000, undefined)
     } finally {
       await disconnect()
     }
@@ -1730,7 +1730,7 @@ describe('identity card auto-sync on serial master list', () => {
       expect(relayRequestMock).toHaveBeenCalledWith('client_uri', {
         slot_index: 3,
         expected_secret_fingerprint: SLOT_FP,
-      }, 35_000)
+      }, 35_000, undefined)
     } finally {
       await disconnect()
     }
@@ -1763,7 +1763,7 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       await expect(mgmtCreateClient('Damus', policy)).resolves.toEqual(expect.objectContaining({ slot_index: 4 }))
-      expect(relayRequestMock).toHaveBeenCalledWith('create_client_v2', { label: 'Damus', policy }, 35_000)
+      expect(relayRequestMock).toHaveBeenCalledWith('create_client_v2', { label: 'Damus', policy }, 35_000, undefined)
       expect(device.slotUris[4]).toBeUndefined()
     } finally {
       await disconnect()
@@ -1839,7 +1839,7 @@ describe('identity card auto-sync on serial master list', () => {
       expect(relayRequestMock).toHaveBeenCalledWith('revoke_client', {
         slot_index: 5,
         expected_secret_fingerprint: SLOT_FP,
-      }, 35_000)
+      }, 35_000, undefined)
       expect(device.slotUris[5]).toBeUndefined()
     } finally {
       await disconnect()

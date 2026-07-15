@@ -851,12 +851,18 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         // Only assign on real change: this refresh runs every few seconds and
         // replacing identical state makes the page shuffle under the user
         // (identity cards re-render while they are typing a new name).
+        const firstInventory = !device.masters.some((m) => m.addressed !== undefined)
         if (JSON.stringify(device.masters) !== JSON.stringify(mapped)) {
           device.masters = mapped
         }
+        // Pre-select the identity this session was connected to; after that
+        // the operator's choice sticks.
+        if (firstInventory) {
+          device.selectedSlot = mapped.find((m) => m.addressed)?.slot ?? mapped[0]?.slot ?? 0
+        }
       }
     } catch { /* older firmware — keep the status-derived single master */ }
-    const res = await current.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
+    const res = await current.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS, relayMgmtTarget())
     if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     const clients = (res.clients as Array<Record<string, unknown>>) ?? []
     // Slot URIs are reusable credentials and numeric indices compact on revoke.
@@ -1093,6 +1099,24 @@ function appendRelayAudit(entries: RelayAuditEntry[]) {
 }
 
 /**
+ * Hex pubkey of the identity relay management should address — the SELECTED
+ * identity when it differs from the session's primary. The firmware resolves
+ * the target from the request's #p tag, so every identity the signer serves is
+ * manageable from one session; undefined addresses the primary.
+ */
+function relayMgmtTarget(): string | undefined {
+  if (!relayTransport) return undefined
+  const m = device.masters.find((x) => !x.persona && x.slot === device.selectedSlot)
+  if (!m) return undefined
+  try {
+    const decoded = nip19.decode(m.npub)
+    if (decoded.type !== 'npub') return undefined
+    const hex = (decoded.data as string).toLowerCase()
+    return hex === relayTransport.devicePub ? undefined : hex
+  } catch { return undefined }
+}
+
+/**
  * Create a client over the relay with one exact, atomic policy. The versioned
  * method makes older firmware fail before mutation instead of ignoring fields.
  */
@@ -1101,9 +1125,11 @@ export async function relayCreateClient(
   policy: ExactClientPolicy,
 ): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number; secret_fingerprint: string }> {
   if (!relayTransport) throw new Error('not connected over relay')
+  // Capture once so the create and any cleanup revoke address the SAME identity.
+  const target = relayMgmtTarget()
   let res: Record<string, unknown>
   try {
-    res = await relayTransport.request('create_client_v2', { label, policy }, MGMT_WRITE_TIMEOUT_MS)
+    res = await relayTransport.request('create_client_v2', { label, policy }, MGMT_WRITE_TIMEOUT_MS, target)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/unknown method.*create_client_v2/i.test(message)) {
@@ -1123,7 +1149,7 @@ export async function relayCreateClient(
         await relayTransport.request('revoke_client', {
           slot_index: slotIndex,
           expected_secret_fingerprint: fingerprint,
-        }, MGMT_WRITE_TIMEOUT_MS)
+        }, MGMT_WRITE_TIMEOUT_MS, target)
       }
       catch { /* do not expose the credential when cleanup cannot be confirmed */ }
     }
@@ -1171,7 +1197,7 @@ export async function relayApproveSigning(slotIndex: number, expectedFingerprint
     await relayTransport.request('approve_signing', {
       slot_index: slotIndex,
       expected_secret_fingerprint: fingerprint,
-    }, MGMT_WRITE_TIMEOUT_MS)
+    }, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
     return rethrowAfterManagementConflict(error)
   }
@@ -1186,7 +1212,7 @@ export async function relayRevokeClient(slotIndex: number, expectedFingerprint?:
     await relayTransport.request('revoke_client', {
       slot_index: slotIndex,
       expected_secret_fingerprint: fingerprint,
-    }, MGMT_WRITE_TIMEOUT_MS)
+    }, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
     return rethrowAfterManagementConflict(error)
   }
@@ -1206,7 +1232,7 @@ export async function relayUpdateClient(
       slot_index: slotIndex,
       expected_secret_fingerprint: fingerprint,
       ...changes,
-    }, MGMT_WRITE_TIMEOUT_MS)
+    }, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
     return rethrowAfterManagementConflict(error)
   }
@@ -2556,14 +2582,16 @@ export async function relayProvisionIdentity(
 /**
  * Derive a named child identity over the relay (mgmt `derive_identity`). Safe
  * over WiFi: no key material crosses the wire, only the name — the signer
- * already holds the tree root. The parent is the addressed master. The signer
- * restarts about two seconds after replying to serve the new identity.
+ * already holds the tree root. The parent is the ADDRESSED identity, so
+ * `parentHex` selects which master derives; omitted, the session's primary.
+ * The signer restarts about two seconds after replying to serve the new one.
  */
 export async function relayDeriveIdentity(
   name: string,
+  parentHex?: string,
 ): Promise<{ slot: number; label: string; npub: string; existing: boolean }> {
   if (!relayTransport) throw new Error('Not connected over the relay')
-  const res = await relayTransport.request('derive_identity', { name }, MGMT_WRITE_TIMEOUT_MS)
+  const res = await relayTransport.request('derive_identity', { name }, MGMT_WRITE_TIMEOUT_MS, parentHex)
   const hex = String(res.npub_hex ?? '')
   let npub = hex
   try { npub = nip19.npubEncode(hex) } catch { /* keep hex */ }
@@ -2684,7 +2712,7 @@ export async function mgmtNostrconnect(params: {
       label: params.label,
       policy: params.policy,
       ...(params.relay ? { relay: params.relay } : {}),
-    }, MGMT_DIAL_TIMEOUT_MS)
+    }, MGMT_DIAL_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/unknown method.*nostrconnect_v2/i.test(message)) {
@@ -2736,7 +2764,7 @@ export async function mgmtClientUri(slotIndex: number, expectedFingerprint?: str
       res = await relayTransport.request('client_uri', {
         slot_index: slotIndex,
         expected_secret_fingerprint: fingerprint,
-      }, MGMT_WRITE_TIMEOUT_MS)
+      }, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
     } catch (error) {
       return rethrowAfterManagementConflict(error)
     }

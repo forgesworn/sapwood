@@ -203,6 +203,9 @@ export class RelayTransport {
   private sub: { close(): void } | null = null
   private readonly sk: Uint8Array
   private readonly ck: Uint8Array
+  /** Conversation keys per management target (a signer serves several
+   *  identities; each is addressed by its own pubkey with its own key). */
+  private readonly cks = new Map<string, Uint8Array>()
   readonly operatorPub: string
   readonly devicePub: string
   readonly relays: string[]
@@ -226,7 +229,20 @@ export class RelayTransport {
     this.sk = hexToBytes(opSkHex)
     this.operatorPub = getPublicKey(this.sk)
     this.ck = getConversationKey(this.sk, this.devicePub)
+    this.cks.set(this.devicePub, this.ck)
     this.pool = pool
+  }
+
+  /** Conversation key for a management target, cached per identity. */
+  private targetCk(targetHex: string): Uint8Array {
+    const hex = targetHex.toLowerCase()
+    let ck = this.cks.get(hex)
+    if (!ck) {
+      if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('management target must be 64 hex chars')
+      ck = getConversationKey(this.sk, hex)
+      this.cks.set(hex, ck)
+    }
+    return ck
   }
 
   /** Open the response subscription only after at least one real relay socket
@@ -301,16 +317,19 @@ export class RelayTransport {
   }
 
   private routeEvent(ev: { pubkey: string; content: string }): void {
-    if (ev.pubkey !== this.devicePub) {
+    // Replies are authored by the identity a request was ADDRESSED to — the
+    // session's primary or any other identity this session has targeted.
+    const ck = this.cks.get(ev.pubkey)
+    if (!ck) {
       // Scoped to our operator, so this reply was meant for us — but authored by a
-      // different signer pubkey than we targeted. Usually a stale target (the
+      // signer pubkey this session never targeted. Usually a stale target (the
       // signer's identity was restored/changed since we remembered it).
-      console.warn(`[hw] relay: reply from ${ev.pubkey.slice(0, 8)}…, but we target ${this.devicePub.slice(0, 8)}… (wrong signer pubkey?)`)
+      console.warn(`[hw] relay: reply from ${ev.pubkey.slice(0, 8)}…, an identity this session never targeted (stale signer pubkey?)`)
       return
     }
     let resp: MgmtResponse
     try {
-      resp = JSON.parse(decrypt(ev.content, this.ck)) as MgmtResponse
+      resp = JSON.parse(decrypt(ev.content, ck)) as MgmtResponse
     } catch {
       console.warn('[hw] relay: a reply from the signer could not be decrypted (operator-key mismatch?)')
       return
@@ -321,7 +340,11 @@ export class RelayTransport {
     else p.resolve(resp.result ?? {})
   }
 
-  /** Send a management request and await the device's decrypted reply. */
+  /** Send a management request and await the device's decrypted reply.
+   * `targetHex` addresses a specific identity the signer serves (its x-only
+   * pubkey); omitted, the session's primary identity is addressed. The
+   * mutation challenge is device-global, so replay safety holds across
+   * targets and the shared mutation queue keeps rotations serialised. */
   request(
     method: string,
     params: Record<string, unknown> = {},
@@ -330,9 +353,10 @@ export class RelayTransport {
     // (rough WiFi, a busy laptop) needs headroom or a status read that would
     // have arrived reports a false "timeout waiting for device".
     timeoutMs = 35_000,
+    targetHex?: string,
   ): Promise<Record<string, unknown>> {
     if (!requiresManagementMutationChallenge(method)) {
-      return this.requestRaw(method, params, timeoutMs)
+      return this.requestRaw(method, params, timeoutMs, undefined, undefined, undefined, targetHex)
     }
 
     const run = () => sendReplaySafeManagementRequest(
@@ -344,6 +368,9 @@ export class RelayTransport {
         attempt.params,
         attempt.timeoutMs,
         attempt.mutationChallenge,
+        undefined,
+        undefined,
+        targetHex,
       ),
     )
     const result = this.mutationQueue.then(run, run)
@@ -382,9 +409,13 @@ export class RelayTransport {
     mutationChallenge?: string,
     republishIntervalMs?: number,
     progress?: ReadRepublishProgress,
+    targetHex?: string,
   ): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error('transport closed'))
     if (!this.sub) return Promise.reject(new Error('not connected'))
+    const target = (targetHex ?? this.devicePub).toLowerCase()
+    let targetCk: Uint8Array
+    try { targetCk = this.targetCk(target) } catch (e) { return Promise.reject(e) }
     const firstId = newManagementRequestId()
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -429,8 +460,8 @@ export class RelayTransport {
             {
               kind: MGMT_KIND,
               created_at: Math.floor(Date.now() / 1000),
-              tags: [['p', this.devicePub]],
-              content: encrypt(payload, this.ck),
+              tags: [['p', target]],
+              content: encrypt(payload, targetCk),
             },
             this.sk,
           )

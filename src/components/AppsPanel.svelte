@@ -257,23 +257,18 @@
     </section>
   {/if}
 
-  <!-- Every app binds to ONE identity: this bar names it, switches it where
-       the transport allows (USB, bridge), and scopes both the create form and
-       the list below. A relay session is addressed to one identity, so there
-       it names the identity and points at the front page instead. -->
+  <!-- Every app binds to ONE identity: this bar names it, switches it, and
+       scopes both the create form and the list below. Works on every
+       transport — over the relay each management request is simply addressed
+       to the selected identity's own pubkey. -->
   {#if identities.length > 1}
     <section class="identity-bar">
       <span class="identity-bar-label">Apps below connect and sign as</span>
-      {#if device.mode !== 'relay'}
-        <select class="field-input identity-pick" aria-label="Identity apps sign as" value={device.selectedSlot} onchange={handleIdentityChange}>
-          {#each identities as master (master.slot)}
-            <option value={master.slot}>{master.label ?? master.slot}</option>
-          {/each}
-        </select>
-      {:else}
-        <strong class="identity-bar-current">“{identities.find((m) => m.addressed)?.label ?? identities[0]?.label}”</strong>
-        <span class="identity-bar-hint">A WiFi session manages one identity at a time; to connect apps under another, pick it from the front page.</span>
-      {/if}
+      <select class="field-input identity-pick" aria-label="Identity apps sign as" value={device.selectedSlot} onchange={handleIdentityChange}>
+        {#each identities as master (master.slot)}
+          <option value={master.slot}>{master.label ?? master.slot}</option>
+        {/each}
+      </select>
     </section>
   {/if}
 
@@ -507,8 +502,6 @@
     padding: 0.65rem 0.9rem; margin-bottom: 1rem;
   }
   .identity-bar-label { font-size: 0.85rem; color: var(--text-dim); }
-  .identity-bar-current { font-size: 0.95rem; color: var(--green); }
-  .identity-bar-hint { flex-basis: 100%; font-size: 0.75rem; color: var(--text-muted); line-height: 1.45; }
 
   .new-connection { display: flex; flex-direction: column; }
   .create-form { display: flex; gap: 0.5rem; align-items: center; }

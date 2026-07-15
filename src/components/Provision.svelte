@@ -57,10 +57,9 @@
   // phrase/nsec path stays for older firmware and off-signer roots.
   let deriveSource = $state<'signer' | 'secret'>('signer')
   let parentSlot = $state(0)
-  // Over the relay only the ADDRESSED master can derive; a relay management
-  // session is bound to one identity.
-  const signerParents = $derived(device.masters.filter((m) =>
-    !m.persona && (device.mode !== 'relay' || m.addressed !== false)))
+  // Any master can be the parent: over the relay the request is simply
+  // addressed to the chosen master's own pubkey.
+  const signerParents = $derived(device.masters.filter((m) => !m.persona))
   const canDeriveOnSigner = $derived(
     (device.mode === 'serial' || device.mode === 'relay') && signerParents.length > 0)
   const overRelay = $derived(device.mode === 'relay')
@@ -79,9 +78,20 @@
     npubPreview = ''
     try {
       label = label.trim()
-      const res = device.mode === 'relay'
-        ? await relayDeriveIdentity(label)
-        : await serialDeriveIdentity(parentSlot, label)
+      let res
+      if (device.mode === 'relay') {
+        // Address the chosen parent directly: the firmware derives from
+        // whichever of its identities the request is addressed to.
+        const parent = signerParents.find((m) => m.slot === parentSlot)
+        let parentHex: string | undefined
+        try {
+          const decoded = parent ? nip19.decode(parent.npub) : null
+          if (decoded?.type === 'npub') parentHex = decoded.data as string
+        } catch { /* fall back to the session's primary identity */ }
+        res = await relayDeriveIdentity(label, parentHex)
+      } else {
+        res = await serialDeriveIdentity(parentSlot, label)
+      }
       npubPreview = res.npub
       status = 'done'
       message = res.existing

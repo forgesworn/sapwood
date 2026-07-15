@@ -46,10 +46,7 @@
   // master. Personas share their owner's slot table, so only masters count.
   const identityCount = $derived(device.masters?.filter((m) => !m.persona).length ?? 0)
   const activeIdentity = $derived(
-    device.mode === 'relay'
-      // A relay session is bound to the addressed identity, whatever its slot.
-      ? device.masters?.find((m) => m.addressed) ?? device.masters?.[0] ?? null
-      : device.masters?.find((m) => !m.persona && m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
+    device.masters?.find((m) => !m.persona && m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
   )
   const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
   const commonKindSet = new Set(COMMON_KINDS.map((k) => k.kind))
@@ -208,19 +205,16 @@
       />
       {#if identityCount > 1}
         <!-- The signer holds several identities: the app binds to exactly one,
-             so the choice belongs here in the first step, not hidden away. -->
-        {#if overUsb}
-          <label class="field flow-note">
-            <span class="field-label">It will sign as</span>
-            <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
-              {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
-                <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
-              {/each}
-            </select>
-          </label>
-        {:else if device.mode === 'relay' && activeIdentity}
-          <p class="hint-sm flow-note">It will sign as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>. A WiFi session manages one identity at a time: for another identity, connect to it from the front page first.</p>
-        {/if}
+             so the choice belongs here in the first step, not hidden away.
+             Works over USB and WiFi alike. -->
+        <label class="field flow-note">
+          <span class="field-label">It will sign as</span>
+          <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
+            {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+              <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
+            {/each}
+          </select>
+        </label>
       {/if}
       {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
