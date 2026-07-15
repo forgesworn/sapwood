@@ -21,14 +21,16 @@ const PROJECT_RELAY = 'wss://relay.trotters.cc'
 // The project relay is the only write target; the rest are the widely-mirrored
 // public indexes the pallasite apps read profiles from, so a profile published
 // from any mainstream client still resolves — and gets mirrored home.
+// relay.nostr.band and relay.ditto.pub were dropped after going dark (probed
+// 2026-07-15: nostr.band unreachable, ditto.pub 502) — every lookup against
+// them cost a browser-side timeout.
 export const DEFAULT_PROFILE_RELAYS: ProfileRelay[] = [
   { url: PROJECT_RELAY, write: true },
   { url: 'wss://purplepag.es', write: false },
   { url: 'wss://relay.damus.io', write: false },
-  { url: 'wss://relay.nostr.band', write: false },
   { url: 'wss://nos.lol', write: false },
   { url: 'wss://relay.primal.net', write: false },
-  { url: 'wss://relay.ditto.pub', write: false },
+  { url: 'wss://nostr.mom', write: false },
 ]
 
 /** A relay URL is valid if it is wss://, or ws:// against localhost (dev only). */

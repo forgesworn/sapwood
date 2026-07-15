@@ -40,12 +40,14 @@ export const DEFAULT_SIGNER_RELAYS: readonly string[] = [
   'wss://relay.primal.net',
 ]
 
-/** The full ecosystem set (pallasite's DEFAULT_RELAYS), offered as one-tap
- *  additions. nostr.wine is deliberately absent: paid, rejected our writes. */
+/** Extra reliable relays offered as one-tap additions. nostr.wine is
+ *  deliberately absent: paid, rejected our writes. relay.nostr.band and
+ *  relay.ditto.pub were dropped after going dark (probed 2026-07-15:
+ *  nostr.band unreachable, ditto.pub 502). */
 export const SUGGESTED_SIGNER_RELAYS: readonly string[] = [
   ...DEFAULT_SIGNER_RELAYS,
-  'wss://relay.nostr.band',
-  'wss://relay.ditto.pub',
+  'wss://nostr.mom',
+  'wss://offchain.pub',
 ]
 
 export interface WizardData {

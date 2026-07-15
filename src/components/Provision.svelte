@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity, relayProvisionIdentity } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
@@ -13,7 +13,7 @@
     zeroize,
     type ProvisionMode,
   } from '../lib/provision.js'
-  import { isKeyBackupCandidate, keyToWords, wordsToKey } from '../lib/restore.js'
+  import { isKeyBackupCandidate, keyToWords, wordsToKey, decryptNcryptsec } from '../lib/restore.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { nip19 } from 'nostr-tools'
   import PasswordReveal from './PasswordReveal.svelte'
@@ -39,17 +39,22 @@
     } catch { /* non-fatal */ }
   }
 
-  let mode = $state<ProvisionMode>('tree-mnemonic')
-  let label = $state('default')
+  // Over the relay the recommended path is the on-signer derive (no secret in
+  // the browser), so it opens on that mode with an empty name. All other modes
+  // work remotely too: the secret travels NIP-44 encrypted end-to-end.
+  let mode = $state<ProvisionMode>(device.mode === 'relay' ? 'named-child' : 'tree-mnemonic')
+  let label = $state(device.mode === 'relay' ? '' : 'default')
   let secret = $state('')
   let passphrase = $state('')
+  let ncryptPassword = $state('')
   let showPassphrase = $state(false)
   let showSecret = $state(false)
+  const isNcryptsec = $derived(secret.trim().startsWith('ncryptsec1'))
 
   // Named-identity source. The signer already holds the master's tree root, so
   // by default IT derives the child (frame 0x60 over USB, mgmt derive_identity
   // over the relay — no key material crosses the wire either way). The
-  // phrase/nsec path stays for older firmware and off-signer roots, USB only.
+  // phrase/nsec path stays for older firmware and off-signer roots.
   let deriveSource = $state<'signer' | 'secret'>('signer')
   let parentSlot = $state(0)
   // Over the relay only the ADDRESSED master can derive; a relay management
@@ -58,14 +63,9 @@
     !m.persona && (device.mode !== 'relay' || m.addressed !== false)))
   const canDeriveOnSigner = $derived(
     (device.mode === 'serial' || device.mode === 'relay') && signerParents.length > 0)
-  // A relay session can ONLY derive on-signer: entering a master secret is a
-  // cable-gated act, and the child key could not be sent remotely anyway.
-  const relayOnly = $derived(device.mode === 'relay')
+  const overRelay = $derived(device.mode === 'relay')
   const onSigner = $derived(mode === 'named-child'
-    && (deriveSource === 'signer' || relayOnly) && canDeriveOnSigner)
-  $effect(() => {
-    if (relayOnly && mode !== 'named-child') mode = 'named-child'
-  })
+    && deriveSource === 'signer' && canDeriveOnSigner)
   $effect(() => {
     if (canDeriveOnSigner && !signerParents.some((m) => m.slot === parentSlot)) {
       parentSlot = signerParents[0]!.slot
@@ -129,6 +129,15 @@
   let message = $state('')
   let npubPreview = $state('')
 
+  /** Decode an nsec1… or password-protected ncryptsec1… input to key bytes. */
+  function nsecOrNcryptBytes(trimmed: string): Uint8Array {
+    if (trimmed.startsWith('ncryptsec1')) {
+      if (!ncryptPassword.trim()) throw new Error('Enter the password for this encrypted key.')
+      return decryptNcryptsec(trimmed, ncryptPassword)
+    }
+    return decodeNsec(trimmed)
+  }
+
   async function handleDerive() {
     status = 'deriving'
     message = ''
@@ -143,13 +152,13 @@
         // the name that derives the key is exactly the label sent to the device.
         label = label.trim()
         const trimmedSecret = secret.trim()
-        if (trimmedSecret.startsWith('nsec1')) {
+        if (trimmedSecret.startsWith('nsec1') || trimmedSecret.startsWith('ncryptsec1')) {
           // Master made from an nsec (sign-as-is or tree): same root nsec-tree
           // fromNsec() builds, so the named child matches the CLI's. Words are
           // always read as a recovery phrase here; a 24-word key backup must be
           // pasted as its nsec, since valid 24 words are indistinguishable
           // from a real phrase.
-          const nsecBytes = decodeNsec(trimmedSecret)
+          const nsecBytes = nsecOrNcryptBytes(trimmedSecret)
           try {
             result = deriveNamedFromNsec(nsecBytes, label)
           } finally {
@@ -159,8 +168,11 @@
           result = await deriveNamedFromMnemonic(secret, passphrase, label)
         }
       } else {
-        // An nsec, or the same key as the 24 backup words Sapwood writes out.
-        const nsecBytes = isKeyBackupCandidate(secret) ? wordsToKey(secret) : decodeNsec(secret)
+        // An nsec, an ncryptsec, or the 24 backup words Sapwood writes out.
+        const trimmedSecret = secret.trim()
+        const nsecBytes = trimmedSecret.startsWith('ncryptsec1')
+          ? nsecOrNcryptBytes(trimmedSecret)
+          : isKeyBackupCandidate(secret) ? wordsToKey(secret) : decodeNsec(secret)
         try {
           result = mode === 'tree-nsec' ? deriveFromNsec(nsecBytes) : useRawNsec(nsecBytes)
         } finally {
@@ -187,11 +199,11 @@
   let backupWords = $state('')
   let showBackup = $state(false)
 
-  /** Write the entered nsec out as 24 words, computed only when asked for. */
+  /** Write the entered nsec/ncryptsec out as 24 words, computed only when asked for. */
   function toggleBackupWords() {
     if (!showBackup && !backupWords) {
       try {
-        const bytes = decodeNsec(secret)
+        const bytes = nsecOrNcryptBytes(secret.trim())
         try { backupWords = keyToWords(bytes) } finally { zeroize(bytes) }
       } catch { return }
     }
@@ -205,23 +217,34 @@
     message = 'Sending to device...'
 
     try {
-      const frame = buildProvisionFrame(pendingSecret, label, mode)
-      const resp = await serialTransport.sendAndReceive(
-        frame,
-        [FrameType.ACK, FrameType.NACK],
-        30_000,
-      )
-
-      if (resp.type === FrameType.ACK) {
+      if (device.mode === 'relay') {
+        // The secret travels NIP-44 encrypted end-to-end to the signer; the
+        // signer restarts shortly after storing to serve the new identity.
+        const res = await relayProvisionIdentity(pendingSecret, label, mode)
         status = 'done'
-        message = `Identity '${label}' added to the signer.`
-        // Remember this device so it can be managed over the relay once it
-        // boots into wifi-standalone mode (Connect WiFi in the top bar).
-        rememberProvisioned(npubPreview, label)
-        await refreshMasters()
+        message = res.existing
+          ? `“${res.label}” was already on this signer (slot ${res.slot}).`
+          : `Identity '${res.label}' added to the signer. It restarts briefly to start serving it; reconnect from the front page in a few seconds.`
+        rememberProvisioned(res.npub, res.label)
       } else {
-        status = 'error'
-        message = 'Device rejected the provision (CRC error or NVS write failure).'
+        const frame = buildProvisionFrame(pendingSecret, label, mode)
+        const resp = await serialTransport.sendAndReceive(
+          frame,
+          [FrameType.ACK, FrameType.NACK],
+          30_000,
+        )
+
+        if (resp.type === FrameType.ACK) {
+          status = 'done'
+          message = `Identity '${label}' added to the signer.`
+          // Remember this device so it can be managed over the relay once it
+          // boots into wifi-standalone mode (Connect WiFi in the top bar).
+          rememberProvisioned(npubPreview, label)
+          await refreshMasters()
+        } else {
+          status = 'error'
+          message = 'Device rejected the provision (CRC error or NVS write failure).'
+        }
       }
     } catch (e) {
       status = 'error'
@@ -231,6 +254,7 @@
       pendingSecret = null
       secret = ''
       passphrase = ''
+      ncryptPassword = ''
       backupWords = ''
       showBackup = false
     }
@@ -246,6 +270,7 @@
     npubPreview = ''
     secret = ''
     passphrase = ''
+    ncryptPassword = ''
     backupWords = ''
     showBackup = false
     handoff = null
@@ -278,7 +303,7 @@
       </p>
     {/if}
     <button class="btn btn-secondary" onclick={handleCancel}>Add another</button>
-  {:else if device.mode !== 'serial' && !(relayOnly && canDeriveOnSigner)}
+  {:else if device.mode !== 'serial' && device.mode !== 'relay'}
     <div class="card card--warn usb-gate">
       <p class="usb-gate-lead">🔌 Plug in a USB cable to set up this device.</p>
       <p class="usb-gate-why">
@@ -335,16 +360,16 @@
         <select
           class="field-input"
           bind:value={mode}
-          disabled={status === 'deriving' || status === 'sending' || relayOnly}
+          disabled={status === 'deriving' || status === 'sending'}
           onchange={() => { if (mode === 'named-child' && label === 'default') label = '' }}
         >
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
-          <option value="named-child">{relayOnly ? 'Derive a named identity on this signer' : 'Phrase or nsec + name: derive a named identity'}</option>
+          <option value="named-child">Name: derive a named identity from your master</option>
           <option value="bunker">Existing nsec: sign as-is (keeps your npub)</option>
           <option value="tree-nsec">Existing nsec: derive a new key (new npub)</option>
         </select>
-        {#if relayOnly}
-          <span class="hint-sm name-hint">Over WiFi the signer can derive named identities itself, since no secret crosses the network. The other set-up styles enter a master secret, so they need the USB cable.</span>
+        {#if overRelay}
+          <span class="hint-sm name-hint">Over WiFi, deriving by name needs no secret at all: the signer already holds your master. The other styles send the secret to the signer encrypted end-to-end (NIP-44); relays only ever carry ciphertext.</span>
         {/if}
       </label>
 
@@ -356,7 +381,7 @@
         </p>
       </div>
 
-      {#if mode === 'named-child' && canDeriveOnSigner && !relayOnly}
+      {#if mode === 'named-child' && canDeriveOnSigner}
         <div class="source-toggle" role="radiogroup" aria-label="Where to derive">
           <button
             class="source-opt"
@@ -405,27 +430,39 @@
         {/if}
       </label>
 
+      <!-- Secret inputs. NONE render for an on-signer derive: the whole point
+           is that the browser never sees a secret, so only the Name applies. -->
       {#if (mode === 'tree-mnemonic' || mode === 'named-child') && !onSigner}
         <label class="field">
-          <span class="field-label">{mode === 'named-child' ? 'Recovery phrase or nsec' : 'Mnemonic'}</span>
+          <span class="field-label">{mode === 'named-child' ? 'Recovery phrase, nsec or ncryptsec' : 'Mnemonic'}</span>
           <textarea
             class="field-input"
             bind:value={secret}
-            placeholder={mode === 'named-child' ? '12 or 24 words, or nsec1…' : '12 or 24 words'}
+            placeholder={mode === 'named-child' ? '12 or 24 words, nsec1… or ncryptsec1…' : '12 or 24 words'}
             rows="3"
             disabled={status === 'deriving' || status === 'sending'}
             autocomplete="off"
             spellcheck="false"
           ></textarea>
         </label>
-        <label class="field">
-          <span class="field-label">{mode === 'named-child' ? 'Passphrase (phrase input only)' : 'Passphrase'}</span>
-          <div class="pw-wrap">
-            <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" disabled={status === 'deriving' || status === 'sending'} />
-            <PasswordReveal bind:shown={showPassphrase} disabled={status === 'deriving' || status === 'sending'} />
-          </div>
-        </label>
-      {:else}
+        {#if isNcryptsec}
+          <label class="field">
+            <span class="field-label">Password for the encrypted key</span>
+            <div class="pw-wrap">
+              <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={ncryptPassword} placeholder="ncryptsec password" disabled={status === 'deriving' || status === 'sending'} autocomplete="off" />
+              <PasswordReveal bind:shown={showPassphrase} disabled={status === 'deriving' || status === 'sending'} />
+            </div>
+          </label>
+        {:else}
+          <label class="field">
+            <span class="field-label">{mode === 'named-child' ? 'Passphrase (phrase input only)' : 'Passphrase'}</span>
+            <div class="pw-wrap">
+              <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" disabled={status === 'deriving' || status === 'sending'} />
+              <PasswordReveal bind:shown={showPassphrase} disabled={status === 'deriving' || status === 'sending'} />
+            </div>
+          </label>
+        {/if}
+      {:else if mode === 'bunker' || mode === 'tree-nsec'}
         <label class="field">
           <span class="field-label">{mode === 'tree-nsec' ? 'nsec (tree derivation)' : 'nsec (raw, no derivation)'}</span>
           <div class="pw-wrap">
@@ -433,13 +470,22 @@
               type={showSecret ? 'text' : 'password'}
               class="field-input"
               bind:value={secret}
-              placeholder="nsec1... or a 24-word key backup"
+              placeholder="nsec1…, ncryptsec1… or a 24-word key backup"
               disabled={status === 'deriving' || status === 'sending'}
               autocomplete="off"
             />
             <PasswordReveal bind:shown={showSecret} disabled={status === 'deriving' || status === 'sending'} />
           </div>
         </label>
+        {#if isNcryptsec}
+          <label class="field">
+            <span class="field-label">Password for the encrypted key</span>
+            <div class="pw-wrap">
+              <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={ncryptPassword} placeholder="ncryptsec password" disabled={status === 'deriving' || status === 'sending'} autocomplete="off" />
+              <PasswordReveal bind:shown={showPassphrase} disabled={status === 'deriving' || status === 'sending'} />
+            </div>
+          </label>
+        {/if}
       {/if}
 
       {#if onSigner}
@@ -454,7 +500,8 @@
       {:else}
         <button
           class="btn btn-primary derive"
-          disabled={!device.connected || device.mode !== 'serial' || status === 'deriving' || !secret.trim()
+          disabled={!device.connected || (device.mode !== 'serial' && device.mode !== 'relay')
+            || status === 'deriving' || !secret.trim()
             || (mode === 'named-child' && nameDeriveError(label) !== null)}
           onclick={handleDerive}
         >
@@ -471,6 +518,8 @@
   <p class="security-note">
     {#if onSigner}
       The identity is derived inside the signer from the master it already holds. No secret enters or leaves this browser.
+    {:else if overRelay}
+      The secret is derived in your browser and sent to the signer encrypted end-to-end (NIP-44). Relays and every network hop only ever carry ciphertext; nothing is stored or logged.
     {:else}
       The secret is derived in your browser and sent directly to the device over USB. It is never stored, never logged, and never sent over the network.
     {/if}

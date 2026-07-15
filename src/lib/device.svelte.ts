@@ -674,14 +674,20 @@ function applyRelayStatus(raw: Record<string, unknown>) {
   if (masterHex) {
     let npub = masterHex
     try { npub = nip19.npubEncode(masterHex) } catch { /* keep hex */ }
-    const known = device.masters[0]
-    device.masters = [{
-      slot: 0,
-      label: known?.label ?? 'master',
-      mode: -1,
-      modeLabel: status.mode.toUpperCase(),
-      npub,
-    }]
+    // Seed the addressed master only when it is not already known: the full
+    // list_identities inventory supersedes this single entry, and re-seeding
+    // on every status poll made the identity list flap between one and many
+    // entries (the page visibly shuffled every few seconds).
+    if (!device.masters.some((m) => m.npub === npub)) {
+      const known = device.masters[0]
+      device.masters = [{
+        slot: 0,
+        label: known?.label ?? 'master',
+        mode: -1,
+        modeLabel: status.mode.toUpperCase(),
+        npub,
+      }]
+    }
   }
   // Knowing the master npub is all we need to dress the signer's screen —
   // over the relay too (firmware ≥0.9.12 accepts set_identity_meta).
@@ -842,7 +848,12 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
           Number(b.addressed ?? false) - Number(a.addressed ?? false)
           || Number(a.persona ?? false) - Number(b.persona ?? false)
           || a.slot - b.slot)
-        device.masters = mapped
+        // Only assign on real change: this refresh runs every few seconds and
+        // replacing identical state makes the page shuffle under the user
+        // (identity cards re-render while they are typing a new name).
+        if (JSON.stringify(device.masters) !== JSON.stringify(mapped)) {
+          device.masters = mapped
+        }
       }
     } catch { /* older firmware — keep the status-derived single master */ }
     const res = await current.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
@@ -851,8 +862,7 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
     // Slot URIs are reusable credentials and numeric indices compact on revoke.
     // Never carry an index-keyed cache across a fresh authoritative listing;
     // remote reissue below is fingerprint-bound and can safely fetch it again.
-    device.slotUris = {}
-    device.slots = clients.map((c) => ({
+    const nextSlots = clients.map((c) => ({
       slot_index: Number(c.slot_index),
       label: String(c.label ?? ''),
       secret: '',
@@ -870,6 +880,12 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         ? c.secret_fingerprint.toLowerCase()
         : undefined,
     }))
+    // Assign only on real change so the periodic refresh doesn't make the
+    // Apps list (and everything below it) re-render under the user.
+    if (JSON.stringify(device.slots) !== JSON.stringify(nextSlots)) {
+      device.slotUris = {}
+      device.slots = nextSlots
+    }
     await recoverPendingNetworkRoute()
     if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     device.error = null
@@ -2500,6 +2516,40 @@ export async function serialDeriveIdentity(
   // Best-effort: a wifi-standalone signer reboots shortly after replying (to
   // re-subscribe with the new master set), so the list refresh may not land.
   try { await refreshMasters() } catch { /* device rebooting */ }
+  return info
+}
+
+/**
+ * Provision a new identity over the relay (mgmt `provision_identity`). The
+ * secret travels NIP-44 encrypted end-to-end under the operator⇄signer
+ * conversation key — relays and every network hop carry only ciphertext. The
+ * signer restarts about two seconds after replying to serve the new identity.
+ */
+export async function relayProvisionIdentity(
+  secret: Uint8Array,
+  label: string,
+  mode: 'tree-mnemonic' | 'tree-nsec' | 'bunker' | 'named-child',
+): Promise<{ slot: number; label: string; npub: string; existing: boolean }> {
+  if (!relayTransport) throw new Error('Not connected over the relay')
+  const modeByte = mode === 'bunker' || mode === 'named-child' ? 0 : mode === 'tree-mnemonic' ? 1 : 2
+  const secretHex = Array.from(secret, (b) => b.toString(16).padStart(2, '0')).join('')
+  const res = await relayTransport.request(
+    'provision_identity',
+    { mode: modeByte, label, secret_hex: secretHex },
+    MGMT_WRITE_TIMEOUT_MS,
+  )
+  const hex = String(res.npub_hex ?? '')
+  let npub = hex
+  try { npub = nip19.npubEncode(hex) } catch { /* keep hex */ }
+  const info = {
+    slot: Number(res.slot ?? -1),
+    label: String(res.label ?? label),
+    npub,
+    existing: res.existing === true,
+  }
+  if (!info.existing) {
+    rememberDevice(hex, device.relays.length ? device.relays : [...DEFAULT_SIGNER_RELAYS], info.label)
+  }
   return info
 }
 

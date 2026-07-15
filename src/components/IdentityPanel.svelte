@@ -50,9 +50,9 @@
 
     {#if !device.connected}
       <p class="empty">Connect to your signer to see its identities.</p>
-    {:else if device.mode === 'relay' && device.relayStatus === null && !device.error}
+    {:else if device.mode === 'relay' && device.relayStatus === null && !device.error && device.masters.length === 0}
       <p class="empty">Loading identities over the relay…</p>
-    {:else if device.mode === 'relay' && device.relayStatus === null && device.error}
+    {:else if device.mode === 'relay' && device.relayStatus === null && device.error && device.masters.length === 0}
       <!-- Connected over the relay but get_status never came back. A WiFi signer
            always has an identity, so this is a round-trip failure, not an empty
            list. Surface it instead of a misleading "no identities". -->

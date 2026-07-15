@@ -69,7 +69,7 @@ All destructive operations (factory reset, OTA, provisioning) require physical b
 - **WiFi-standalone (standard)** -- the signer joins the user's WiFi and serves NIP-46 over relays itself. Convenient, manageable from anywhere, no extra software. This is what the guided flasher produces by default.
 - **USB-only, radio off (hardened)** -- no network stack runs on the key-holding chip at all; its remote attack surface is zero. Remote signing requires the heartwood bridge daemon on an always-on host with the signer plugged in. Presented as the advanced option in the flasher and the Device > Network panel.
 
-Regardless of tier, identity creation, firmware updates, factory reset and PIN changes always require the USB cable -- deliberate physical-presence gates.
+Regardless of tier, firmware updates, factory reset and PIN changes always require the USB cable -- deliberate physical-presence gates. Identity management works over WiFi too: derive-by-name sends no secret at all (the signer holds the root), and importing a phrase/nsec/ncryptsec travels NIP-44 encrypted end-to-end under the operator-signer conversation key, so relays only ever carry ciphertext.
 
 ### Future: Web Bluetooth (portable mode only)
 
