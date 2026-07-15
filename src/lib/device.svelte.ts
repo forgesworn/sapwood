@@ -9,6 +9,7 @@ import {
   buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
   buildFirmwareInfo, buildWifiScan,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
+  buildDeriveIdentity,
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
 import { policiesEqual } from './client-policy.js'
@@ -2434,6 +2435,32 @@ function lastRelays(): string[] {
     if (list.length) return list
   } catch { /* fall through to defaults */ }
   return [...DEFAULT_SIGNER_RELAYS]
+}
+
+/**
+ * Derive a named child identity on the signer itself (USB, frame 0x60). The
+ * device already holds the tree root, so no secret enters or leaves the
+ * browser. Returns the new (or pre-existing, when re-derived) identity.
+ */
+export async function serialDeriveIdentity(
+  parentSlot: number,
+  name: string,
+): Promise<{ slot: number; label: string; npub: string; existing: boolean }> {
+  const resp = await serialTransport.sendAndReceive(
+    buildDeriveIdentity(parentSlot, name),
+    [FrameType.DERIVE_IDENTITY_RESPONSE, FrameType.NACK],
+    SERIAL_RTT_MS,
+  )
+  if (resp.type !== FrameType.DERIVE_IDENTITY_RESPONSE) {
+    const reason = new TextDecoder().decode(resp.payload)
+    // An older firmware replies NACK to any unknown frame type with no reason.
+    throw new Error(reason || 'This firmware cannot derive identities on-device. Update the signer, or enter the phrase or nsec instead.')
+  }
+  const info = JSON.parse(new TextDecoder().decode(resp.payload)) as {
+    slot: number; label: string; npub: string; existing: boolean
+  }
+  await refreshMasters()
+  return info
 }
 
 /** Create a client slot over USB. Returns the bunker URI + secret (shown once). */

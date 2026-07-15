@@ -21,6 +21,9 @@
   const overBridge = $derived(device.mode === 'http')
   const overUsb = $derived(device.mode === 'serial')
   const canApprove = $derived(mgmtCanApproveSigning())
+  // Master slots only: derived personas share their owner's slot table, so
+  // they are not separate targets for app connections here.
+  const identities = $derived(device.masters.filter((m) => !m.persona))
   const hasIdentity = $derived(device.masters.length > 0)
   // A USB device with no identity is the just-fell-through-from-setup state: an
   // app needs an identity to connect to, so point at Identity rather than show a
@@ -241,12 +244,12 @@
   <div class="head">
     <h2 class="section-title head-title">Apps</h2>
     <div class="head-controls">
-      {#if device.masters.length > 1}
+      {#if identities.length > 1}
         <!-- Which identity new connections bind to. Shown on any transport that
              lists more than one (USB via PROVISION_LIST, bridge via HTTP); a
              relay session always manages a single master, so it never appears. -->
         <select class="field-input identity-pick" aria-label="Identity" value={device.selectedSlot} onchange={handleIdentityChange}>
-          {#each device.masters as master (master.slot)}
+          {#each identities as master (master.slot)}
             <option value={master.slot}>{master.label ?? master.slot}</option>
           {/each}
         </select>

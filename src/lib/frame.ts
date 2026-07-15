@@ -26,6 +26,8 @@ export const FrameType = {
   RESTORE_IDENTITY:      0x58,
   FIRMWARE_INFO:         0x59,
   FIRMWARE_INFO_RESPONSE: 0x5a,
+  DERIVE_IDENTITY:       0x60,
+  DERIVE_IDENTITY_RESPONSE: 0x61,
   SET_IDENTITY_META:     0x5b,
   GET_NET_CONFIG:        0x5c,
   GET_NET_CONFIG_RESPONSE: 0x5d,
@@ -298,6 +300,20 @@ function hexToBytes32(hexSecret: string): Uint8Array {
     bytes[i] = parseInt(hexSecret.slice(i * 2, i * 2 + 2), 16)
   }
   return bytes
+}
+
+/**
+ * DERIVE_IDENTITY (0x60): payload [parent_slot][name utf8]. The device derives
+ * the nsec-tree child at purpose = name, index 0 from that master's tree root
+ * and stores it as a new identity. No secret enters or leaves the host.
+ * Responds 0x61 with JSON { slot, label, npub, parent_slot, purpose, existing }.
+ */
+export function buildDeriveIdentity(parentSlot: number, name: string): Uint8Array {
+  const nameBytes = new TextEncoder().encode(name)
+  const payload = new Uint8Array(1 + nameBytes.length)
+  payload[0] = parentSlot
+  payload.set(nameBytes, 1)
+  return buildFrame(FrameType.DERIVE_IDENTITY, payload)
 }
 
 // --- Connection-slot (client) management over serial (mirrors CONNSLOT_* frames) ---

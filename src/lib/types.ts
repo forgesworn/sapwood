@@ -44,8 +44,12 @@ export interface ClientPolicy {
 export interface MasterInfo {
   slot: number
   label: string
-  mode: number
+  /** Absent on persona entries — they have no wire mode of their own. */
+  mode?: number
   npub: string
+  /** True for a derived persona entry; `slot` is then the OWNING master's slot,
+   *  so persona rows must not be offered where a distinct slot is required. */
+  persona?: boolean
   /** Display override for the mode tag (e.g. 'WIFI-STANDALONE' over relay). */
   modeLabel?: string
   /** Bunker URI for this identity (Pi multi-instance mode). */

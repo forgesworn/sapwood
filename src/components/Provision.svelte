@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters, serialDeriveIdentity } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
@@ -46,6 +46,40 @@
   let showPassphrase = $state(false)
   let showSecret = $state(false)
 
+  // Named-identity source. The signer already holds the master's tree root, so
+  // by default IT derives the child (frame 0x60) and no secret touches the
+  // browser. The phrase/nsec path stays for older firmware and off-signer roots.
+  let deriveSource = $state<'signer' | 'secret'>('signer')
+  let parentSlot = $state(0)
+  const signerParents = $derived(device.masters.filter((m) => !m.persona))
+  const canDeriveOnSigner = $derived(device.mode === 'serial' && signerParents.length > 0)
+  const onSigner = $derived(mode === 'named-child' && deriveSource === 'signer' && canDeriveOnSigner)
+  $effect(() => {
+    if (canDeriveOnSigner && !signerParents.some((m) => m.slot === parentSlot)) {
+      parentSlot = signerParents[0]!.slot
+    }
+  })
+
+  /** Ask the signer to derive label as a named child of the chosen master. */
+  async function handleDeriveOnSigner() {
+    status = 'deriving'
+    message = ''
+    npubPreview = ''
+    try {
+      label = label.trim()
+      const res = await serialDeriveIdentity(parentSlot, label)
+      npubPreview = res.npub
+      status = 'done'
+      message = res.existing
+        ? `“${res.label}” was already on this signer (slot ${res.slot}).`
+        : `Identity '${res.label}' derived on the signer.`
+      rememberProvisioned(res.npub, res.label)
+    } catch (e) {
+      status = 'error'
+      message = e instanceof Error ? e.message : 'Derivation failed'
+    }
+  }
+
   // Plain-English explanation of each style, including the one thing that trips
   // people up: whether the device keeps your existing npub or gets a new one.
   const MODE_INFO: Record<ProvisionMode, { title: string; body: string; address: string; addressKind: 'same' | 'new' }> = {
@@ -68,9 +102,9 @@
       addressKind: 'new',
     },
     'named-child': {
-      title: 'Named identity from your master secret',
-      body: 'Derive a member of your identity tree by name (for example work, social, or a project name). Enter the recovery phrase or nsec your master identity was made from: the name picks a branch of that tree, and the same secret and name always recreate the same identity, here or with the nsec-tree tools. Names are case-sensitive.',
-      address: 'A new address, derived from your master secret and the name.',
+      title: 'Named identity from your master',
+      body: 'Derive a member of your identity tree by name (for example work, social, or a project name). The name picks a branch of the tree: the same master and name always recreate the same identity, here or with the nsec-tree tools. Names are case-sensitive.',
+      address: 'A new address, derived from your master and the name.',
       addressKind: 'new',
     },
   }
@@ -285,7 +319,7 @@
         <select
           class="field-input"
           bind:value={mode}
-          disabled={status !== 'idle'}
+          disabled={status === 'deriving' || status === 'sending'}
           onchange={() => { if (mode === 'named-child' && label === 'default') label = '' }}
         >
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
@@ -303,6 +337,40 @@
         </p>
       </div>
 
+      {#if mode === 'named-child' && canDeriveOnSigner}
+        <div class="source-toggle" role="radiogroup" aria-label="Where to derive">
+          <button
+            class="source-opt"
+            class:on={deriveSource === 'signer'}
+            onclick={() => (deriveSource = 'signer')}
+            disabled={status === 'deriving'}
+          >
+            <span class="source-title">On this signer</span>
+            <span class="source-desc">The signer holds the master, so it derives the child itself. No secret is entered.</span>
+          </button>
+          <button
+            class="source-opt"
+            class:on={deriveSource === 'secret'}
+            onclick={() => (deriveSource = 'secret')}
+            disabled={status === 'deriving'}
+          >
+            <span class="source-title">From a phrase or nsec</span>
+            <span class="source-desc">Derive in the browser from the master secret, then send the child to the signer.</span>
+          </button>
+        </div>
+      {/if}
+
+      {#if onSigner && signerParents.length > 1}
+        <label class="field">
+          <span class="field-label">Derive from</span>
+          <select class="field-input" bind:value={parentSlot} disabled={status === 'deriving'}>
+            {#each signerParents as parent (parent.npub)}
+              <option value={parent.slot}>{parent.label ?? `slot ${parent.slot}`}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+
       <label class="field">
         <span class="field-label">{mode === 'named-child' ? 'Name' : 'Label'}</span>
         <input
@@ -311,14 +379,14 @@
           bind:value={label}
           placeholder={mode === 'named-child' ? 'e.g. work, social, pallasite' : 'default'}
           maxlength="32"
-          disabled={status !== 'idle'}
+          disabled={status === 'deriving' || status === 'sending'}
         />
         {#if mode === 'named-child'}
-          <span class="hint-sm name-hint">The name selects the derived key. Write it down with your phrase: both are needed to recreate this identity.</span>
+          <span class="hint-sm name-hint">The name selects the derived key. Write it down with your master's backup: both are needed to recreate this identity.</span>
         {/if}
       </label>
 
-      {#if mode === 'tree-mnemonic' || mode === 'named-child'}
+      {#if (mode === 'tree-mnemonic' || mode === 'named-child') && !onSigner}
         <label class="field">
           <span class="field-label">{mode === 'named-child' ? 'Recovery phrase or nsec' : 'Mnemonic'}</span>
           <textarea
@@ -326,7 +394,7 @@
             bind:value={secret}
             placeholder={mode === 'named-child' ? '12 or 24 words, or nsec1…' : '12 or 24 words'}
             rows="3"
-            disabled={status !== 'idle'}
+            disabled={status === 'deriving' || status === 'sending'}
             autocomplete="off"
             spellcheck="false"
           ></textarea>
@@ -334,8 +402,8 @@
         <label class="field">
           <span class="field-label">{mode === 'named-child' ? 'Passphrase (phrase input only)' : 'Passphrase'}</span>
           <div class="pw-wrap">
-            <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" disabled={status !== 'idle'} />
-            <PasswordReveal bind:shown={showPassphrase} disabled={status !== 'idle'} />
+            <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" disabled={status === 'deriving' || status === 'sending'} />
+            <PasswordReveal bind:shown={showPassphrase} disabled={status === 'deriving' || status === 'sending'} />
           </div>
         </label>
       {:else}
@@ -347,22 +415,33 @@
               class="field-input"
               bind:value={secret}
               placeholder="nsec1... or a 24-word key backup"
-              disabled={status !== 'idle'}
+              disabled={status === 'deriving' || status === 'sending'}
               autocomplete="off"
             />
-            <PasswordReveal bind:shown={showSecret} disabled={status !== 'idle'} />
+            <PasswordReveal bind:shown={showSecret} disabled={status === 'deriving' || status === 'sending'} />
           </div>
         </label>
       {/if}
 
-      <button
-        class="btn btn-primary derive"
-        disabled={!device.connected || device.mode !== 'serial' || status === 'deriving' || !secret.trim()
-          || (mode === 'named-child' && nameDeriveError(label) !== null)}
-        onclick={handleDerive}
-      >
-        {status === 'deriving' ? 'Deriving...' : 'Derive and Preview'}
-      </button>
+      {#if onSigner}
+        <button
+          class="btn btn-primary derive"
+          disabled={!device.connected || device.mode !== 'serial' || status === 'deriving'
+            || nameDeriveError(label) !== null}
+          onclick={handleDeriveOnSigner}
+        >
+          {status === 'deriving' ? 'Deriving on signer...' : 'Derive on signer'}
+        </button>
+      {:else}
+        <button
+          class="btn btn-primary derive"
+          disabled={!device.connected || device.mode !== 'serial' || status === 'deriving' || !secret.trim()
+            || (mode === 'named-child' && nameDeriveError(label) !== null)}
+          onclick={handleDerive}
+        >
+          {status === 'deriving' ? 'Deriving...' : 'Derive and Preview'}
+        </button>
+      {/if}
     </div>
 
     {#if status === 'error'}
@@ -371,7 +450,11 @@
   {/if}
 
   <p class="security-note">
-    The secret is derived in your browser and sent directly to the device over USB. It is never stored, never logged, and never sent over the network.
+    {#if onSigner}
+      The identity is derived inside the signer from the master it already holds. No secret enters or leaves this browser.
+    {:else}
+      The secret is derived in your browser and sent directly to the device over USB. It is never stored, never logged, and never sent over the network.
+    {/if}
   </p>
 </div>
 
@@ -405,6 +488,23 @@
   .info strong { color: var(--text); }
 
   .name-hint { display: block; margin-top: 0.35rem; }
+
+  /* Where a named identity derives: on the signer (default) or in the browser */
+  .source-toggle { display: flex; flex-direction: column; gap: 0.5rem; }
+  .source-opt {
+    display: flex; flex-direction: column; gap: 0.2rem; text-align: left;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7rem 0.9rem; cursor: pointer; font-family: inherit;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .source-opt:hover { border-color: #444; }
+  .source-opt.on { border-color: var(--green-dim); background: #08130d; }
+  .source-title { font-size: 0.88rem; font-weight: 600; color: #fff; }
+  .source-opt.on .source-title { color: var(--green); }
+  .source-desc { font-size: 0.76rem; color: var(--text-dim); line-height: 1.45; }
+  @media (max-width: 640px) {
+    .source-toggle { flex-direction: column; }
+  }
 
   .mode-info {
     border: 1px solid #243; border-left: 3px solid #4a9; border-radius: 4px;

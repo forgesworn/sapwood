@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { buildFrame, parseFrame, FrameError, FrameType, OVERHEAD, MAX_PAYLOAD } from './frame.js'
 import { crc32 } from './crc32.js'
 import {
+  buildDeriveIdentity,
   buildPolicyListRequest,
   buildPolicyRevoke,
   buildPolicyUpdate,
@@ -148,6 +149,24 @@ describe('policy management frames', () => {
     const frame = parseFrame(bytes)
     expect(frame.type).toBe(FrameType.FACTORY_RESET)
     expect(frame.payload.length).toBe(0)
+  })
+})
+
+describe('derive identity frame', () => {
+  it('roundtrips DERIVE_IDENTITY as [parent_slot][name utf8]', () => {
+    const bytes = buildDeriveIdentity(1, 'pallasite')
+    const frame = parseFrame(bytes)
+    expect(frame.type).toBe(0x60)
+    expect(frame.payload[0]).toBe(1)
+    expect(new TextDecoder().decode(frame.payload.slice(1))).toBe('pallasite')
+  })
+
+  it('roundtrips DERIVE_IDENTITY_RESPONSE JSON', () => {
+    const json = '{"slot":2,"label":"pallasite","npub":"npub1...","parent_slot":1,"purpose":"pallasite","existing":false}'
+    const bytes = buildFrame(FrameType.DERIVE_IDENTITY_RESPONSE, new TextEncoder().encode(json))
+    const frame = parseFrame(bytes)
+    expect(frame.type).toBe(0x61)
+    expect(new TextDecoder().decode(frame.payload)).toBe(json)
   })
 })
 

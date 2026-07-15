@@ -83,11 +83,13 @@
     {:else if device.masters.length === 0}
       <p class="empty">No identities yet. Add one below, or use the guided setup on Home.</p>
     {:else}
-      {#each device.masters as master (master.slot)}
+      <!-- Keyed by npub: derived personas carry their OWNING master's slot
+           number, so slot is not unique across the list. -->
+      {#each device.masters as master (master.npub)}
         <div class="card id-card">
           <div class="id-head">
-            <span class="id-slot">SLOT {master.slot}</span>
-            <span class="id-mode">{master.modeLabel ?? MODE_LABELS[master.mode] ?? `MODE ${master.mode}`}</span>
+            <span class="id-slot">{master.persona ? `FROM SLOT ${master.slot}` : `SLOT ${master.slot}`}</span>
+            <span class="id-mode">{master.persona ? 'DERIVED' : master.modeLabel ?? MODE_LABELS[master.mode ?? -1] ?? `MODE ${master.mode}`}</span>
           </div>
           {#if master.label}<div class="id-label">{master.label}</div>{/if}
           <div class="id-npub">{master.npub}</div>

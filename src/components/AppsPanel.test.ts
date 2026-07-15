@@ -66,4 +66,16 @@ describe('AppsPanel identity picker', () => {
     render(AppsPanel)
     expect(screen.queryByLabelText('Identity')).toBeNull()
   })
+
+  it('excludes derived personas: they share their owner slot table', () => {
+    // A persona row carries its OWNING master's slot, so offering it as a
+    // separate target would duplicate slot 0. One real master + personas
+    // means there is still nothing to pick between.
+    device.masters = [
+      MASTERS[0]!,
+      { slot: 0, npub: 'npub1personakey', label: 'pallasite', persona: true } as never,
+    ]
+    render(AppsPanel)
+    expect(screen.queryByLabelText('Identity')).toBeNull()
+  })
 })
