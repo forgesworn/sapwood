@@ -42,6 +42,11 @@ export interface RelayStatus {
   mode: string
   relay: string
   capabilities: string[]
+  /** Seconds since the signer booted (absent on older firmware). */
+  uptime_s?: number
+  /** Why the chip last reset: software-restart is deliberate; panic,
+   *  watchdog and brownout are crashes worth investigating. */
+  last_reset?: string
 }
 
 /** Network state returned by relay management. Password material is never
@@ -668,6 +673,8 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     capabilities: Array.isArray(raw.capabilities)
       ? raw.capabilities.filter((value): value is string => typeof value === 'string')
       : [],
+    ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
+    ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
@@ -2006,6 +2013,10 @@ export async function provisionSecret(secret: Uint8Array, label: string, mode: P
 export interface FirmwareInfo {
   version: string
   board: string
+  /** Seconds since the signer booted (absent on older firmware). */
+  uptime_s?: number
+  /** Why the chip last reset (absent on older firmware). */
+  last_reset?: string
 }
 
 /**
@@ -2024,7 +2035,12 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
     if (resp.type !== FrameType.FIRMWARE_INFO_RESPONSE) return null
     const info = JSON.parse(new TextDecoder().decode(resp.payload))
     if (typeof info?.version !== 'string') return null
-    return { version: info.version, board: typeof info.board === 'string' ? info.board : '' }
+    return {
+      version: info.version,
+      board: typeof info.board === 'string' ? info.board : '',
+      ...(typeof info.uptime_s === 'number' ? { uptime_s: info.uptime_s } : {}),
+      ...(typeof info.last_reset === 'string' ? { last_reset: info.last_reset } : {}),
+    }
   } catch {
     return null // older firmware, or no response — treat as unknown
   }

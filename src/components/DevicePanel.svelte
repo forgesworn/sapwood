@@ -7,6 +7,8 @@
     device, serialTransport, httpTransport, bridgeRestart, mgmtRevokeClient,
   } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
+  import { getFirmwareVersion } from '../lib/device.svelte.js'
+  import { describeReset, formatUptime } from '../lib/reset-reason.js'
   import Connectivity from './Connectivity.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import PasswordReveal from './PasswordReveal.svelte'
@@ -22,13 +24,21 @@
     return 'Disconnected'
   }
 
-  function formatUptime(secs: number): string {
-    if (secs < 60) return `${secs}s`
-    if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`
-    const h = Math.floor(secs / 3600)
-    const m = Math.floor((secs % 3600) / 60)
-    return `${h}h ${m}m`
-  }
+  // Signer uptime + why it last restarted: over WiFi from get_status, over USB
+  // from FIRMWARE_INFO. Turns "it keeps rebooting" from an anecdote into data —
+  // a planned restart reads differently from a crash.
+  let usbHealth = $state<{ uptime_s?: number; last_reset?: string } | null>(null)
+  $effect(() => {
+    if (device.connected && device.mode === 'serial') {
+      void getFirmwareVersion().then((info) => { usbHealth = info })
+    } else {
+      usbHealth = null
+    }
+  })
+  const health = $derived(device.mode === 'relay'
+    ? { uptime_s: device.relayStatus?.uptime_s, last_reset: device.relayStatus?.last_reset }
+    : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset })
+  const lastReset = $derived(health.last_reset ? describeReset(health.last_reset) : null)
 
   // --- Boot PIN (USB only) ---
   let pinValue = $state('')
@@ -172,9 +182,19 @@
     <table class="kv-table"><tbody>
       <tr><td class="label">Connected over</td><td>{modeLabel()}</td></tr>
       <tr><td class="label">Address</td><td class="mono">{device.portInfo || '--'}</td></tr>
-      <tr><td class="label">Identities</td><td>{device.masters.length}</td></tr>
+      <tr><td class="label">Identities</td><td>{device.masters.filter((m) => !m.persona).length}</td></tr>
       <tr><td class="label">Apps</td><td>{device.slots.length}</td></tr>
+      {#if typeof health.uptime_s === 'number'}
+        <tr><td class="label">Signer up</td><td>{formatUptime(health.uptime_s)}</td></tr>
+      {/if}
+      {#if lastReset}
+        <tr><td class="label">Last restart</td><td class:crash-reset={lastReset.crash}>{lastReset.text}</td></tr>
+      {/if}
     </tbody></table>
+    {#if lastReset?.crash}
+      <p class="hint-sm crash-hint">The signer's last restart was not planned. If this repeats, note what the
+        connected apps were doing at the time; the request log below restarts empty each boot.</p>
+    {/if}
   </section>
 
   <!-- Network mode -->
@@ -335,6 +355,9 @@
 </div>
 
 <style>
+  .crash-reset { color: var(--amber); font-weight: 600; }
+  .crash-hint { margin-top: 0.4rem; color: var(--amber); }
+
   .device-panel { display: flex; flex-direction: column; gap: 1.75rem; }
 
   .sub-title { font-size: 0.9rem; font-weight: 600; color: var(--text); margin: 1.1rem 0 0.4rem; }

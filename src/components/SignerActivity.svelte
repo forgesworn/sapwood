@@ -32,6 +32,8 @@
     <h2 class="section-title">Signer Activity</h2>
     <span class="count">{device.signerActivity.length} events</span>
   </div>
+  <p class="hint-sm retention-note">The signer keeps its most recent requests in memory (up to 32).
+    The list starts fresh each time it restarts; nothing is written to storage.</p>
 
   {#if entries.length === 0}
     <p class="empty">{device.connected ? 'No signing activity yet.' : 'Connect to view signer activity.'}</p>
@@ -179,6 +181,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .retention-note { margin: -0.4rem 0 0.8rem; }
 
   .empty {
     border: 1px solid var(--border);

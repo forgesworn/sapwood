@@ -1,0 +1,39 @@
+// Present the signer's uptime and last reset cause in plain English, so a
+// deliberate restart (identity changes, network activation) reads differently
+// from a crash. Reason strings come from the firmware's reset_reason_str().
+
+export interface ResetDescription {
+  text: string
+  /** True for causes worth investigating (panic, watchdog, brownout). */
+  crash: boolean
+}
+
+const REASONS: Record<string, ResetDescription> = {
+  'power-on': { text: 'powered on', crash: false },
+  'external-reset': { text: 'reset button', crash: false },
+  'software-restart': { text: 'planned restart', crash: false },
+  'deep-sleep-wake': { text: 'woke from deep sleep', crash: false },
+  'panic': { text: 'crash (panic)', crash: true },
+  'interrupt-watchdog': { text: 'crash (interrupt watchdog)', crash: true },
+  'task-watchdog': { text: 'crash (task watchdog)', crash: true },
+  'watchdog': { text: 'crash (watchdog)', crash: true },
+  'brownout': { text: 'power dip (brownout)', crash: true },
+}
+
+export function describeReset(reason: string): ResetDescription {
+  return REASONS[reason] ?? { text: reason || 'unknown', crash: reason === 'unknown' }
+}
+
+/** "3d 4h", "2h 12m", "5m", "42s" — coarse on purpose; it answers "how long
+ *  has it been up", not "time a race". */
+export function formatUptime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '--'
+  const s = Math.floor(seconds)
+  const d = Math.floor(s / 86_400)
+  const h = Math.floor((s % 86_400) / 3_600)
+  const m = Math.floor((s % 3_600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m`
+  return `${s}s`
+}
