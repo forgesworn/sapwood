@@ -49,7 +49,7 @@ describe('AppsPanel identity picker', () => {
     device.masters = MASTERS
     render(AppsPanel)
 
-    const picker = screen.getByLabelText('Identity') as HTMLSelectElement
+    const picker = screen.getByLabelText('Identity apps sign as') as HTMLSelectElement
     const labels = Array.from(picker.options).map((o) => o.textContent)
     expect(labels).toEqual(['default', 'pallasite'])
   })
@@ -58,13 +58,13 @@ describe('AppsPanel identity picker', () => {
     device.mode = 'http'
     device.masters = MASTERS
     render(AppsPanel)
-    expect(screen.getByLabelText('Identity')).toBeTruthy()
+    expect(screen.getByLabelText('Identity apps sign as')).toBeTruthy()
   })
 
   it('hides the picker with a single identity', () => {
     device.masters = [MASTERS[0]!]
     render(AppsPanel)
-    expect(screen.queryByLabelText('Identity')).toBeNull()
+    expect(screen.queryByLabelText('Identity apps sign as')).toBeNull()
   })
 
   it('excludes derived personas: they share their owner slot table', () => {
@@ -76,6 +76,6 @@ describe('AppsPanel identity picker', () => {
       { slot: 0, npub: 'npub1personakey', label: 'pallasite', persona: true } as never,
     ]
     render(AppsPanel)
-    expect(screen.queryByLabelText('Identity')).toBeNull()
+    expect(screen.queryByLabelText('Identity apps sign as')).toBeNull()
   })
 })

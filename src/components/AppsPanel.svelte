@@ -244,17 +244,6 @@
   <div class="head">
     <h2 class="section-title head-title">Apps</h2>
     <div class="head-controls">
-      {#if device.mode !== 'relay' && identities.length > 1}
-        <!-- Which identity new connections bind to. Shown when the transport
-             can switch identities in-session (USB via PROVISION_LIST, bridge
-             via HTTP). A relay session is addressed to ONE identity, so it
-             gets the note below instead of a switch that cannot work. -->
-        <select class="field-input identity-pick" aria-label="Identity" value={device.selectedSlot} onchange={handleIdentityChange}>
-          {#each identities as master (master.slot)}
-            <option value={master.slot}>{master.label ?? master.slot}</option>
-          {/each}
-        </select>
-      {/if}
       <button class="btn btn-secondary btn-sm" onclick={() => refreshSlots()}>Refresh</button>
     </div>
   </div>
@@ -268,12 +257,24 @@
     </section>
   {/if}
 
-  {#if device.mode === 'relay' && identities.length > 1}
-    <p class="hint">
-      Managing apps for <strong>“{identities.find((m) => m.addressed)?.label ?? identities[0]?.label}”</strong>.
-      A WiFi session manages one identity at a time: to connect apps under another,
-      pick that identity from the front page.
-    </p>
+  <!-- Every app binds to ONE identity: this bar names it, switches it where
+       the transport allows (USB, bridge), and scopes both the create form and
+       the list below. A relay session is addressed to one identity, so there
+       it names the identity and points at the front page instead. -->
+  {#if identities.length > 1}
+    <section class="identity-bar">
+      <span class="identity-bar-label">Apps below connect and sign as</span>
+      {#if device.mode !== 'relay'}
+        <select class="field-input identity-pick" aria-label="Identity apps sign as" value={device.selectedSlot} onchange={handleIdentityChange}>
+          {#each identities as master (master.slot)}
+            <option value={master.slot}>{master.label ?? master.slot}</option>
+          {/each}
+        </select>
+      {:else}
+        <strong class="identity-bar-current">“{identities.find((m) => m.addressed)?.label ?? identities[0]?.label}”</strong>
+        <span class="identity-bar-hint">A WiFi session manages one identity at a time; to connect apps under another, pick it from the front page.</span>
+      {/if}
+    </section>
   {/if}
 
   <!-- New connection -->
@@ -498,6 +499,16 @@
   .head-title { margin: 0; font-size: 1.3rem; }
   .head-controls { display: flex; align-items: center; gap: 0.75rem; }
   .identity-pick { width: auto; padding: 0.35rem 0.75rem; font-size: 0.85rem; }
+
+  /* Which identity the create form and app list belong to */
+  .identity-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem;
+    border: 1px solid var(--green-dim); border-radius: 6px; background: #08130d;
+    padding: 0.65rem 0.9rem; margin-bottom: 1rem;
+  }
+  .identity-bar-label { font-size: 0.85rem; color: var(--text-dim); }
+  .identity-bar-current { font-size: 0.95rem; color: var(--green); }
+  .identity-bar-hint { flex-basis: 100%; font-size: 0.75rem; color: var(--text-muted); line-height: 1.45; }
 
   .new-connection { display: flex; flex-direction: column; }
   .create-form { display: flex; gap: 0.5rem; align-items: center; }

@@ -206,6 +206,22 @@
         onkeydown={(e) => { if (e.key === 'Enter' && canCreate(name)) step = 'permissions' }}
         disabled={creating}
       />
+      {#if identityCount > 1}
+        <!-- The signer holds several identities: the app binds to exactly one,
+             so the choice belongs here in the first step, not hidden away. -->
+        {#if overUsb}
+          <label class="field flow-note">
+            <span class="field-label">It will sign as</span>
+            <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
+              {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+                <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
+              {/each}
+            </select>
+          </label>
+        {:else if device.mode === 'relay' && activeIdentity}
+          <p class="hint-sm flow-note">It will sign as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>. A WiFi session manages one identity at a time: for another identity, connect to it from the front page first.</p>
+        {/if}
+      {/if}
       {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
         <button class="btn btn-ghost" onclick={cancel}>Cancel</button>
@@ -275,20 +291,11 @@
 
       {#if overUsb}
         <p class="hint-sm flow-note">Over USB the first signature is approved by a physical button press on the device.</p>
-        {#if identityCount > 1}
-          <!-- The signer holds several identities: choose which one this app
-               signs as, right here in the flow. -->
-          <label class="field flow-note">
-            <span class="field-label">Sign as</span>
-            <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
-              {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
-                <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-      {:else if device.mode === 'relay' && identityCount > 1 && activeIdentity}
-        <p class="hint-sm flow-note">This app will sign as “{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”. A WiFi session manages one identity at a time: to connect an app under another, pick that identity from the front page first.</p>
+      {/if}
+      {#if identityCount > 1 && activeIdentity}
+        <!-- Echo the choice made on the first step so it is visible at the
+             moment of creation too. -->
+        <p class="hint-sm flow-note">“{name.trim()}” will sign as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>.</p>
       {/if}
       {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
@@ -304,7 +311,7 @@
         <h3 class="flow-title">Connection ready</h3>
       </div>
       {#if created.bunker_uri && bunkerHasRelay(created.bunker_uri)}
-        <p class="hint">Scan this with the app, or copy the link and paste it in to finish pairing.</p>
+        <p class="hint">Scan this with the app, or copy the link and paste it in to finish pairing.{#if identityCount > 1 && activeIdentity}&#32;It signs as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>.{/if}</p>
         <div class="qr">{@html qr}</div>
         <div class="uri-box copy-uri">
           <code>{created.bunker_uri}</code>
