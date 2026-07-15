@@ -41,9 +41,8 @@
   let copied = $state(false)
 
   const overUsb = $derived(device.mode === 'serial')
-  // Which identity the new connection binds to. Only worth surfacing over USB
-  // when the signer holds more than one; a relay session serves a single
-  // master. Personas share their owner's slot table, so only masters count.
+  // Which identity the new connection binds to — selectable on every
+  // transport. Personas share their owner's slot table, so only masters count.
   const identityCount = $derived(device.masters?.filter((m) => !m.persona).length ?? 0)
   const activeIdentity = $derived(
     device.masters?.find((m) => !m.persona && m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
@@ -330,6 +329,18 @@
       <h3 class="flow-title">Paste the app's connect link</h3>
       <p class="hint">Some apps offer a <code>nostrconnect://</code> link or QR to connect a signer.
         Paste it here and your signer pairs with it, no link to copy back.</p>
+      {#if identityCount > 1}
+        <!-- This entry point skips the name step, so the identity choice must
+             be offered here too: the pairing binds the app to exactly one. -->
+        <label class="field nc-identity">
+          <span class="field-label">It will sign as</span>
+          <select class="field-input" bind:value={device.selectedSlot} disabled={ncPairing}>
+            {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+              <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <textarea
         class="field-input nc-input"
         bind:value={ncUri}
@@ -374,7 +385,7 @@
         <h3 class="flow-title">Paired “{ncPaired.appName}”</h3>
       </div>
       <p class="hint">Your signer sent the connection reply. The app should show as connected now, and
-        appears under your connected apps.</p>
+        appears under your connected apps.{#if identityCount > 1 && activeIdentity}&#32;It signs as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>.{/if}</p>
       {#if ncJoined}
         <p class="hint-sm">Your signer joined the app's relay and keeps serving it while this
           connection exists. Removing the app releases the relay.</p>
@@ -431,6 +442,7 @@
   }
   .nc-entry:hover { color: var(--green); }
   .nc-input { resize: vertical; }
+  .nc-identity { margin-bottom: 0.7rem; }
   .nc-summary {
     margin-top: 0.7rem; padding: 0.7rem 0.85rem; border-radius: 6px;
     border: 1px solid var(--green-dim); background: #08130d;
