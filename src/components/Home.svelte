@@ -143,21 +143,28 @@
   // Over USB we can ask the board what it runs and compare with the firmware
   // bundled into this app. One quiet line when they differ; the update itself
   // lives in Advanced › Device.
-  let fwRunning = $state<string | null>(null)
+  let fwUsbRunning = $state<string | null>(null)
   let fwLatest = $state<string | null>(null)
   $effect(() => {
-    if (!(device.connected && device.mode === 'serial' && hasIdentity)) return
+    if (!(device.connected && (device.mode === 'serial' || device.mode === 'relay') && hasIdentity)) return
     void (async () => {
       try {
         const res = await fetch('/firmware/version.json', { cache: 'no-store' })
         if (res.ok) fwLatest = (await res.json()).version ?? null
       } catch { /* not bundled / offline — no nudge */ }
-      try { fwRunning = (await getFirmwareVersion())?.version ?? null }
-      catch { /* older firmware doesn't answer — no nudge */ }
+      if (device.mode === 'serial') {
+        try { fwUsbRunning = (await getFirmwareVersion())?.version ?? null }
+        catch { /* older firmware doesn't answer — no nudge */ }
+      }
     })()
   })
+  // Over WiFi the running version rides get_status (firmware ≥0.13.2).
+  const fwRunning = $derived(device.mode === 'relay'
+    ? device.relayStatus?.version ?? null
+    : fwUsbRunning)
   const fwUpdateAvailable = $derived(
-    device.mode === 'serial' && !!fwRunning && !!fwLatest && fwRunning !== fwLatest,
+    (device.mode === 'serial' || device.mode === 'relay')
+    && !!fwRunning && !!fwLatest && fwRunning !== fwLatest,
   )
 
   // One-click recovery from a USB hiccup (e.g. after pressing RESET): re-pick the

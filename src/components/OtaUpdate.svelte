@@ -35,13 +35,31 @@
   let showAdvanced = $state(false)
 
   let available = $state<Manifest | null>(null)
-  let running = $state<string | null>(null)
-  let boardKey = $state<string | null>(null)
+  let usbInfo = $state<{ version: string; board: string } | null>(null)
+  // Set optimistically after a successful OTA: the device rebooted into the
+  // version we just sent, before any transport re-reads it.
+  let optimisticVersion = $state<string | null>(null)
 
   const canUpdate = $derived(device.connected && (device.mode === 'serial' || device.mode === 'http'))
   const busy = $derived(status === 'waiting' || status === 'uploading' || status === 'verifying')
   const latest = $derived(available ? available.version : null)
+  // What the signer is running: over WiFi from get_status (firmware ≥0.13.2),
+  // over USB from the FIRMWARE_INFO frame. Older firmware → unknown.
+  const running = $derived(optimisticVersion
+    ?? (device.mode === 'relay' ? device.relayStatus?.version ?? null : usbInfo?.version ?? null))
+  const deviceBoard = $derived(device.mode === 'relay'
+    ? device.relayStatus?.board ?? null
+    : usbInfo?.board ?? null)
   const upToDate = $derived(!!running && !!latest && running === latest)
+
+  // Pick which board's image to offer: the device's own, else the first
+  // OTA-capable board. The served list now also holds factory-only boards, which
+  // must not become the default for a legacy device that doesn't report its board.
+  const boardKey = $derived.by(() => {
+    const boards = available ? Object.keys(available.boards ?? {}) : []
+    const otaBoards = boards.filter((b) => available?.boards[b]?.ota !== false)
+    return (deviceBoard && boards.includes(deviceBoard)) ? deviceBoard : (otaBoards[0] ?? boards[0] ?? null)
+  })
 
   onMount(async () => {
     // What firmware ships with this app…
@@ -50,16 +68,9 @@
       if (res.ok) available = await res.json()
     } catch { /* not bundled / offline — fall back to the manual picker */ }
 
-    // …and what the connected device is running (USB only; older firmware → null).
+    // …and what the connected device is running over USB (older firmware → null).
     const info = await getFirmwareVersion()
-    running = info?.version ?? null
-
-    // Pick which board's image to offer: the device's own, else the first
-    // OTA-capable board. The served list now also holds factory-only boards, which
-    // must not become the default for a legacy device that doesn't report its board.
-    const boards = available ? Object.keys(available.boards ?? {}) : []
-    const otaBoards = boards.filter((b) => available?.boards[b]?.ota !== false)
-    boardKey = (info?.board && boards.includes(info.board)) ? info.board : (otaBoards[0] ?? boards[0] ?? null)
+    usbInfo = info ? { version: info.version, board: info.board } : null
   })
 
   // The connected board's manifest entry, and whether it supports OTA at all.
@@ -98,7 +109,7 @@
       }, signature)
       status = 'done'
       message = 'Done. Your signer is restarting with the new firmware.'
-      running = latest // optimistic: it rebooted into the version we just sent
+      optimisticVersion = latest // it rebooted into the version we just sent
     } catch (e) {
       status = 'error'
       message = e instanceof Error ? e.message : 'The update could not be completed.'
@@ -160,6 +171,18 @@
   <h2 class="section-title">Update firmware</h2>
 
   {#if !canUpdate}
+    <!-- Version state is knowable over WiFi (get_status carries the running
+         version on current firmware) even though the update itself needs the
+         cable — show it, so "is my signer current?" has an answer here. -->
+    {#if running || latest}
+      <table class="kv-table fw-status"><tbody>
+        <tr><td class="label">On your signer</td><td>{running ? `v${running}` : 'unknown (older firmware)'}</td></tr>
+        <tr><td class="label">Bundled with this app</td><td>{latest ? `v${latest}` : '—'}</td></tr>
+      </tbody></table>
+      {#if upToDate}
+        <p class="success-text fw-ok">Your signer is up to date.</p>
+      {/if}
+    {/if}
     <p class="hint">
       Firmware updates run <strong>over USB</strong>, never over WiFi, for safety. Connect this
       signer with a cable to update it.

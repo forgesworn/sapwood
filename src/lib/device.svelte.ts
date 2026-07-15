@@ -50,6 +50,10 @@ export interface RelayStatus {
   /** Whether runtime logging is dropped to warnings (calms activity LEDs
    *  wired to the log UART). */
   log_quiet?: boolean
+  /** Running firmware version (absent on older firmware). */
+  version?: string
+  /** Board identifier, e.g. 'tdisplay' (absent on older firmware). */
+  board?: string
 }
 
 /** Network state returned by relay management. Password material is never
@@ -679,6 +683,8 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
     ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
     ...(typeof raw.log_quiet === 'boolean' ? { log_quiet: raw.log_quiet } : {}),
+    ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
+    ...(typeof raw.board === 'string' ? { board: raw.board } : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
