@@ -3,10 +3,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   deriveFromMnemonic,
+  deriveNamedFromMnemonic,
+  deriveNamedFromNsec,
+  deriveChild,
   deriveFromNsec,
   useRawNsec,
   decodeNsec,
   buildProvisionFrame,
+  nameDeriveError,
   generateMnemonic,
   zeroize,
 } from './provision.js'
@@ -116,6 +120,111 @@ describe('tree-nsec derivation', () => {
   })
 })
 
+describe('named-child derivation', () => {
+  it('matches the heartwood-common child vector', () => {
+    // FROZEN: heartwood-esp32/common/src/derive.rs
+    // test_child_derivation_matches_heartwood_core — root 0x01..0x20,
+    // purpose "persona/test", index 0.
+    const root = new Uint8Array(32)
+    for (let i = 0; i < 32; i++) root[i] = i + 1
+    const result = deriveChild(root, 'persona/test')
+
+    expect(result.npub).toBe(
+      'npub1rx8u4wk9ytu8aak4f9wcaqdgk0lj4rjhdu4j9n7dj2mg68l9cdqs2fjf2t'
+    )
+
+    zeroize(result.secret)
+  })
+
+  it('matches nsec-tree derive() from the test mnemonic', async () => {
+    // FROZEN: generated with the local nsec-tree library —
+    // derive(fromMnemonic(TEST_MNEMONIC), 'pallasite') and 'social'.
+    const pallasite = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'pallasite')
+    expect(pallasite.npub).toBe(
+      'npub1vr9q6ecjejn805vek76xtt263rnw3em2cmw63vkl3zg9qyk23fnsccluju'
+    )
+    zeroize(pallasite.secret)
+
+    const social = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'social')
+    expect(social.npub).toBe(
+      'npub1rf8rzpz7u7lpl3ekj48lul4y3llu0pyx23f209295qnapecjljtsr7x8kl'
+    )
+    zeroize(social.secret)
+  })
+
+  it('different names derive different keys; same name is deterministic', async () => {
+    const a = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'work')
+    const b = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'play')
+    const a2 = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'work')
+
+    expect(a.npub).not.toBe(b.npub)
+    expect(a.npub).toBe(a2.npub)
+
+    zeroize(a.secret)
+    zeroize(b.secret)
+    zeroize(a2.secret)
+  })
+
+  it('names are case-sensitive', async () => {
+    const lower = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'pallasite')
+    const upper = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'Pallasite')
+    expect(lower.npub).not.toBe(upper.npub)
+    zeroize(lower.secret)
+    zeroize(upper.secret)
+  })
+
+  it('the child differs from the master and from the bare-purpose root', async () => {
+    const master = await deriveFromMnemonic(TEST_MNEMONIC, '')
+    const child = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'pallasite')
+    expect(child.npub).not.toBe(master.npub)
+    zeroize(master.secret)
+    zeroize(child.secret)
+  })
+
+  it('rejects invalid names', () => {
+    const root = new Uint8Array(32).fill(0x42)
+    expect(() => deriveChild(root, '')).toThrow()
+    expect(() => deriveChild(root, '   ')).toThrow()
+    expect(() => deriveChild(root, 'a|b')).toThrow()
+    expect(() => deriveChild(root, 'a\0b')).toThrow()
+  })
+
+  it('matches nsec-tree derive(fromNsec(nsec), name) for an nsec master', () => {
+    // FROZEN: generated with the local nsec-tree library —
+    // derive(fromNsec(nsec of 0x01 x 32), 'pallasite'). This is the path a
+    // bunker-mode master takes: HMAC root from the nsec, then the named child.
+    const nsecBytes = new Uint8Array(32).fill(0x01)
+    const result = deriveNamedFromNsec(nsecBytes, 'pallasite')
+
+    expect(result.npub).toBe(
+      'npub15mucgvh8ca7hnq8a6330r296jemjez329r4tjtmwut6juavnmdvsc7tt20'
+    )
+    // The input nsec must be left intact for the caller to zeroize.
+    expect(nsecBytes.every((b) => b === 0x01)).toBe(true)
+
+    zeroize(result.secret)
+  })
+
+  it('nsec-rooted and phrase-rooted children with the same name differ', async () => {
+    const fromNsec = deriveNamedFromNsec(new Uint8Array(32).fill(0x01), 'pallasite')
+    const fromPhrase = await deriveNamedFromMnemonic(TEST_MNEMONIC, '', 'pallasite')
+    expect(fromNsec.npub).not.toBe(fromPhrase.npub)
+    zeroize(fromNsec.secret)
+    zeroize(fromPhrase.secret)
+  })
+})
+
+describe('nameDeriveError', () => {
+  it('accepts ordinary names and rejects malformed ones', () => {
+    expect(nameDeriveError('pallasite')).toBeNull()
+    expect(nameDeriveError('work:client-a')).toBeNull()
+    expect(nameDeriveError('')).not.toBeNull()
+    expect(nameDeriveError('  ')).not.toBeNull()
+    expect(nameDeriveError('a|b')).not.toBeNull()
+    expect(nameDeriveError('a'.repeat(256))).not.toBeNull()
+  })
+})
+
 describe('bunker mode', () => {
   it('uses raw nsec without derivation', () => {
     const nsecBytes = new Uint8Array(32).fill(0xbb)
@@ -158,6 +267,18 @@ describe('provision frame', () => {
     expect(parsed.type).toBe(FrameType.PROVISION)
     // Bunker + non-default: extended format.
     expect(parsed.payload[0]).toBe(0) // bunker
+  })
+
+  it('builds named-child frames with the bunker wire byte', () => {
+    // The child key is sent as-is: the device signs AS the named identity, so
+    // on the wire it is indistinguishable from a bunker-mode key.
+    const secret = new Uint8Array(32).fill(0xab)
+    const frame = buildProvisionFrame(secret, 'pallasite', 'named-child')
+    const parsed = parseFrame(frame)
+    expect(parsed.type).toBe(FrameType.PROVISION)
+    expect(parsed.payload[0]).toBe(0) // bunker wire byte
+    expect(parsed.payload[1]).toBe(9) // "pallasite"
+    expect(parsed.payload.length).toBe(2 + 9 + 32)
   })
 
   it('builds tree-nsec mode frame', () => {

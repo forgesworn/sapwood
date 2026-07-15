@@ -1,9 +1,14 @@
 // Provisioning key derivation -- mirrors heartwood-esp32/provision/src/main.rs.
 //
-// Three modes:
+// Four modes:
 //   tree-mnemonic: BIP-39 mnemonic -> BIP-32 at m/44'/1237'/727'/0'/0' -> 32 bytes
 //   tree-nsec: nsec bytes -> HMAC-SHA256(key=nsec, msg="nsec-tree-root") -> 32 bytes
 //   bunker: raw nsec bytes (no derivation)
+//   named-child: mnemonic -> tree root (as tree-mnemonic) -> nsec-tree child at
+//     purpose = the identity's name, index 0. The child key is sent as-is (wire
+//     mode byte 0), so the signer signs AS the named identity. Matches
+//     nsec-tree derive(root, name) byte-for-byte: the same phrase and name
+//     recreate the same identity anywhere.
 //
 // The derived secret is sent to the ESP32 as a PROVISION frame. It is never
 // stored in the browser and is zeroed after transmission.
@@ -22,7 +27,10 @@ const MNEMONIC_PATH = "m/44'/1237'/727'/0'/0'"
 /** HMAC label for nsec-tree root derivation -- must match nsec-tree fromNsec(). */
 const NSEC_ROOT_LABEL = new TextEncoder().encode('nsec-tree-root')
 
-export type ProvisionMode = 'tree-mnemonic' | 'tree-nsec' | 'bunker'
+/** Domain prefix for nsec-tree child derivation -- must match nsec-tree derive(). */
+const CHILD_DOMAIN_PREFIX = new TextEncoder().encode('nsec-tree\0')
+
+export type ProvisionMode = 'tree-mnemonic' | 'tree-nsec' | 'bunker' | 'named-child'
 
 export interface ProvisionResult {
   secret: Uint8Array    // 32 bytes -- zeroize after use
@@ -70,6 +78,83 @@ export function deriveFromNsec(nsecBytes: Uint8Array): ProvisionResult {
   return { secret: new Uint8Array(secret), npub }
 }
 
+/**
+ * Validate an identity name as an nsec-tree purpose string (PROTOCOL.md §3):
+ * non-empty, not whitespace-only, ≤255 bytes UTF-8, no null bytes, no `|`.
+ * Returns null when valid, or a human-readable reason.
+ */
+export function nameDeriveError(name: string): string | null {
+  if (!name || !name.trim()) return 'Enter a name for the identity'
+  if (new TextEncoder().encode(name).length > 255) return 'Name is too long'
+  if (name.includes('\0')) return 'Name cannot contain null characters'
+  if (name.includes('|')) return 'Name cannot contain the | character'
+  return null
+}
+
+/**
+ * Derive an nsec-tree child key: HMAC-SHA256(key = root, msg = "nsec-tree\0" ||
+ * name || 0x00 || index_be32). Skips indices that produce invalid secp256k1
+ * scalars (probability ~2^-128), exactly as nsec-tree deriveChildKey() and
+ * heartwood-common derive() do, so the result matches them byte-for-byte.
+ */
+export function deriveChild(rootSecret: Uint8Array, name: string, index = 0): ProvisionResult {
+  const reason = nameDeriveError(name)
+  if (reason) throw new Error(reason)
+
+  const nameBytes = new TextEncoder().encode(name)
+  for (let i = index; i <= 0xffffffff; i++) {
+    const msg = new Uint8Array(CHILD_DOMAIN_PREFIX.length + nameBytes.length + 1 + 4)
+    msg.set(CHILD_DOMAIN_PREFIX, 0)
+    msg.set(nameBytes, CHILD_DOMAIN_PREFIX.length)
+    msg[CHILD_DOMAIN_PREFIX.length + nameBytes.length] = 0
+    new DataView(msg.buffer).setUint32(msg.length - 4, i, false)
+
+    const derived = hmac(sha256, rootSecret, msg)
+    try {
+      const pubkey = schnorr.getPublicKey(derived)
+      // Hand the hmac buffer over as-is: no copy is left behind to linger.
+      return { secret: derived, npub: pubkeyToNpub(pubkey) }
+    } catch {
+      derived.fill(0) // invalid scalar -- scrub and try the next index
+    }
+  }
+  throw new Error('Index overflow: no valid key found')
+}
+
+/**
+ * Derive a named identity from a BIP-39 mnemonic: tree root (same path as
+ * tree-mnemonic mode) then the nsec-tree child at purpose = name, index 0.
+ * The same phrase and name always recreate the same identity.
+ */
+export async function deriveNamedFromMnemonic(
+  mnemonic: string,
+  passphrase: string,
+  name: string,
+): Promise<ProvisionResult> {
+  const root = await deriveFromMnemonic(mnemonic, passphrase)
+  try {
+    return deriveChild(root.secret, name)
+  } finally {
+    zeroize(root.secret)
+  }
+}
+
+/**
+ * Derive a named identity from an existing nsec: tree root via
+ * HMAC(nsec, "nsec-tree-root") — the same root nsec-tree fromNsec() builds and
+ * the same one the signer itself uses for a bunker-mode master — then the
+ * child at purpose = name, index 0. Matches nsec-tree derive(fromNsec(nsec),
+ * name) byte-for-byte.
+ */
+export function deriveNamedFromNsec(nsecBytes: Uint8Array, name: string): ProvisionResult {
+  const root = deriveFromNsec(nsecBytes)
+  try {
+    return deriveChild(root.secret, name)
+  } finally {
+    zeroize(root.secret)
+  }
+}
+
 /** Use raw nsec bytes directly (bunker mode, no derivation). */
 export function useRawNsec(nsecBytes: Uint8Array): ProvisionResult {
   if (nsecBytes.length !== 32) {
@@ -98,7 +183,9 @@ export function decodeNsec(nsec: string): Uint8Array {
 
 /** Build a PROVISION frame. Matches provision CLI build_provision_frame(). */
 export function buildProvisionFrame(secret: Uint8Array, label: string, mode: ProvisionMode): Uint8Array {
-  const modeByte = mode === 'bunker' ? 0 : mode === 'tree-mnemonic' ? 1 : 2
+  // A named child is a raw key the device signs with as-is, so it ships with
+  // the bunker wire byte; the derivation already happened in the browser.
+  const modeByte = mode === 'bunker' || mode === 'named-child' ? 0 : mode === 'tree-mnemonic' ? 1 : 2
 
   // Legacy format for default label + tree-mnemonic: just 32 bytes.
   if (label === 'default' && modeByte === 1) {

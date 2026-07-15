@@ -9,6 +9,7 @@ Bootstrap Heartwood over USB, then leave it online in WiFi-standalone mode and m
 ## Features
 
 - **Masters** -- view provisioned master slots, npubs, and derivation modes
+- **Named identities** -- derive an identity by name from your recovery phrase (nsec-tree child derivation), add it to the signer, and connect apps to it via the identity picker
 - **Key backup** -- write an imported nsec/ncryptsec out as [24 words](docs/key-backup.md) that restore the same npub, here or via the offline CLI
 - **Clients** -- remotely create, list, revoke, and update exact client policies
 - **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely

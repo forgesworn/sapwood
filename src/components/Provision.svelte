@@ -3,10 +3,13 @@
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
+    deriveNamedFromMnemonic,
+    deriveNamedFromNsec,
     deriveFromNsec,
     useRawNsec,
     decodeNsec,
     buildProvisionFrame,
+    nameDeriveError,
     zeroize,
     type ProvisionMode,
   } from '../lib/provision.js'
@@ -64,6 +67,12 @@
       address: 'A NEW, different address, not your nsec’s npub.',
       addressKind: 'new',
     },
+    'named-child': {
+      title: 'Named identity from your master secret',
+      body: 'Derive a member of your identity tree by name (for example work, social, or a project name). Enter the recovery phrase or nsec your master identity was made from: the name picks a branch of that tree, and the same secret and name always recreate the same identity, here or with the nsec-tree tools. Names are case-sensitive.',
+      address: 'A new address, derived from your master secret and the name.',
+      addressKind: 'new',
+    },
   }
   const modeInfo = $derived(MODE_INFO[mode])
   let status = $state<'idle' | 'deriving' | 'confirming' | 'sending' | 'done' | 'error'>('idle')
@@ -79,6 +88,26 @@
       let result
       if (mode === 'tree-mnemonic') {
         result = await deriveFromMnemonic(secret, passphrase)
+      } else if (mode === 'named-child') {
+        // The label IS the derivation name: one field, one concept. Trim it so
+        // the name that derives the key is exactly the label sent to the device.
+        label = label.trim()
+        const trimmedSecret = secret.trim()
+        if (trimmedSecret.startsWith('nsec1')) {
+          // Master made from an nsec (sign-as-is or tree): same root nsec-tree
+          // fromNsec() builds, so the named child matches the CLI's. Words are
+          // always read as a recovery phrase here; a 24-word key backup must be
+          // pasted as its nsec, since valid 24 words are indistinguishable
+          // from a real phrase.
+          const nsecBytes = decodeNsec(trimmedSecret)
+          try {
+            result = deriveNamedFromNsec(nsecBytes, label)
+          } finally {
+            zeroize(nsecBytes)
+          }
+        } else {
+          result = await deriveNamedFromMnemonic(secret, passphrase, label)
+        }
       } else {
         // An nsec, or the same key as the 24 backup words Sapwood writes out.
         const nsecBytes = isKeyBackupCandidate(secret) ? wordsToKey(secret) : decodeNsec(secret)
@@ -192,6 +221,12 @@
         browser via <strong>Connect to “{label}”</strong> on the front page.
       </p>
     {/if}
+    {#if mode === 'named-child'}
+      <p class="hint">
+        To connect an app to this identity, open <strong>Apps</strong>, pick “{label}” in the
+        identity selector, and create the connection there.
+      </p>
+    {/if}
     <button class="btn btn-secondary" onclick={handleCancel}>Add another</button>
   {:else if device.mode !== 'serial'}
     <div class="card card--warn usb-gate">
@@ -219,7 +254,7 @@
         {/if}
       </p>
       <div class="uri-box confirm-npub"><code class="mono">{npubPreview}</code></div>
-      {#if mode !== 'tree-mnemonic' && !isKeyBackupCandidate(secret)}
+      {#if (mode === 'bunker' || mode === 'tree-nsec') && !isKeyBackupCandidate(secret)}
         <div class="backup">
           <button class="backup-toggle" onclick={toggleBackupWords}>
             {showBackup ? 'Hide the backup words' : 'Back up this nsec as 24 words first'}
@@ -247,8 +282,14 @@
     <div class="form">
       <label class="field">
         <span class="field-label">How do you want to set up this signer?</span>
-        <select class="field-input" bind:value={mode} disabled={status !== 'idle'}>
+        <select
+          class="field-input"
+          bind:value={mode}
+          disabled={status !== 'idle'}
+          onchange={() => { if (mode === 'named-child' && label === 'default') label = '' }}
+        >
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
+          <option value="named-child">Phrase or nsec + name: derive a named identity</option>
           <option value="bunker">Existing nsec: sign as-is (keeps your npub)</option>
           <option value="tree-nsec">Existing nsec: derive a new key (new npub)</option>
         </select>
@@ -263,17 +304,27 @@
       </div>
 
       <label class="field">
-        <span class="field-label">Label</span>
-        <input class="field-input" type="text" bind:value={label} placeholder="default" maxlength="32" disabled={status !== 'idle'} />
+        <span class="field-label">{mode === 'named-child' ? 'Name' : 'Label'}</span>
+        <input
+          class="field-input"
+          type="text"
+          bind:value={label}
+          placeholder={mode === 'named-child' ? 'e.g. work, social, pallasite' : 'default'}
+          maxlength="32"
+          disabled={status !== 'idle'}
+        />
+        {#if mode === 'named-child'}
+          <span class="hint-sm name-hint">The name selects the derived key. Write it down with your phrase: both are needed to recreate this identity.</span>
+        {/if}
       </label>
 
-      {#if mode === 'tree-mnemonic'}
+      {#if mode === 'tree-mnemonic' || mode === 'named-child'}
         <label class="field">
-          <span class="field-label">Mnemonic</span>
+          <span class="field-label">{mode === 'named-child' ? 'Recovery phrase or nsec' : 'Mnemonic'}</span>
           <textarea
             class="field-input"
             bind:value={secret}
-            placeholder="12 or 24 words"
+            placeholder={mode === 'named-child' ? '12 or 24 words, or nsec1…' : '12 or 24 words'}
             rows="3"
             disabled={status !== 'idle'}
             autocomplete="off"
@@ -281,7 +332,7 @@
           ></textarea>
         </label>
         <label class="field">
-          <span class="field-label">Passphrase</span>
+          <span class="field-label">{mode === 'named-child' ? 'Passphrase (phrase input only)' : 'Passphrase'}</span>
           <div class="pw-wrap">
             <input type={showPassphrase ? 'text' : 'password'} class="field-input" bind:value={passphrase} placeholder="Optional" disabled={status !== 'idle'} />
             <PasswordReveal bind:shown={showPassphrase} disabled={status !== 'idle'} />
@@ -306,7 +357,8 @@
 
       <button
         class="btn btn-primary derive"
-        disabled={!device.connected || device.mode !== 'serial' || status === 'deriving' || !secret.trim()}
+        disabled={!device.connected || device.mode !== 'serial' || status === 'deriving' || !secret.trim()
+          || (mode === 'named-child' && nameDeriveError(label) !== null)}
         onclick={handleDerive}
       >
         {status === 'deriving' ? 'Deriving...' : 'Derive and Preview'}
@@ -351,6 +403,8 @@
 
   .info { font-size: 0.8rem; color: var(--text-dim); margin: 0; }
   .info strong { color: var(--text); }
+
+  .name-hint { display: block; margin-top: 0.35rem; }
 
   .mode-info {
     border: 1px solid #243; border-left: 3px solid #4a9; border-radius: 4px;
