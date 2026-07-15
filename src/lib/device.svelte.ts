@@ -2459,7 +2459,9 @@ export async function serialDeriveIdentity(
   const info = JSON.parse(new TextDecoder().decode(resp.payload)) as {
     slot: number; label: string; npub: string; existing: boolean
   }
-  await refreshMasters()
+  // Best-effort: a wifi-standalone signer reboots shortly after replying (to
+  // re-subscribe with the new master set), so the list refresh may not land.
+  try { await refreshMasters() } catch { /* device rebooting */ }
   return info
 }
 
