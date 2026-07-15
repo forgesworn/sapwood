@@ -139,6 +139,9 @@ describe('ConnectApp — happy path', () => {
         allowed_kinds: [13, 1059],
         auto_approve: true,
       },
+      // The shared relay is always named: the connect ACK must be published
+      // where the APP listens, not on whichever session received the request.
+      relay: 'wss://relay.trotters.cc',
     })
   })
 

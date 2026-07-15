@@ -154,12 +154,16 @@
     ncPairing = true
     ncError = null
     try {
+      // Always name the relay the app actually listens on: the connect ACK
+      // must be published THERE, not merely on whichever session the signer
+      // happened to receive this request over.
+      const ackRelay = ncJoinRelay ?? ncSharedRelay
       const res = await mgmtNostrconnect({
         clientPubkey: ncReq.clientPubkey,
         secret: ncReq.secret,
         label: ncReq.appName,
         policy: ncPermissions.policy,
-        ...(ncJoinRelay ? { relay: ncJoinRelay } : {}),
+        ...(ackRelay ? { relay: ackRelay } : {}),
       })
       ncJoined = res.joined_relay
       ncPaired = { appName: ncReq.appName }
