@@ -266,7 +266,7 @@
       <span class="identity-bar-label">Apps below connect and sign as</span>
       <select class="field-input identity-pick" aria-label="Identity apps sign as" value={device.selectedSlot} onchange={handleIdentityChange}>
         {#each identities as master (master.slot)}
-          <option value={master.slot}>{master.label ?? master.slot}</option>
+          <option value={master.slot}>{master.label ?? master.slot}{typeof master.apps === 'number' ? ` · ${master.apps} app${master.apps === 1 ? '' : 's'}` : ''}</option>
         {/each}
       </select>
     </section>

@@ -368,7 +368,11 @@ export class RelayTransport {
         attempt.params,
         attempt.timeoutMs,
         attempt.mutationChallenge,
-        undefined,
+        // The challenge fetch is an idempotent read (the nonce only rotates
+        // when a mutation lands), so republishing lets it ride over a signer
+        // relay failover (~11s) instead of failing a user-visible action.
+        // The mutation itself must NEVER republish.
+        requiresManagementMutationChallenge(attempt.method) ? undefined : 5_000,
         undefined,
         targetHex,
       ),

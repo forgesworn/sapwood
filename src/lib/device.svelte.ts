@@ -842,6 +842,7 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
               : 'MASTER',
             npub,
             addressed,
+            ...(typeof r.apps === 'number' ? { apps: r.apps } : {}),
           }
         })
         mapped.sort((a, b) =>

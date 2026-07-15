@@ -1,12 +1,21 @@
 <script lang="ts">
   import { device } from '../lib/device.svelte.js'
+
+  const identityCount = $derived(device.masters.filter((m) => !m.persona).length)
+  // App connections live per identity, so the true total is the sum across
+  // masters (reported by current firmware). Older firmware omits the counts;
+  // fall back to the selected identity's table rather than claiming a total.
+  const counted = $derived(device.masters.filter((m) => !m.persona && typeof m.apps === 'number'))
+  const appCount = $derived(counted.length > 0
+    ? counted.reduce((sum, m) => sum + (m.apps ?? 0), 0)
+    : device.slots.length)
 </script>
 
 {#if device.connected && device.masters.length > 0}
   <div class="status-bar">
-    <span class="stat">{device.masters.length} identit{device.masters.length !== 1 ? 'ies' : 'y'}</span>
+    <span class="stat">{identityCount} identit{identityCount !== 1 ? 'ies' : 'y'}</span>
     <span class="dot"></span>
-    <span class="stat">{device.slots.length} app{device.slots.length !== 1 ? 's' : ''}</span>
+    <span class="stat">{appCount} app{appCount !== 1 ? 's' : ''}</span>
     {#if device.mode === 'http' && device.bridgeInfo}
       <span class="dot"></span>
       <span class="stat">{device.bridgeInfo.mode}</span>

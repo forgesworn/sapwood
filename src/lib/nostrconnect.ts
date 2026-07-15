@@ -212,7 +212,14 @@ export function describeNostrConnectPermissions(result: NostrConnectPermissionRe
  *  works over a shared relay (a WiFi signer can't dial the app's own relay).
  *  Compares on host+path, ignoring a trailing slash and scheme case. */
 export function sharesRelay(appRelays: string[], signerRelays: string[]): boolean {
+  return sharedRelay(appRelays, signerRelays) !== null
+}
+
+/** The first of the app's relays the signer actually serves, or null. This is
+ *  the relay the connect reply travels over — name THIS one in the UI, not
+ *  simply the first relay the app happened to list. */
+export function sharedRelay(appRelays: string[], signerRelays: string[]): string | null {
   const norm = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase()
   const serve = new Set(signerRelays.map(norm))
-  return appRelays.some((r) => serve.has(norm(r)))
+  return appRelays.find((r) => serve.has(norm(r))) ?? null
 }

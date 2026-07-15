@@ -54,6 +54,9 @@ export interface MasterInfo {
    *  session is addressed to. Only the addressed master is manageable;
    *  the others are connectable from the front page. */
   addressed?: boolean
+  /** Number of app connections under this master (absent on older firmware
+   *  and on persona rows, which share their owner's slot table). */
+  apps?: number
   /** Display override for the mode tag (e.g. 'WIFI-STANDALONE' over relay). */
   modeLabel?: string
   /** Bunker URI for this identity (Pi multi-instance mode). */

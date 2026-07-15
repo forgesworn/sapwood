@@ -449,11 +449,24 @@
     </div>
   {/if}
 
-  <!-- What is connected -->
+  <!-- What is connected. Apps live per identity, so with several identities a
+       switcher scopes this list (and shares its selection with the connect
+       flow above and the Advanced Apps panel). -->
   <section class="apps">
     <div class="apps-head">
       <h3 class="apps-title">Connected apps</h3>
-      {#if device.slots.length > 0}
+      {#if device.masters.filter((m) => !m.persona).length > 1}
+        <select
+          class="field-input apps-identity"
+          aria-label="Identity whose apps are shown"
+          value={device.selectedSlot}
+          onchange={(e) => { device.selectedSlot = parseInt((e.target as HTMLSelectElement).value); refreshSlots(device.selectedSlot) }}
+        >
+          {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+            <option value={m.slot}>{m.label ?? `slot ${m.slot}`}{typeof m.apps === 'number' ? ` · ${m.apps} app${m.apps === 1 ? '' : 's'}` : ''}</option>
+          {/each}
+        </select>
+      {:else if device.slots.length > 0}
         <span class="apps-count">{device.slots.length}</span>
       {/if}
     </div>
@@ -689,6 +702,7 @@
     font-size: 0.72rem; font-weight: 600; color: var(--green); background: #08130d;
     border: 1px solid var(--green-dim); border-radius: 999px; padding: 0.05rem 0.5rem;
   }
+  .apps-identity { width: auto; padding: 0.3rem 0.6rem; font-size: 0.8rem; }
 
   .app-card { padding: 0.85rem 1.1rem; margin-bottom: 0.5rem; }
   .app-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

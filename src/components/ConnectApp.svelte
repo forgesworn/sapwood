@@ -12,7 +12,7 @@
   import { nameError, canCreate, type ConnectStep } from '../lib/connect-flow.js'
   import {
     parseNostrConnectURI, isValidNostrConnect, permissionsToClientPolicy,
-    describeNostrConnectPermissions, sharesRelay,
+    describeNostrConnectPermissions, sharedRelay,
   } from '../lib/nostrconnect.js'
   import {
     PERMISSION_PRESETS, resolvePolicy, type PresetId,
@@ -60,7 +60,8 @@
   let ncPaired = $state<{ appName: string } | null>(null)
   const ncReq = $derived(isValidNostrConnect(ncUri) ? parseNostrConnectURI(ncUri.trim()) : null)
   const ncPermissions = $derived(ncReq ? permissionsToClientPolicy(ncReq.perms) : null)
-  const ncRelayShared = $derived(!!ncReq && sharesRelay(ncReq.relays, device.relays))
+  const ncSharedRelay = $derived(ncReq ? sharedRelay(ncReq.relays, device.relays) : null)
+  const ncRelayShared = $derived(ncSharedRelay !== null)
   // No overlap is no longer fatal: the signer can dial the app's relay and keep
   // it as a pinned session. It only refuses when it is already at capacity.
   const ncJoinRelay = $derived(ncReq && !ncRelayShared ? ncReq.relays[0] ?? null : null)
@@ -356,7 +357,7 @@
         <div class="nc-summary" class:bad={!ncRelayShared && !ncJoinRelay}>
           <p class="nc-app">{ncReq.appName}{#if ncReq.appUrl} · <span class="nc-url">{ncReq.appUrl}</span>{/if}</p>
           {#if ncRelayShared}
-            <p class="hint-sm">Pairs on <code>{ncReq.relays[0]}</code>. Your signer will send the connection reply there.</p>
+            <p class="hint-sm">Pairs on <code>{ncSharedRelay}</code>, a relay you and the app share. Your signer will send the connection reply there.</p>
           {:else if ncJoinRelay}
             <p class="hint-sm">This app listens on <code>{ncJoinRelay}</code>, which your signer does not
               serve yet. Your signer will join that relay and keep serving it for this app.</p>
