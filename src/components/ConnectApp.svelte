@@ -41,6 +41,11 @@
   let copied = $state(false)
 
   const overUsb = $derived(device.mode === 'serial')
+  // Which identity the new connection binds to. Only worth surfacing over USB
+  // when the signer holds more than one; a relay session serves a single master.
+  const activeIdentity = $derived(
+    device.masters?.find((m) => m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
+  )
   const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
   const commonKindSet = new Set(COMMON_KINDS.map((k) => k.kind))
   const customExtraKinds = $derived(customKinds.filter((k) => !commonKindSet.has(k)).sort((a, b) => a - b))
@@ -265,6 +270,9 @@
 
       {#if overUsb}
         <p class="hint-sm flow-note">Over USB the first signature is approved by a physical button press on the device.</p>
+        {#if device.masters?.length > 1 && activeIdentity}
+          <p class="hint-sm flow-note">This app will sign as “{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”. To use another identity, pick it under Advanced, Apps, then connect from there.</p>
+        {/if}
       {/if}
       {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">

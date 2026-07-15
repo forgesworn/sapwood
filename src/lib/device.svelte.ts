@@ -222,6 +222,7 @@ serialTransport.on((event: SerialEvent) => {
         device.portInfo = ''
         device.masters = []
         device.slots = []
+        device.selectedSlot = 0
         device.signerActivity = []
         device.bridgeAuthed = false
         device.usbProbing = false
@@ -264,6 +265,7 @@ httpTransport.on((event: HttpEvent) => {
         device.portInfo = ''
         device.masters = []
         device.slots = []
+        device.selectedSlot = 0
         device.pendingClients = []
         device.approvals = []
         device.signerActivity = []
@@ -291,6 +293,11 @@ function handleFrame(frame: { type: number; payload: Uint8Array }) {
     case FrameType.PROVISION_LIST_RESPONSE:
       try {
         device.masters = JSON.parse(decoder.decode(frame.payload)) as MasterInfo[]
+        // A selection carried over from another signer must not silently target
+        // a different identity's slot table here.
+        if (!device.masters.some((m) => m.slot === device.selectedSlot)) {
+          device.selectedSlot = device.masters[0]?.slot ?? 0
+        }
         // Knowing the master npub is all we need to dress the signer's screen.
         void autoSyncIdentityMeta()
       } catch {
@@ -721,6 +728,9 @@ export async function connectRelay(
   device.error = null
   device.masters = []
   device.slots = []
+  // A relay session manages a single master; slot indices from a previous
+  // USB or bridge session do not apply here.
+  device.selectedSlot = 0
   device.signerActivity = []
   device.relays = recoveryRelays
   device.relayConfiguredRelays = null

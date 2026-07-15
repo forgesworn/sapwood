@@ -7,7 +7,7 @@ import {
 
 // Mock the transport layer; the flow logic (connect-flow + client-presets) is real.
 vi.mock('../lib/device.svelte.js', () => ({
-  device: { mode: 'relay', connected: true, error: null, relays: ['wss://relay.trotters.cc'] },
+  device: { mode: 'relay', connected: true, error: null, relays: ['wss://relay.trotters.cc'], masters: [], selectedSlot: 0 },
   mgmtCreateClient: vi.fn(),
   mgmtNostrconnect: vi.fn(),
 }))
