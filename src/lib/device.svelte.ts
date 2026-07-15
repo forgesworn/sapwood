@@ -807,6 +807,44 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         || !sameRelayList(previousConfiguredRelays, configuredRelays))) {
       replaceDeviceRelays(current.devicePub, configuredRelays)
     }
+    // Full identity inventory: every master (and derived persona) the signer
+    // serves, not just the addressed one. The addressed identity stays first —
+    // masters[0] drives the identity card, phone handoff and NIP-05 defaults.
+    // Best-effort: an older signer only reports the addressed master here.
+    try {
+      const inv = await current.request('list_identities', {}, RELAY_STATUS_TIMEOUT_MS)
+      if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
+      const rows = Array.isArray(inv.identities)
+        ? inv.identities as Array<Record<string, unknown>>
+        : []
+      if (rows.length) {
+        const addressedHex = current.devicePub.toLowerCase()
+        const mapped = rows.map((r, i): MasterInfo => {
+          const hex = String(r.npub_hex ?? '').toLowerCase()
+          let npub = hex
+          try { npub = nip19.npubEncode(hex) } catch { /* keep hex */ }
+          if (r.kind === 'persona') {
+            return { slot: Number(r.slot ?? 0), label: String(r.label ?? ''), npub, persona: true }
+          }
+          const addressed = typeof r.addressed === 'boolean' ? r.addressed : hex === addressedHex
+          return {
+            slot: Number(r.slot ?? i),
+            label: String(r.label ?? ''),
+            mode: -1,
+            modeLabel: addressed
+              ? (device.relayStatus?.mode ?? 'wifi-standalone').toUpperCase()
+              : 'MASTER',
+            npub,
+            addressed,
+          }
+        })
+        mapped.sort((a, b) =>
+          Number(b.addressed ?? false) - Number(a.addressed ?? false)
+          || Number(a.persona ?? false) - Number(b.persona ?? false)
+          || a.slot - b.slot)
+        device.masters = mapped
+      }
+    } catch { /* older firmware — keep the status-derived single master */ }
     const res = await current.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS)
     if (!relayRefreshIsCurrent(current, generation, authorityEpoch)) return
     const clients = (res.clients as Array<Record<string, unknown>>) ?? []
@@ -2462,6 +2500,33 @@ export async function serialDeriveIdentity(
   // Best-effort: a wifi-standalone signer reboots shortly after replying (to
   // re-subscribe with the new master set), so the list refresh may not land.
   try { await refreshMasters() } catch { /* device rebooting */ }
+  return info
+}
+
+/**
+ * Derive a named child identity over the relay (mgmt `derive_identity`). Safe
+ * over WiFi: no key material crosses the wire, only the name — the signer
+ * already holds the tree root. The parent is the addressed master. The signer
+ * restarts about two seconds after replying to serve the new identity.
+ */
+export async function relayDeriveIdentity(
+  name: string,
+): Promise<{ slot: number; label: string; npub: string; existing: boolean }> {
+  if (!relayTransport) throw new Error('Not connected over the relay')
+  const res = await relayTransport.request('derive_identity', { name }, MGMT_WRITE_TIMEOUT_MS)
+  const hex = String(res.npub_hex ?? '')
+  let npub = hex
+  try { npub = nip19.npubEncode(hex) } catch { /* keep hex */ }
+  const info = {
+    slot: Number(res.slot ?? -1),
+    label: String(res.label ?? name),
+    npub,
+    existing: res.existing === true,
+  }
+  if (!info.existing) {
+    // Make the new identity one-tap connectable once the signer is back.
+    rememberDevice(hex, device.relays.length ? device.relays : [...DEFAULT_SIGNER_RELAYS], info.label)
+  }
   return info
 }
 

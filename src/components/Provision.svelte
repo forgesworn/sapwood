@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters, serialDeriveIdentity } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
@@ -47,13 +47,25 @@
   let showSecret = $state(false)
 
   // Named-identity source. The signer already holds the master's tree root, so
-  // by default IT derives the child (frame 0x60) and no secret touches the
-  // browser. The phrase/nsec path stays for older firmware and off-signer roots.
+  // by default IT derives the child (frame 0x60 over USB, mgmt derive_identity
+  // over the relay — no key material crosses the wire either way). The
+  // phrase/nsec path stays for older firmware and off-signer roots, USB only.
   let deriveSource = $state<'signer' | 'secret'>('signer')
   let parentSlot = $state(0)
-  const signerParents = $derived(device.masters.filter((m) => !m.persona))
-  const canDeriveOnSigner = $derived(device.mode === 'serial' && signerParents.length > 0)
-  const onSigner = $derived(mode === 'named-child' && deriveSource === 'signer' && canDeriveOnSigner)
+  // Over the relay only the ADDRESSED master can derive; a relay management
+  // session is bound to one identity.
+  const signerParents = $derived(device.masters.filter((m) =>
+    !m.persona && (device.mode !== 'relay' || m.addressed !== false)))
+  const canDeriveOnSigner = $derived(
+    (device.mode === 'serial' || device.mode === 'relay') && signerParents.length > 0)
+  // A relay session can ONLY derive on-signer: entering a master secret is a
+  // cable-gated act, and the child key could not be sent remotely anyway.
+  const relayOnly = $derived(device.mode === 'relay')
+  const onSigner = $derived(mode === 'named-child'
+    && (deriveSource === 'signer' || relayOnly) && canDeriveOnSigner)
+  $effect(() => {
+    if (relayOnly && mode !== 'named-child') mode = 'named-child'
+  })
   $effect(() => {
     if (canDeriveOnSigner && !signerParents.some((m) => m.slot === parentSlot)) {
       parentSlot = signerParents[0]!.slot
@@ -67,12 +79,16 @@
     npubPreview = ''
     try {
       label = label.trim()
-      const res = await serialDeriveIdentity(parentSlot, label)
+      const res = device.mode === 'relay'
+        ? await relayDeriveIdentity(label)
+        : await serialDeriveIdentity(parentSlot, label)
       npubPreview = res.npub
       status = 'done'
       message = res.existing
         ? `“${res.label}” was already on this signer (slot ${res.slot}).`
-        : `Identity '${res.label}' derived on the signer.`
+        : device.mode === 'relay'
+          ? `Identity '${res.label}' derived on the signer. It restarts briefly to start serving it; reconnect from the front page in a few seconds.`
+          : `Identity '${res.label}' derived on the signer.`
       rememberProvisioned(res.npub, res.label)
     } catch (e) {
       status = 'error'
@@ -262,7 +278,7 @@
       </p>
     {/if}
     <button class="btn btn-secondary" onclick={handleCancel}>Add another</button>
-  {:else if device.mode !== 'serial'}
+  {:else if device.mode !== 'serial' && !(relayOnly && canDeriveOnSigner)}
     <div class="card card--warn usb-gate">
       <p class="usb-gate-lead">🔌 Plug in a USB cable to set up this device.</p>
       <p class="usb-gate-why">
@@ -319,14 +335,17 @@
         <select
           class="field-input"
           bind:value={mode}
-          disabled={status === 'deriving' || status === 'sending'}
+          disabled={status === 'deriving' || status === 'sending' || relayOnly}
           onchange={() => { if (mode === 'named-child' && label === 'default') label = '' }}
         >
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
-          <option value="named-child">Phrase or nsec + name: derive a named identity</option>
+          <option value="named-child">{relayOnly ? 'Derive a named identity on this signer' : 'Phrase or nsec + name: derive a named identity'}</option>
           <option value="bunker">Existing nsec: sign as-is (keeps your npub)</option>
           <option value="tree-nsec">Existing nsec: derive a new key (new npub)</option>
         </select>
+        {#if relayOnly}
+          <span class="hint-sm name-hint">Over WiFi the signer can derive named identities itself, since no secret crosses the network. The other set-up styles enter a master secret, so they need the USB cable.</span>
+        {/if}
       </label>
 
       <div class="mode-info" class:same={modeInfo.addressKind === 'same'}>
@@ -337,7 +356,7 @@
         </p>
       </div>
 
-      {#if mode === 'named-child' && canDeriveOnSigner}
+      {#if mode === 'named-child' && canDeriveOnSigner && !relayOnly}
         <div class="source-toggle" role="radiogroup" aria-label="Where to derive">
           <button
             class="source-opt"
@@ -426,8 +445,8 @@
       {#if onSigner}
         <button
           class="btn btn-primary derive"
-          disabled={!device.connected || device.mode !== 'serial' || status === 'deriving'
-            || nameDeriveError(label) !== null}
+          disabled={!device.connected || (device.mode !== 'serial' && device.mode !== 'relay')
+            || status === 'deriving' || nameDeriveError(label) !== null}
           onclick={handleDeriveOnSigner}
         >
           {status === 'deriving' ? 'Deriving on signer...' : 'Derive on signer'}

@@ -50,6 +50,10 @@ export interface MasterInfo {
   /** True for a derived persona entry; `slot` is then the OWNING master's slot,
    *  so persona rows must not be offered where a distinct slot is required. */
   persona?: boolean
+  /** Relay sessions only: whether this master is the one the management
+   *  session is addressed to. Only the addressed master is manageable;
+   *  the others are connectable from the front page. */
+  addressed?: boolean
   /** Display override for the mode tag (e.g. 'WIFI-STANDALONE' over relay). */
   modeLabel?: string
   /** Bunker URI for this identity (Pi multi-instance mode). */

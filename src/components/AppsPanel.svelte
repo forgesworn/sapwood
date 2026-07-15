@@ -244,10 +244,11 @@
   <div class="head">
     <h2 class="section-title head-title">Apps</h2>
     <div class="head-controls">
-      {#if identities.length > 1}
-        <!-- Which identity new connections bind to. Shown on any transport that
-             lists more than one (USB via PROVISION_LIST, bridge via HTTP); a
-             relay session always manages a single master, so it never appears. -->
+      {#if device.mode !== 'relay' && identities.length > 1}
+        <!-- Which identity new connections bind to. Shown when the transport
+             can switch identities in-session (USB via PROVISION_LIST, bridge
+             via HTTP). A relay session is addressed to ONE identity, so it
+             gets the note below instead of a switch that cannot work. -->
         <select class="field-input identity-pick" aria-label="Identity" value={device.selectedSlot} onchange={handleIdentityChange}>
           {#each identities as master (master.slot)}
             <option value={master.slot}>{master.label ?? master.slot}</option>
@@ -265,6 +266,14 @@
         <strong>Identity</strong> tab and use “Add an identity to this signer”. Then come back here
         to connect your apps.</p>
     </section>
+  {/if}
+
+  {#if device.mode === 'relay' && identities.length > 1}
+    <p class="hint">
+      Managing apps for <strong>“{identities.find((m) => m.addressed)?.label ?? identities[0]?.label}”</strong>.
+      A WiFi session manages one identity at a time: to connect apps under another,
+      pick that identity from the front page.
+    </p>
   {/if}
 
   <!-- New connection -->

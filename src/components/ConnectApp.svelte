@@ -46,7 +46,10 @@
   // master. Personas share their owner's slot table, so only masters count.
   const identityCount = $derived(device.masters?.filter((m) => !m.persona).length ?? 0)
   const activeIdentity = $derived(
-    device.masters?.find((m) => !m.persona && m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
+    device.mode === 'relay'
+      // A relay session is bound to the addressed identity, whatever its slot.
+      ? device.masters?.find((m) => m.addressed) ?? device.masters?.[0] ?? null
+      : device.masters?.find((m) => !m.persona && m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
   )
   const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
   const commonKindSet = new Set(COMMON_KINDS.map((k) => k.kind))
@@ -272,9 +275,20 @@
 
       {#if overUsb}
         <p class="hint-sm flow-note">Over USB the first signature is approved by a physical button press on the device.</p>
-        {#if identityCount > 1 && activeIdentity}
-          <p class="hint-sm flow-note">This app will sign as “{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”. To use another identity, pick it under Advanced, Apps, then connect from there.</p>
+        {#if identityCount > 1}
+          <!-- The signer holds several identities: choose which one this app
+               signs as, right here in the flow. -->
+          <label class="field flow-note">
+            <span class="field-label">Sign as</span>
+            <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
+              {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+                <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
+              {/each}
+            </select>
+          </label>
         {/if}
+      {:else if device.mode === 'relay' && identityCount > 1 && activeIdentity}
+        <p class="hint-sm flow-note">This app will sign as “{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”. A WiFi session manages one identity at a time: to connect an app under another, pick that identity from the front page first.</p>
       {/if}
       {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
