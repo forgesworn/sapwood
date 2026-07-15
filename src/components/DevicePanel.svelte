@@ -5,6 +5,7 @@
   // tabs plus the device half of Settings.
   import {
     device, serialTransport, httpTransport, bridgeRestart, mgmtRevokeClient,
+    relaySetLogQuiet,
   } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
   import { getFirmwareVersion } from '../lib/device.svelte.js'
@@ -39,6 +40,16 @@
     ? { uptime_s: device.relayStatus?.uptime_s, last_reset: device.relayStatus?.last_reset }
     : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset })
   const lastReset = $derived(health.last_reset ? describeReset(health.last_reset) : null)
+
+  // Quiet logging: warnings only, which also calms activity LEDs wired to the
+  // log UART (the T-Display's blue light flashes with every log line).
+  let logQuietPending = $state(false)
+  async function setLogQuiet(quiet: boolean) {
+    logQuietPending = true
+    try { await relaySetLogQuiet(quiet) }
+    catch (e) { device.error = e instanceof Error ? e.message : 'Could not change the log level.' }
+    finally { logQuietPending = false }
+  }
 
   // --- Boot PIN (USB only) ---
   let pinValue = $state('')
@@ -194,6 +205,29 @@
     {#if lastReset?.crash}
       <p class="hint-sm crash-hint">The signer's last restart was not planned. If this repeats, note what the
         connected apps were doing at the time; the request log below restarts empty each boot.</p>
+    {/if}
+    {#if device.mode === 'relay' && typeof device.relayStatus?.log_quiet === 'boolean'}
+      <div class="log-quiet">
+        <span class="lq-label">Activity light and log detail</span>
+        <div class="lq-buttons">
+          <button
+            class="btn btn-sm"
+            class:btn-secondary={device.relayStatus.log_quiet}
+            class:lq-on={!device.relayStatus.log_quiet}
+            disabled={logQuietPending || !device.relayStatus.log_quiet}
+            onclick={() => setLogQuiet(false)}
+          >Detailed</button>
+          <button
+            class="btn btn-sm"
+            class:btn-secondary={!device.relayStatus.log_quiet}
+            class:lq-on={device.relayStatus.log_quiet}
+            disabled={logQuietPending || device.relayStatus.log_quiet}
+            onclick={() => setLogQuiet(true)}
+          >Quiet</button>
+        </div>
+        <p class="hint-sm no-gap">The signer's blue activity light flashes with its log output. Quiet keeps
+          warnings only, so the light stays dark in normal use.</p>
+      </div>
     {/if}
   </section>
 
@@ -357,6 +391,11 @@
 <style>
   .crash-reset { color: var(--amber); font-weight: 600; }
   .crash-hint { margin-top: 0.4rem; color: var(--amber); }
+
+  .log-quiet { margin-top: 0.9rem; }
+  .lq-label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.4rem; }
+  .lq-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; }
+  .lq-on { border-color: var(--green-dim); color: var(--green); background: #08130d; }
 
   .device-panel { display: flex; flex-direction: column; gap: 1.75rem; }
 

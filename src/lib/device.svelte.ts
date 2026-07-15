@@ -47,6 +47,9 @@ export interface RelayStatus {
   /** Why the chip last reset: software-restart is deliberate; panic,
    *  watchdog and brownout are crashes worth investigating. */
   last_reset?: string
+  /** Whether runtime logging is dropped to warnings (calms activity LEDs
+   *  wired to the log UART). */
+  log_quiet?: boolean
 }
 
 /** Network state returned by relay management. Password material is never
@@ -675,6 +678,7 @@ function applyRelayStatus(raw: Record<string, unknown>) {
       : [],
     ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
     ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
+    ...(typeof raw.log_quiet === 'boolean' ? { log_quiet: raw.log_quiet } : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
@@ -1244,6 +1248,17 @@ export async function relayUpdateClient(
   } catch (error) {
     return rethrowAfterManagementConflict(error)
   }
+  await relayRefresh()
+}
+
+/**
+ * Set the signer's runtime log verbosity over the relay. Quiet keeps warnings
+ * only — on boards whose activity LED is wired to the log UART (the
+ * T-Display's blue light), this is the calm-the-light control.
+ */
+export async function relaySetLogQuiet(quiet: boolean): Promise<void> {
+  if (!relayTransport) throw new Error('not connected over relay')
+  await relayTransport.request('set_log_level', { quiet }, MGMT_WRITE_TIMEOUT_MS)
   await relayRefresh()
 }
 
