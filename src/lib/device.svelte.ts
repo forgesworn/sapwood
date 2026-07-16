@@ -50,6 +50,11 @@ export interface RelayStatus {
   /** What the signer was doing when it last crashed (only after a crash
    *  reset that left a breadcrumb), e.g. 'relay sign_event kind 1059'. */
   crashed_during?: string
+  /** Total free heap (bytes). */
+  free_heap?: number
+  /** Largest single free block (bytes). Much smaller than free_heap means a
+   *  fragmented heap — the condition behind the bulk-decrypt crashes. */
+  largest_free_block?: number
   /** Whether runtime logging is dropped to warnings (calms activity LEDs
    *  wired to the log UART). */
   log_quiet?: boolean
@@ -686,6 +691,8 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
     ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
     ...(typeof raw.crashed_during === 'string' ? { crashed_during: raw.crashed_during } : {}),
+    ...(typeof raw.free_heap === 'number' ? { free_heap: raw.free_heap } : {}),
+    ...(typeof raw.largest_free_block === 'number' ? { largest_free_block: raw.largest_free_block } : {}),
     ...(typeof raw.log_quiet === 'boolean' ? { log_quiet: raw.log_quiet } : {}),
     ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
     ...(typeof raw.board === 'string' ? { board: raw.board } : {}),

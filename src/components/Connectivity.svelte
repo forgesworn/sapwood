@@ -404,6 +404,7 @@
           {relays}
           suggestions={SUGGESTED_SIGNER_RELAYS}
           disabled={!canConfigure || loading || status === 'sending'}
+          showHealth
           onchange={(next) => (relays = next)}
         />
       </div>

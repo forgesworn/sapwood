@@ -41,6 +41,15 @@
     : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset, crashed_during: usbHealth?.crashed_during })
   const lastReset = $derived(health.last_reset ? describeReset(health.last_reset) : null)
 
+  // Live memory health (relay only). A largest block far below total free is a
+  // fragmented heap — the condition behind the bulk-decrypt crashes. Flag it
+  // amber so it is visible before it becomes a reboot.
+  const freeHeap = $derived(device.mode === 'relay' ? device.relayStatus?.free_heap : undefined)
+  const largestBlock = $derived(device.mode === 'relay' ? device.relayStatus?.largest_free_block : undefined)
+  const fragmented = $derived(typeof freeHeap === 'number' && typeof largestBlock === 'number'
+    && freeHeap > 0 && largestBlock / freeHeap < 0.4)
+  const kb = (n: number) => `${Math.round(n / 1024)} KB`
+
   // Quiet logging: warnings only, which also calms activity LEDs wired to the
   // log UART (the T-Display's blue light flashes with every log line).
   let logQuietPending = $state(false)
@@ -201,7 +210,20 @@
       {#if lastReset}
         <tr><td class="label">Last restart</td><td class:crash-reset={lastReset.crash}>{lastReset.text}</td></tr>
       {/if}
+      {#if typeof freeHeap === 'number' && typeof largestBlock === 'number'}
+        <tr>
+          <td class="label">Free memory</td>
+          <td class:crash-reset={fragmented}>
+            {kb(freeHeap)}{#if fragmented} · fragmented (largest block {kb(largestBlock)}){/if}
+          </td>
+        </tr>
+      {/if}
     </tbody></table>
+    {#if fragmented}
+      <p class="hint-sm crash-hint">The signer's memory is fragmented (its largest free block is small
+        relative to total free). This can happen after a burst of decryptions; it clears on the next
+        restart. Newer firmware frees the TLS buffers between messages to avoid it.</p>
+    {/if}
     {#if lastReset?.crash}
       <p class="hint-sm crash-hint">The signer's last restart was not planned.{#if health.crashed_during}&#32;It crashed while
         handling <strong>{health.crashed_during}</strong>.{/if} If this repeats, note the pattern; the request log
