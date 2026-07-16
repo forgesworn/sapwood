@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sapwood — shape your signer</title>
+<title>Sapwood: shape your signer</title>
 <meta name="description" content="Sapwood is the browser console for the Heartwood hardware signer: flash firmware, provision masters, derive identities, set policies, approve requests, take backups. No account, no server, no keys in the browser. MIT.">
 <link rel="canonical" href="https://sapwood.forgesworn.dev/about/">
-<meta property="og:title" content="Sapwood — shape your signer">
-<meta property="og:description" content="The management console for the Heartwood signer. Flash, provision, set policies, approve, back up — over USB or end-to-end encrypted relay commands.">
+<meta property="og:title" content="Sapwood: shape your signer">
+<meta property="og:description" content="The management console for the Heartwood signer. Flash, provision, set policies, approve, back up. Over USB or end-to-end encrypted relay commands.">
 <meta property="og:url" content="https://sapwood.forgesworn.dev/about/">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#050505">
@@ -40,8 +40,8 @@
       Sapwood is the browser console for the
       <a href="https://heartwood.forgesworn.dev">Heartwood</a> signer: flash
       firmware, provision masters, derive identities, set policies, approve
-      requests, take backups. It is a static page — no account, no server, no
-      analytics — and it talks to the signer over USB or through end-to-end
+      requests, take backups. It is a static page with no account, no server and
+      no analytics, and it talks to the signer over USB or through end-to-end
       encrypted relay commands. Your keys stay on the device; the browser only
       ever shapes what the device will agree to do.
     </p>
@@ -56,7 +56,7 @@
   <figure class="term reveal r3" aria-label="A Sapwood session: device status, identities, a pending approval, a firmware update">
     <figcaption class="term-bar">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="term-title">sapwood — usb</span>
+      <span class="term-title">sapwood · usb</span>
     </figcaption>
     <pre class="term-body"><code><span class="p">$</span> sapwood <span class="dim">▸ device</span>
 <span class="ok">✓</span> HEARTWOOD v0.13.7 · Heltec V4 · serial connected
@@ -112,7 +112,7 @@
     <li>
       <h3>Backups</h3>
       <p>An imported key writes out as 24 BIP&#8209;39 words that restore the
-      identical npub — in Sapwood or the offline CLI, never on a server.</p>
+      identical npub, in Sapwood or the offline CLI, never on a server.</p>
     </li>
     <li>
       <h3>Connectivity</h3>
@@ -121,7 +121,7 @@
     </li>
     <li>
       <h3>Logs</h3>
-      <p>The device's own log stream, live in the console — watch a request
+      <p>The device's own log stream, live in the console. Watch a request
       arrive, meet policy, and leave signed.</p>
     </li>
     <li>
@@ -142,14 +142,14 @@
     <div class="spec-row">
       <dt>No keys to take</dt>
       <dd>Master secrets never leave the ESP32. Sapwood holds a management
-      credential, not signing power — a hostile page with full control of the
+      credential, not signing power. A hostile page with full control of the
       console still cannot extract a key or sign an event.</dd>
     </div>
     <div class="spec-row">
       <dt>Every change is challenged</dt>
       <dd>Remote mutations require the operator key, a device-issued one-time
-      challenge, and the current client credential — a captured command replays
-      as garbage.</dd>
+      challenge, and the current client credential, so a captured command
+      replays as garbage.</dd>
     </div>
     <div class="spec-row">
       <dt>The button outranks the browser</dt>
@@ -160,7 +160,7 @@
     <div class="spec-row">
       <dt>Bounded operator</dt>
       <dd>The operator credential can shape policies and connectivity. It cannot
-      read or replace seeds, change the PIN, or push firmware — by design, not
+      read or replace seeds, change the PIN, or push firmware. By design, not
       by promise.</dd>
     </div>
   </dl>
@@ -175,20 +175,20 @@
   <div class="section-body two-col">
     <p>
       <span class="green mono-label">USB.</span> Plug the board in and Sapwood
-      speaks to it directly over Web Serial — flashing, provisioning, recovery,
+      speaks to it directly over Web Serial: flashing, provisioning, recovery,
       logs. Everything stays on your desk; nothing needs a network at all.
     </p>
     <p>
       <span class="green mono-label">RELAYS.</span> Day to day, management
       commands travel as end-to-end encrypted Nostr events to the signer's own
       outbound connection. No inbound port, no port forwarding, no cloud
-      account, no management server — the relay carries ciphertext it cannot
+      account, no management server. The relay carries ciphertext it cannot
       read.
     </p>
   </div>
   <p class="aside">
-    Honest requirements: Web Serial means a Chromium browser — Chrome, Edge or
-    Opera — for the USB path. Firefox and Safari don't ship it.
+    Honest requirements: Web Serial means a Chromium browser (Chrome, Edge or
+    Opera) for the USB path. Firefox and Safari don't ship it.
   </p>
 </section>
 
@@ -201,7 +201,7 @@
   <ol class="steps">
     <li>
       <span class="step-no">01</span>
-      <p>Plug a supported ESP32 board into USB — see
+      <p>Plug a supported ESP32 board into USB. See
       <a href="https://heartwood.forgesworn.dev/#hardware">the boards</a>.</p>
     </li>
     <li>
@@ -211,7 +211,7 @@
     </li>
     <li>
       <span class="step-no">03</span>
-      <p>Provision a master — new mnemonic, existing nsec, or bunker key — and
+      <p>Provision a master (new mnemonic, existing nsec, or bunker key) and
       name your first identity.</p>
     </li>
     <li>
@@ -239,7 +239,7 @@
     <span class="family-card current">
       <span class="family-ring sap-swatch"></span>
       <h3>Sapwood</h3>
-      <p>The management console. Shape your signer — you are here.</p>
+      <p>The management console. Shape your signer. You are here.</p>
     </span>
     <a class="family-card" href="https://cambium.forgesworn.dev">
       <span class="family-ring cambium-swatch"></span>
@@ -267,7 +267,7 @@
   </p>
   <p class="colophon-note">
     MIT licence. This page is static: no scripts, no cookies, no analytics, no
-    third-party requests — the font is served from this domain. Like the
+    third-party requests. The font is served from this domain. Like the
     console, it holds nothing of yours.
   </p>
 </footer>
