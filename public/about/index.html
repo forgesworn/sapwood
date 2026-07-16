@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sapwood — shape your signer</title>
+<meta name="description" content="Sapwood is the browser console for the Heartwood hardware signer: flash firmware, provision masters, derive identities, set policies, approve requests, take backups. No account, no server, no keys in the browser. MIT.">
+<link rel="canonical" href="https://sapwood.forgesworn.dev/about/">
+<meta property="og:title" content="Sapwood — shape your signer">
+<meta property="og:description" content="The management console for the Heartwood signer. Flash, provision, set policies, approve, back up — over USB or end-to-end encrypted relay commands.">
+<meta property="og:url" content="https://sapwood.forgesworn.dev/about/">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="masthead">
+  <a class="wordmark" href="./">SAPWOOD<span class="cursor">_</span></a>
+  <nav class="mastnav" aria-label="Sections">
+    <a href="#what">What</a>
+    <a href="#security">Security</a>
+    <a href="#connect">Connect</a>
+    <a href="#start">Start</a>
+    <a class="ext" href="https://sapwood.forgesworn.dev">Open the app</a>
+    <a class="ext" href="https://github.com/forgesworn/sapwood">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<!-- ======================= HERO ======================= -->
+<section class="hero">
+  <div class="hero-copy">
+    <p class="kicker reveal r1">// the management console for Heartwood</p>
+    <h1 class="reveal r2">Shape your <span class="green">signer.</span></h1>
+    <p class="lede reveal r3">
+      Sapwood is the browser console for the
+      <a href="https://heartwood.forgesworn.dev">Heartwood</a> signer: flash
+      firmware, provision masters, derive identities, set policies, approve
+      requests, take backups. It is a static page — no account, no server, no
+      analytics — and it talks to the signer over USB or through end-to-end
+      encrypted relay commands. Your keys stay on the device; the browser only
+      ever shapes what the device will agree to do.
+    </p>
+    <div class="cta-row reveal r4">
+      <a class="btn btn-primary" href="https://sapwood.forgesworn.dev">Open Sapwood</a>
+      <a class="btn btn-ghost" href="https://github.com/forgesworn/sapwood">Read the source</a>
+    </div>
+    <p class="hero-meta reveal r5">static SPA &nbsp;·&nbsp; Web Serial &nbsp;·&nbsp; no keys in the browser &nbsp;·&nbsp; MIT</p>
+  </div>
+
+  <!-- the console, in the app's own voice -->
+  <figure class="term reveal r3" aria-label="A Sapwood session: device status, identities, a pending approval, a firmware update">
+    <figcaption class="term-bar">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="term-title">sapwood — usb</span>
+    </figcaption>
+    <pre class="term-body"><code><span class="p">$</span> sapwood <span class="dim">▸ device</span>
+<span class="ok">✓</span> HEARTWOOD v0.13.7 · Heltec V4 · serial connected
+<span class="dim">2 masters provisioned. 5 approved clients.</span>
+
+<span class="p">$</span> sapwood <span class="dim">▸ identities</span>
+  forge     <span class="dim">npub1q3k…x7d0</span>   tree m/0
+  market    <span class="dim">npub1zzj…p2q4</span>   tree m/1
+
+<span class="p">$</span> sapwood <span class="dim">▸ approvals</span>
+<span class="warn">!</span> kind 1 (note) · client "gossip" · waiting
+  <span class="ok">[approve]</span> <span class="err">[deny]</span>
+
+<span class="p">$</span> sapwood <span class="dim">▸ firmware --update</span>
+<span class="ok">✓</span> signature verified · sha-256 ok
+<span class="ok">✓</span> Firmware updated. Rebooting.</code></pre>
+  </figure>
+</section>
+
+<!-- ======================= 01 · WHAT ======================= -->
+<section class="section" id="what">
+  <div class="section-head">
+    <span class="section-no">01</span>
+    <h2>EVERYTHING THE SIGNER NEEDS. NOTHING IT SHOULDN'T.</h2>
+  </div>
+  <ul class="feature-grid">
+    <li>
+      <h3>Provision</h3>
+      <p>Bootstrap a device over USB from a 12/24-word mnemonic, an existing
+      nsec, or a raw bunker key. Secrets are zeroised in browser memory the
+      moment they are transmitted.</p>
+    </li>
+    <li>
+      <h3>Identities</h3>
+      <p>Type a name; the signer derives the identity on-device from a master it
+      already holds. No secret ever exists in the browser to steal.</p>
+    </li>
+    <li>
+      <h3>Policies</h3>
+      <p>Exact per-client allowlists of methods and event kinds, with presets
+      for common apps. Anything outside the ceiling fails closed.</p>
+    </li>
+    <li>
+      <h3>Approvals</h3>
+      <p>A pending queue for requests that policy alone won't decide. Approve or
+      deny from the console; the device remains the authority.</p>
+    </li>
+    <li>
+      <h3>Firmware</h3>
+      <p>Flash a new board in the browser, and update over USB with the release
+      signature and SHA&#8209;256 verified before a byte is committed.</p>
+    </li>
+    <li>
+      <h3>Backups</h3>
+      <p>An imported key writes out as 24 BIP&#8209;39 words that restore the
+      identical npub — in Sapwood or the offline CLI, never on a server.</p>
+    </li>
+    <li>
+      <h3>Connectivity</h3>
+      <p>Stage WiFi and relay changes, then activate them rollback-safe, with
+      live red/amber/green health for every relay the signer uses.</p>
+    </li>
+    <li>
+      <h3>Logs</h3>
+      <p>The device's own log stream, live in the console — watch a request
+      arrive, meet policy, and leave signed.</p>
+    </li>
+    <li>
+      <h3>Phone handoff</h3>
+      <p>Move the operator credential to your phone through a protected QR flow
+      that fails closed if anything looks wrong.</p>
+    </li>
+  </ul>
+</section>
+
+<!-- ======================= 02 · SECURITY ======================= -->
+<section class="section" id="security">
+  <div class="section-head">
+    <span class="section-no">02</span>
+    <h2>WHAT A COMPROMISED BROWSER GETS: NOTHING</h2>
+  </div>
+  <dl class="spec-rows">
+    <div class="spec-row">
+      <dt>No keys to take</dt>
+      <dd>Master secrets never leave the ESP32. Sapwood holds a management
+      credential, not signing power — a hostile page with full control of the
+      console still cannot extract a key or sign an event.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Every change is challenged</dt>
+      <dd>Remote mutations require the operator key, a device-issued one-time
+      challenge, and the current client credential — a captured command replays
+      as garbage.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>The button outranks the browser</dt>
+      <dd>Provisioning, seed and PIN changes, factory reset and the start of any
+      firmware update need a physical press on the device. Software can ask;
+      only your thumb can insist.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Bounded operator</dt>
+      <dd>The operator credential can shape policies and connectivity. It cannot
+      read or replace seeds, change the PIN, or push firmware — by design, not
+      by promise.</dd>
+    </div>
+  </dl>
+</section>
+
+<!-- ======================= 03 · CONNECT ======================= -->
+<section class="section" id="connect">
+  <div class="section-head">
+    <span class="section-no">03</span>
+    <h2>TWO WIRES, BOTH YOURS</h2>
+  </div>
+  <div class="section-body two-col">
+    <p>
+      <span class="green mono-label">USB.</span> Plug the board in and Sapwood
+      speaks to it directly over Web Serial — flashing, provisioning, recovery,
+      logs. Everything stays on your desk; nothing needs a network at all.
+    </p>
+    <p>
+      <span class="green mono-label">RELAYS.</span> Day to day, management
+      commands travel as end-to-end encrypted Nostr events to the signer's own
+      outbound connection. No inbound port, no port forwarding, no cloud
+      account, no management server — the relay carries ciphertext it cannot
+      read.
+    </p>
+  </div>
+  <p class="aside">
+    Honest requirements: Web Serial means a Chromium browser — Chrome, Edge or
+    Opera — for the USB path. Firefox and Safari don't ship it.
+  </p>
+</section>
+
+<!-- ======================= 04 · START ======================= -->
+<section class="section" id="start">
+  <div class="section-head">
+    <span class="section-no">04</span>
+    <h2>FIRST BOOT IN MINUTES</h2>
+  </div>
+  <ol class="steps">
+    <li>
+      <span class="step-no">01</span>
+      <p>Plug a supported ESP32 board into USB — see
+      <a href="https://heartwood.forgesworn.dev/#hardware">the boards</a>.</p>
+    </li>
+    <li>
+      <span class="step-no">02</span>
+      <p>Open <a href="https://sapwood.forgesworn.dev">sapwood.forgesworn.dev</a>
+      in a Chromium browser and follow the flasher wizard.</p>
+    </li>
+    <li>
+      <span class="step-no">03</span>
+      <p>Provision a master — new mnemonic, existing nsec, or bunker key — and
+      name your first identity.</p>
+    </li>
+    <li>
+      <span class="step-no">04</span>
+      <p>Connect an app: Sapwood issues the <code>bunker://</code> pairing for
+      <a href="https://bark.forgesworn.dev">Bark</a>,
+      <a href="https://cambium.forgesworn.dev">Cambium</a>, or any NIP&#8209;46
+      client.</p>
+    </li>
+  </ol>
+</section>
+
+<!-- ======================= THE TREE ======================= -->
+<section class="section family">
+  <div class="section-head">
+    <span class="section-no">§</span>
+    <h2>THE WHOLE TREE</h2>
+  </div>
+  <div class="family-row">
+    <a class="family-card" href="https://heartwood.forgesworn.dev">
+      <span class="family-ring heart-swatch"></span>
+      <h3>Heartwood</h3>
+      <p>The core. Keys on a chip behind a physical button.</p>
+    </a>
+    <span class="family-card current">
+      <span class="family-ring sap-swatch"></span>
+      <h3>Sapwood</h3>
+      <p>The management console. Shape your signer — you are here.</p>
+    </span>
+    <a class="family-card" href="https://cambium.forgesworn.dev">
+      <span class="family-ring cambium-swatch"></span>
+      <h3>Cambium</h3>
+      <p>The living layer on Android. A NIP&#8209;55 signer that holds no keys.</p>
+    </a>
+    <a class="family-card" href="https://bark.forgesworn.dev">
+      <span class="family-ring bark-swatch"></span>
+      <h3>Bark</h3>
+      <p>The protective outer layer. NIP&#8209;07 in your browser, keys nowhere
+      near it.</p>
+    </a>
+  </div>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <p class="colophon-links">
+    <a href="https://sapwood.forgesworn.dev">App</a> ·
+    <a href="https://github.com/forgesworn/sapwood">Source</a> ·
+    <a href="https://github.com/forgesworn/sapwood/blob/main/CHANGELOG.md">Changelog</a> ·
+    <a href="https://github.com/sponsors/TheCryptoDonkey">Sponsor</a> ·
+    <a href="https://forgesworn.dev">forgesworn.dev</a>
+  </p>
+  <p class="colophon-note">
+    MIT licence. This page is static: no scripts, no cookies, no analytics, no
+    third-party requests — the font is served from this domain. Like the
+    console, it holds nothing of yours.
+  </p>
+</footer>
+
+</body>
+</html>

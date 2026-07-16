@@ -54,6 +54,19 @@ sapwood.forgesworn.dev {
 		file_server
 	}
 
+	# Marketing page. Static, no scripts; ships in the repo under public/about/
+	# so it deploys with the app. Must be handled before the SPA fallback or
+	# /about/ would serve the admin console instead.
+	redir /about /about/ 308
+	handle /about/* {
+		# The page is static HTML + CSS + a self-hosted font; enforce that
+		# here rather than just promising it in the footer. (The app's own
+		# CSP ships in its index.html and is unaffected.)
+		header Content-Security-Policy "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		try_files {path} {path}index.html
+		file_server
+	}
+
 	# Fixed static files also serve as files only. Unknown app routes still fall
 	# through to the SPA below.
 	handle /firmware/* {
