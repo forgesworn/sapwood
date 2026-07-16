@@ -48,6 +48,10 @@
   const largestBlock = $derived(device.mode === 'relay' ? device.relayStatus?.largest_free_block : undefined)
   const fragmented = $derived(typeof freeHeap === 'number' && typeof largestBlock === 'number'
     && freeHeap > 0 && largestBlock / freeHeap < 0.4)
+  // The signer trimmed this poll to the vital fields because its heap was too
+  // fragmented to transport the full status. The request log paused this poll
+  // rather than the signer crashing — it resumes once the heap recovers.
+  const trimmed = $derived(device.mode === 'relay' && device.relayStatus?.truncated === true)
   const kb = (n: number) => `${Math.round(n / 1024)} KB`
 
   // Quiet logging: warnings only, which also calms activity LEDs wired to the
@@ -223,6 +227,11 @@
       <p class="hint-sm crash-hint">The signer's memory is fragmented (its largest free block is small
         relative to total free). This can happen after a burst of decryptions; it clears on the next
         restart. Newer firmware frees the TLS buffers between messages to avoid it.</p>
+    {/if}
+    {#if trimmed}
+      <p class="hint-sm crash-hint">The signer trimmed this status to its vital fields because its memory
+        was too fragmented to send the full report. The request log paused this poll instead of the signer
+        crashing, and resumes once the memory recovers.</p>
     {/if}
     {#if lastReset?.crash}
       <p class="hint-sm crash-hint">The signer's last restart was not planned.{#if health.crashed_during}&#32;It crashed while

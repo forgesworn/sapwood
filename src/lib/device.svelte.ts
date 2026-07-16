@@ -62,6 +62,11 @@ export interface RelayStatus {
   version?: string
   /** Board identifier, e.g. 'tdisplay' (absent on older firmware). */
   board?: string
+  /** Set when the signer trimmed this poll to the vital fields (dropping the
+   *  request log and relay lists) because its heap was too fragmented to
+   *  transport the full status. Telemetry degraded gracefully rather than the
+   *  signer crashing; the full status returns once the heap recovers. */
+  truncated?: boolean
 }
 
 /** Network state returned by relay management. Password material is never
@@ -696,6 +701,7 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(typeof raw.log_quiet === 'boolean' ? { log_quiet: raw.log_quiet } : {}),
     ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
     ...(typeof raw.board === 'string' ? { board: raw.board } : {}),
+    ...(raw.truncated === true ? { truncated: true } : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
