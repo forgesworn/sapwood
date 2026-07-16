@@ -294,7 +294,7 @@ code {
 
 .section-body p { max-width: var(--measure); color: var(--ink-dim); font-size: 0.95rem; }
 .section-body p + p { margin-top: 1rem; }
-.section-body p a, .two-col p a, .aside a { color: var(--ink); }
+.section-body p a, .two-col p a, .three-col p a, .aside a { color: var(--ink); }
 
 .two-col {
   display: grid;
@@ -302,6 +302,13 @@ code {
   gap: clamp(1.5rem, 4vw, 3rem);
 }
 .two-col p + p { margin-top: 0; }
+
+.three-col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(1.5rem, 4vw, 3rem);
+}
+.three-col p + p { margin-top: 0; }
 
 /* ---------- feature grid ---------- */
 
@@ -454,6 +461,8 @@ a.family-card:hover h3 { color: var(--green); }
   .family-row { grid-template-columns: repeat(2, 1fr); }
   .two-col { grid-template-columns: 1fr; }
   .two-col p + p { margin-top: 1rem; }
+  .three-col { grid-template-columns: 1fr; }
+  .three-col p + p { margin-top: 1rem; }
 }
 
 @media (max-width: 640px) {

@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sapwood: shape your signer</title>
-<meta name="description" content="Sapwood is the browser console for the Heartwood hardware signer: flash firmware, provision masters, derive identities, set policies, approve requests, take backups. No account, no server, no keys in the browser. MIT.">
+<meta name="description" content="Sapwood is the browser console for the Heartwood hardware signer: flash firmware, provision masters, derive identities, set policies, approve requests, take backups. No account, no server, no analytics. MIT.">
 <link rel="canonical" href="https://sapwood.forgesworn.dev/about/">
 <meta property="og:title" content="Sapwood: shape your signer">
-<meta property="og:description" content="The management console for the Heartwood signer. Flash, provision, set policies, approve, back up. Over USB or end-to-end encrypted relay commands.">
+<meta property="og:description" content="The management console for the Heartwood signer. Flash, provision, set policies, approve, back up. Over USB, end-to-end encrypted relay commands, or a local bridge daemon.">
 <meta property="og:url" content="https://sapwood.forgesworn.dev/about/">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#050505">
@@ -41,15 +41,16 @@
       <a href="https://heartwood.forgesworn.dev">Heartwood</a> signer: flash
       firmware, provision masters, derive identities, set policies, approve
       requests, take backups. It is a static page with no account, no server and
-      no analytics, and it talks to the signer over USB or through end-to-end
-      encrypted relay commands. Your keys stay on the device; the browser only
+      no analytics, and it talks to the signer over USB, through end-to-end
+      encrypted relay commands, or via the keyless bridge daemon on your own
+      network. Once provisioned, your keys stay on the device; the browser only
       ever shapes what the device will agree to do.
     </p>
     <div class="cta-row reveal r4">
       <a class="btn btn-primary" href="https://sapwood.forgesworn.dev">Open Sapwood</a>
       <a class="btn btn-ghost" href="https://github.com/forgesworn/sapwood">Read the source</a>
     </div>
-    <p class="hero-meta reveal r5">static SPA &nbsp;·&nbsp; Web Serial &nbsp;·&nbsp; no keys in the browser &nbsp;·&nbsp; MIT</p>
+    <p class="hero-meta reveal r5">static SPA &nbsp;·&nbsp; Web Serial &nbsp;·&nbsp; keys stay on the device &nbsp;·&nbsp; MIT</p>
   </div>
 
   <!-- the console, in the app's own voice -->
@@ -85,9 +86,9 @@
   <ul class="feature-grid">
     <li>
       <h3>Provision</h3>
-      <p>Bootstrap a device over USB from a 12/24-word mnemonic, an existing
-      nsec, or a raw bunker key. Secrets are zeroised in browser memory the
-      moment they are transmitted.</p>
+      <p>Bootstrap a device over USB from a 12/24-word mnemonic or an existing
+      nsec, derived as a tree or used as-is. Secrets are zeroised in browser
+      memory the moment they are transmitted.</p>
     </li>
     <li>
       <h3>Identities</h3>
@@ -106,8 +107,9 @@
     </li>
     <li>
       <h3>Firmware</h3>
-      <p>Flash a new board in the browser, and update over USB with the release
-      signature and SHA&#8209;256 verified before a byte is committed.</p>
+      <p>Flash a new board in the browser, and update over USB or through the
+      local bridge with the release signature and SHA&#8209;256 verified before
+      a byte is committed.</p>
     </li>
     <li>
       <h3>Backups</h3>
@@ -170,9 +172,9 @@
 <section class="section" id="connect">
   <div class="section-head">
     <span class="section-no">03</span>
-    <h2>TWO WIRES, BOTH YOURS</h2>
+    <h2>THREE PATHS, ALL YOURS</h2>
   </div>
-  <div class="section-body two-col">
+  <div class="section-body three-col">
     <p>
       <span class="green mono-label">USB.</span> Plug the board in and Sapwood
       speaks to it directly over Web Serial: flashing, provisioning, recovery,
@@ -184,6 +186,13 @@
       outbound connection. No inbound port, no port forwarding, no cloud
       account, no management server. The relay carries ciphertext it cannot
       read.
+    </p>
+    <p>
+      <span class="green mono-label">BRIDGE.</span> A signer tethered to a Pi
+      or any Linux box is reachable through the keyless
+      <a href="https://heartwood.forgesworn.dev/#daemon">bridge daemon</a> on
+      your LAN: the same console, plus daemon health and restarts, with
+      verified firmware pushed down the tether.
     </p>
   </div>
   <p class="aside">
@@ -201,7 +210,7 @@
   <ol class="steps">
     <li>
       <span class="step-no">01</span>
-      <p>Plug a supported ESP32 board into USB. See
+      <p>Plug a supported board into USB. See
       <a href="https://heartwood.forgesworn.dev/#hardware">the boards</a>.</p>
     </li>
     <li>
@@ -211,7 +220,7 @@
     </li>
     <li>
       <span class="step-no">03</span>
-      <p>Provision a master (new mnemonic, existing nsec, or bunker key) and
+      <p>Provision a master (new mnemonic or existing nsec) and
       name your first identity.</p>
     </li>
     <li>
