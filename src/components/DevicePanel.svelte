@@ -28,7 +28,7 @@
   // Signer uptime + why it last restarted: over WiFi from get_status, over USB
   // from FIRMWARE_INFO. Turns "it keeps rebooting" from an anecdote into data —
   // a planned restart reads differently from a crash.
-  let usbHealth = $state<{ uptime_s?: number; last_reset?: string } | null>(null)
+  let usbHealth = $state<{ uptime_s?: number; last_reset?: string; crashed_during?: string } | null>(null)
   $effect(() => {
     if (device.connected && device.mode === 'serial') {
       void getFirmwareVersion().then((info) => { usbHealth = info })
@@ -37,8 +37,8 @@
     }
   })
   const health = $derived(device.mode === 'relay'
-    ? { uptime_s: device.relayStatus?.uptime_s, last_reset: device.relayStatus?.last_reset }
-    : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset })
+    ? { uptime_s: device.relayStatus?.uptime_s, last_reset: device.relayStatus?.last_reset, crashed_during: device.relayStatus?.crashed_during }
+    : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset, crashed_during: usbHealth?.crashed_during })
   const lastReset = $derived(health.last_reset ? describeReset(health.last_reset) : null)
 
   // Quiet logging: warnings only, which also calms activity LEDs wired to the
@@ -203,8 +203,9 @@
       {/if}
     </tbody></table>
     {#if lastReset?.crash}
-      <p class="hint-sm crash-hint">The signer's last restart was not planned. If this repeats, note what the
-        connected apps were doing at the time; the request log below restarts empty each boot.</p>
+      <p class="hint-sm crash-hint">The signer's last restart was not planned.{#if health.crashed_during}&#32;It crashed while
+        handling <strong>{health.crashed_during}</strong>.{/if} If this repeats, note the pattern; the request log
+        below restarts empty each boot.</p>
     {/if}
     {#if device.mode === 'relay' && typeof device.relayStatus?.log_quiet === 'boolean'}
       <div class="log-quiet">

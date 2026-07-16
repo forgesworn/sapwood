@@ -47,6 +47,9 @@ export interface RelayStatus {
   /** Why the chip last reset: software-restart is deliberate; panic,
    *  watchdog and brownout are crashes worth investigating. */
   last_reset?: string
+  /** What the signer was doing when it last crashed (only after a crash
+   *  reset that left a breadcrumb), e.g. 'relay sign_event kind 1059'. */
+  crashed_during?: string
   /** Whether runtime logging is dropped to warnings (calms activity LEDs
    *  wired to the log UART). */
   log_quiet?: boolean
@@ -682,6 +685,7 @@ function applyRelayStatus(raw: Record<string, unknown>) {
       : [],
     ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
     ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
+    ...(typeof raw.crashed_during === 'string' ? { crashed_during: raw.crashed_during } : {}),
     ...(typeof raw.log_quiet === 'boolean' ? { log_quiet: raw.log_quiet } : {}),
     ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
     ...(typeof raw.board === 'string' ? { board: raw.board } : {}),
@@ -2038,6 +2042,8 @@ export interface FirmwareInfo {
   uptime_s?: number
   /** Why the chip last reset (absent on older firmware). */
   last_reset?: string
+  /** What the signer was doing when it last crashed, if known. */
+  crashed_during?: string
 }
 
 /**
@@ -2061,6 +2067,7 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
       board: typeof info.board === 'string' ? info.board : '',
       ...(typeof info.uptime_s === 'number' ? { uptime_s: info.uptime_s } : {}),
       ...(typeof info.last_reset === 'string' ? { last_reset: info.last_reset } : {}),
+      ...(typeof info.crashed_during === 'string' ? { crashed_during: info.crashed_during } : {}),
     }
   } catch {
     return null // older firmware, or no response — treat as unknown
