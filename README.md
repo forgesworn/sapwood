@@ -49,6 +49,25 @@ npm test          # unit and component tests
 npm run build     # production build to dist/
 ```
 
+## Command line
+
+The same console at a shell prompt. `sapwood` speaks the identical frame protocol over [node-serialport](https://serialport.io/): cross-platform on Linux, macOS and Windows, Node 20+, ~30ms startup.
+
+```bash
+npm install && npm run build:cli
+npm link                               # puts `sapwood` on PATH (or run node dist-cli/sapwood.mjs)
+
+sapwood device                         # firmware, board, identities, connected apps
+sapwood identities                     # slots, npubs, personas
+sapwood derive blog                    # derive an identity on-device, no secret leaves the signer
+sapwood apps                           # connected apps and their permissions
+sapwood apps revoke 2 --identity 0     # revoke an app slot
+sapwood logs                           # stream the device log
+sapwood firmware update heartwood.bin  # OTA: button-approved, signature and SHA-256 verified
+```
+
+`--json` on any command gives machine-readable output for scripting. The port is auto-detected when exactly one signer is plugged in (`sapwood ports` lists candidates); `--port` overrides. The security model is unchanged: no secrets on this side of the cable, and destructive operations still need the physical button.
+
 ## Stack
 
 - [Svelte 5](https://svelte.dev) (runes mode) -- compiles to vanilla JS, no framework runtime shipped

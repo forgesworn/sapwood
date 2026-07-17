@@ -35,7 +35,11 @@ The 19 frame.test.ts tests verify byte-level compatibility with the Rust impleme
 
 ### Transport layer
 
-`src/lib/serial.ts` wraps the Web Serial API. It hunts for frame magic bytes in the serial stream, separating ESP-IDF log output from protocol frames. Event-based: components subscribe to frame and log events.
+`src/lib/serial.ts` wraps the Web Serial API. Event-based: components subscribe to frame and log events. The byte-stream splitting (frame magic hunting, log-line separation) lives in `src/lib/frame-stream.ts`, and the UART write pacing in `src/lib/pacing.ts`; both are shared with the CLI.
+
+### Command line (`cli/`)
+
+`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, derive, apps, apps revoke, logs, firmware update. `--json` everywhere. Same security model: management frames only, button gates destructive operations.
 
 ## Build & run
 
