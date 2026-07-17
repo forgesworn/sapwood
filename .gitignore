@@ -23,3 +23,4 @@ playwright/.cache/
 # scripts/build-firmware.sh + espflash save-image) so they deploy with the site
 # and the live flasher always serves the matching firmware.
 dist-cli/
+coverage/
