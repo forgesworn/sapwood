@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sapwood: shape your signer</title>
-<meta name="description" content="Sapwood is the browser console for the Heartwood hardware signer: flash firmware, provision masters, derive identities, set policies, approve requests, take backups. No account, no server, no analytics. MIT.">
+<meta name="description" content="Sapwood is the console for the Heartwood hardware signer, in the browser and at the shell prompt: flash firmware, provision masters, derive identities, set policies, approve requests, take backups. No account, no server, no analytics. MIT.">
 <link rel="canonical" href="https://sapwood.forgesworn.dev/about/">
 <meta property="og:title" content="Sapwood: shape your signer">
-<meta property="og:description" content="The management console for the Heartwood signer. Flash, provision, set policies, approve, back up. Over USB, end-to-end encrypted relay commands, or a local bridge daemon.">
+<meta property="og:description" content="The management console for the Heartwood signer, in the browser and at the shell prompt. Flash, provision, set policies, approve, back up. Over USB, end-to-end encrypted relay commands, or a local bridge daemon.">
 <meta property="og:url" content="https://sapwood.forgesworn.dev/about/">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#050505">
@@ -37,43 +37,45 @@
     <p class="kicker reveal r1">// the management console for Heartwood</p>
     <h1 class="reveal r2">Shape your <span class="green">signer.</span></h1>
     <p class="lede reveal r3">
-      Sapwood is the browser console for the
-      <a href="https://heartwood.forgesworn.dev">Heartwood</a> signer: flash
-      firmware, provision masters, derive identities, set policies, approve
-      requests, take backups. It is a static page with no account, no server and
-      no analytics, and it talks to the signer over USB, through end-to-end
-      encrypted relay commands, or via the keyless bridge daemon on your own
-      network. Once provisioned, your keys stay on the device; the browser only
-      ever shapes what the device will agree to do.
+      Sapwood is the console for the
+      <a href="https://heartwood.forgesworn.dev">Heartwood</a> signer, in the
+      browser and at the shell prompt: flash firmware, provision masters,
+      derive identities, set policies, approve requests, take backups. The web
+      app is a static page with no account, no server and no analytics, talking
+      to the signer over USB, end-to-end encrypted relay commands, or the
+      keyless bridge daemon on your own network; the CLI speaks the same frame
+      protocol over the same cable from a terminal on Linux, macOS and Windows.
+      Once provisioned, your keys stay on the device; the console only ever
+      shapes what the device will agree to do.
     </p>
     <div class="cta-row reveal r4">
       <a class="btn btn-primary" href="https://sapwood.forgesworn.dev">Open Sapwood</a>
       <a class="btn btn-ghost" href="https://github.com/forgesworn/sapwood">Read the source</a>
     </div>
-    <p class="hero-meta reveal r5">static SPA &nbsp;·&nbsp; Web Serial &nbsp;·&nbsp; keys stay on the device &nbsp;·&nbsp; MIT</p>
+    <p class="hero-meta reveal r5">web console + CLI &nbsp;·&nbsp; Web Serial &nbsp;·&nbsp; keys stay on the device &nbsp;·&nbsp; MIT</p>
   </div>
 
-  <!-- the console, in the app's own voice -->
-  <figure class="term reveal r3" aria-label="The Sapwood console: device status, identities, a pending approval, a firmware update">
+  <!-- a real sapwood CLI session: these are the commands and output shapes it ships -->
+  <figure class="term reveal r3" aria-label="A sapwood CLI session: device status, deriving an identity, listing connected apps, a firmware update">
     <figcaption class="term-bar">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="term-title">sapwood · connected over usb</span>
+      <span class="term-title">sapwood cli · usb</span>
     </figcaption>
-    <pre class="term-body"><code><span class="p">▸</span> DEVICE
-<span class="ok">✓</span> HEARTWOOD v0.13.7 · Heltec V4 · serial connected
-<span class="dim">2 masters provisioned. 5 approved clients.</span>
+    <pre class="term-body"><code><span class="p">$</span> sapwood device
+<span class="ok">✓</span> HEARTWOOD v0.13.7 · heltec-v4
+<span class="dim">  identities 2 · connected apps 5</span>
 
-<span class="p">▸</span> IDENTITIES
-  forge     <span class="dim">npub1q3k…x7d0</span>   tree m/0
-  market    <span class="dim">npub1zzj…p2q4</span>   tree m/1
+<span class="p">$</span> sapwood derive forge
+<span class="ok">✓</span> derived 'forge' under 'default'
+<span class="dim">  npub1q3k…x7d0 · the same name always derives the same key</span>
 
-<span class="p">▸</span> APPROVALS
-<span class="warn">!</span> kind 1 (note) · client "gossip" · waiting
-  <span class="ok">[approve]</span> <span class="err">[deny]</span>
+<span class="p">$</span> sapwood apps
+<span class="dim">IDENTITY  SLOT  APP     METHODS  KINDS  AUTO  PAIRED</span>
+default   0     gossip  6        all    yes   yes
 
-<span class="p">▸</span> FIRMWARE UPDATE
-<span class="ok">✓</span> signature verified · sha-256 ok
-<span class="ok">✓</span> Firmware updated. Rebooting.</code></pre>
+<span class="p">$</span> sapwood firmware update heartwood-v4.bin
+<span class="dim">Waiting for approval. Hold the button on the device.</span>
+<span class="ok">✓</span> Firmware verified. The device is rebooting into it.</code></pre>
   </figure>
 </section>
 
@@ -179,7 +181,8 @@
     <p>
       <span class="green mono-label">USB.</span> Plug the board in and Sapwood
       speaks to it directly over Web Serial: flashing, provisioning, recovery,
-      logs. Everything stays on your desk; nothing needs a network at all.
+      logs. The CLI drives the same cable from a terminal. Everything stays on
+      your desk; nothing needs a network at all.
     </p>
     <p>
       <span class="green mono-label">RELAYS.</span> Day to day, management
@@ -198,14 +201,42 @@
   </div>
   <p class="aside">
     Honest requirements: Web Serial means a Chromium browser (Chrome, Edge or
-    Opera) for the USB path. Firefox and Safari don't ship it.
+    Opera) for the USB path. Firefox and Safari don't ship it. The CLI has no
+    browser requirement at all.
   </p>
 </section>
 
-<!-- ======================= 04 · START ======================= -->
-<section class="section" id="start">
+<!-- ======================= 04 · CLI ======================= -->
+<section class="section" id="cli">
   <div class="section-head">
     <span class="section-no">04</span>
+    <h2>THE SAME CONSOLE, AT A SHELL PROMPT</h2>
+  </div>
+  <div class="section-body two-col">
+    <p>
+      The sapwood CLI ships in the same repo and speaks the same frame
+      protocol over the same cable, on Linux, macOS and Windows. Build it with
+      <code>npm run build:cli</code>, put it on PATH with <code>npm link</code>,
+      and the console is a command away: 32KB bundled, about 30ms to start,
+      <code>--json</code> on every command for scripts.
+    </p>
+    <p>
+      <code>ports</code> finds the signer; <code>device</code>,
+      <code>identities</code> and <code>apps</code> read its state;
+      <code>derive</code> mints an identity on-device from a name;
+      <code>identities remove</code> retires one behind a typed-name
+      confirmation; <code>logs</code> streams the device log;
+      <code>firmware update</code> pushes a signed release, approved by the
+      physical button. The security model does not move: management frames
+      only, and no secret ever crosses the cable.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 05 · START ======================= -->
+<section class="section" id="start">
+  <div class="section-head">
+    <span class="section-no">05</span>
     <h2>FIRST BOOT IN MINUTES</h2>
   </div>
   <ol class="steps">
