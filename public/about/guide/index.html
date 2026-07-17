@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sapwood guide: the web console</title>
-<meta name="description" content="The complete guide to running a Heartwood signer from the browser: flash a board, give it an identity, connect apps, shape permissions, pair your phone, and use the advanced console. Real screenshots throughout.">
+<meta name="description" content="The complete guide to running a Heartwood signer from the browser: flash a board, give it an identity, connect apps, shape permissions, pair your phone and use the advanced console. Real screenshots throughout.">
 <link rel="canonical" href="https://sapwood.forgesworn.dev/about/guide/">
 <meta property="og:title" content="Sapwood guide: the web console">
 <meta property="og:description" content="Flash, provision, connect apps, shape permissions, pair your phone. Everything the Sapwood web console does, step by step, with real screenshots.">
@@ -37,7 +37,7 @@
   <p class="lede reveal r3">
     This is the complete walk through the Sapwood web console: flashing a new
     board, giving it an identity, connecting apps, shaping what each app may
-    sign, pairing your phone, and every panel of the advanced console. Each
+    sign, pairing your phone and every panel of the advanced console. Each
     screenshot below is the real interface. If you prefer a terminal, the
     same console exists as a command line: see the
     <a href="../cli/">CLI guide</a>.
@@ -139,7 +139,7 @@
         <p>When the wizard says the signer is flashed, press the physical
         RESET button on the board so it boots into the new firmware. The done
         screen also shows your <strong>operator key</strong>: twelve words to
-        write down and label "operator". They are your management credential
+        write down and label 'operator'. They are your management credential
         for this signer, separate from any signing key.</p>
       </li>
     </ol>
@@ -173,13 +173,13 @@
   <div class="section-body">
     <p>
       A freshly flashed signer holds no keys. The first time you connect it
-      over USB, Home offers two doors: create a fresh key, or restore one you
+      over USB, Home offers two paths: create a fresh key, or restore one you
       already have. You do this once; afterwards you connect apps and manage
       the signer from anywhere.
     </p>
     <figure class="shot">
       <img src="img/first-identity.png" alt="The new signer screen: Let's give your signer its identity, with Create a fresh key and Restore a key I already have" width="1600" height="1075" loading="lazy">
-      <figcaption><span class="cap-tag">FIG 04</span>The two doors. An advanced console escape hatch sits underneath.</figcaption>
+      <figcaption><span class="cap-tag">FIG 04</span>Create, or restore. An advanced console escape hatch sits underneath.</figcaption>
     </figure>
     <h3 class="sub">Create a fresh key</h3>
     <p>
@@ -210,9 +210,9 @@
     </p>
     <div class="callout">
       <strong>WiFi signers reboot once here.</strong> After provisioning, a
-      WiFi signer restarts to start serving its new identity. Home counts down
+      WiFi signer restarts to serve its new identity. Home counts down
       and connects you over WiFi when it is back; the signer's name and picture
-      sync to its little screen automatically.
+      sync to its screen automatically.
     </div>
   </div>
 </section>
@@ -226,8 +226,8 @@
   <div class="section-body">
     <p>
       Once the signer has an identity, connecting to it lands on Home: the
-      guided surface with everything most days need. Top to bottom, it reads
-      as a story.
+      guided surface with everything a normal day needs, in the order you
+      need it.
     </p>
     <figure class="shot">
       <img src="img/home.png" alt="The guided Home: the live signer card with its npub, the operator key backup nudge, the green Connect an app button, three connected app cards and the Manage from your phone card" width="1600" height="1876" loading="lazy">
@@ -298,11 +298,11 @@
       <figcaption><span class="cap-tag">REC 02</span>Name it, scope it. The name is for you: the app and where it runs.</figcaption>
     </figure>
     <p>
-      The permission step offers four presets. Posting only covers notes,
+      The permission step offers four presets. <strong>Posting only</strong> covers notes,
       reactions, reposts, articles and app settings while keeping the app away
-      from your profile and contacts. Everything is for a personal app you
-      trust fully. Messages only suits a chat app. Let me choose opens the
-      exact kind picker.
+      from your profile and contacts. <strong>Everything</strong> is for a personal app
+      you trust fully. <strong>Messages only</strong> suits a chat app.
+      <strong>Let me choose</strong> opens the exact kind picker.
     </p>
     <figure class="shot">
       <img src="img/connect-permissions.png" alt="The What can this app do step with presets: Posting only, Everything, Messages only, Let me choose" width="1600" height="861" loading="lazy">
@@ -404,8 +404,8 @@
       The working surface for connections. Create a new connection with a
       name, pre-authorise signing when your operator key allows it, approve
       or deny anything the signer queues for a decision, and manage every
-      connected app: its link, its permissions, its automatic or manual mood,
-      and its removal.
+      connected app: its link, its permissions, its automatic or manual
+      switch, and its removal.
     </p>
     <figure class="shot">
       <img src="img/advanced-apps.png" alt="The Apps section: identity picker, new connection card, and connected app cards with CAN SIGN, AUTO and BUTTON tags" width="1600" height="1533" loading="lazy">
@@ -418,7 +418,7 @@
       with its type and full npub. The identity card pushes your name and
       picture to the signer's screen. The short address panel generates the
       <code>nostr.json</code> for a NIP-05 name you host anywhere. Add an
-      identity provisions another key: from a phrase, an nsec, or best of all
+      identity provisions another key: from a phrase, an nsec, or, most private of all,
       derived by name on the device itself, where typing a name mints a new
       identity from a master the signer already holds and no secret exists
       anywhere else. The operator key panel shows, restores and regenerates
@@ -431,7 +431,7 @@
       The machine itself. Connection details with uptime, restart reason and
       memory health. Network mode: WiFi-standalone or USB-only radio-off, with
       an SSID scan, relay editor with live health dots, and rollback-safe
-      saves; a network change is staged, tried, and abandoned automatically if
+      saves; a network change is staged, tried and abandoned automatically if
       the signer cannot reach the new route. Firmware updates flash the
       version bundled with the app, verified against its SHA-256 and release
       signature before a byte is committed, and approved by holding the

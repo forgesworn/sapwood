@@ -71,7 +71,7 @@ const LOG_LINES = [
   'I (184201) heartwood: wifi up: HOMENET, ip 192.168.1.44',
   'I (184390) heartwood: relay: connected wss://relay.trotters.cc',
   'I (198122) heartwood: relay: request from 9f21a3c1 (gossip)',
-  'sign_event signed: short text note (1) for gossip — gm from the workshop',
+  'sign_event signed: short text note (1) for gossip - gm from the workshop',
   'I (204577) heartwood: relay: request from b04e77d2 (coracle)',
   'sign_event signed: reaction (7) for coracle',
   'sign_event denied: contact list (3) for amethyst',

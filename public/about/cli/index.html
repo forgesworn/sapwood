@@ -111,7 +111,7 @@
       <code>ports</code> lists serial ports that look like a signer, filtered
       to the USB bridges these boards actually use; <code>--all</code> lifts
       the filter and shows every serial port. <code>device</code> is the
-      health check: firmware, board, uptime, and what the signer holds.
+      health check: firmware, board, uptime and what the signer holds.
     </p>
     <figure class="term">
       <figcaption class="term-bar">
@@ -160,9 +160,8 @@
     </figure>
     <h3 class="sub">Derive a new identity on-device</h3>
     <p>
-      <code>derive</code> is the quiet star of the CLI. Give it a name and
-      the signer derives a child key from a master it already holds, on its
-      own chip. The name is the derivation path: the same name always
+      Give <code>derive</code> a name and the signer derives a child key from
+      a master it already holds, on its own chip. The name is the derivation path: the same name always
       produces the same key, and nothing secret ever crosses the cable. With
       one master the parent is implied; with more, pick one with
       <code>--parent &lt;slot&gt;</code>.
@@ -181,7 +180,7 @@
     <p>
       Removal is deliberate. The CLI shows what is about to happen, then asks
       you to type the identity's name; anything else aborts with nothing
-      sent. The signer journals the removal, reboots, and renumbers the
+      sent. The signer journals the removal, reboots and renumbers the
       remaining slots to close the gap. The key itself is not destroyed
       knowledge: it remains derivable from its parent or its phrase.
     </p>
@@ -269,7 +268,7 @@ workshop  0     obsidian  6        all    yes   yes
 <span class="dim">Streaming the device log. Ctrl-C to stop.</span>
 I (184201) heartwood: wifi up: HOMENET, ip 192.168.1.44
 I (198122) heartwood: relay: request from 9f21a3c1 (gossip)
-sign_event signed: short text note (1) for gossip — gm from the workshop
+sign_event signed: short text note (1) for gossip - gm from the workshop
 <span class="warn">sign_event denied: contact list (3) for amethyst</span>
 I (231008) heartwood: policy: kind 3 not allowed for slot 2
 ^C
@@ -289,7 +288,7 @@ I (231008) heartwood: policy: kind 3 not allowed for slot 2
     <p>
       <code>firmware update</code> pushes a release image over USB. A
       matching <code>.sig</code> file beside the image is picked up
-      automatically, or point at one with <code>--signature</code>. The
+      automatically; <code>--signature</code> points at one elsewhere. The
       device shows the update size on its screen and waits: the update only
       begins when you hold its button for two seconds. The image's SHA-256
       and its ed25519 release signature are verified on the device before a
@@ -327,7 +326,7 @@ I (231008) heartwood: policy: kind 3 not allowed for slot 2
       Every command accepts <code>--json</code> and prints machine-readable
       output on stdout, with progress and prompts kept on stderr where they
       belong. Exit codes are honest: 0 for success, 1 for a runtime failure,
-      2 for a usage error. Cron jobs, monitoring, and shell pipelines all
+      2 for a usage error. Cron jobs, monitoring and shell pipelines all
       compose naturally.
     </p>
     <figure class="term">
@@ -473,7 +472,7 @@ amethyst
           <tr><td><code>sapwood apps</code></td><td>List connected apps and their permissions across identities.</td></tr>
           <tr><td><code>sapwood apps revoke &lt;slot&gt;</code></td><td>Revoke one connected app's slot.</td></tr>
           <tr><td><code>sapwood logs</code></td><td>Stream the device log until Ctrl-C.</td></tr>
-          <tr><td><code>sapwood firmware update &lt;file.bin&gt;</code></td><td>Update firmware over USB. Button-approved, hash- and signature-verified, self-rolling-back.</td></tr>
+          <tr><td><code>sapwood firmware update &lt;file.bin&gt;</code></td><td>Update firmware over USB. Button-approved, hash- and signature-verified; rolls back on failure.</td></tr>
         </tbody>
       </table>
     </div>
