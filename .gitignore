@@ -24,3 +24,7 @@ playwright/.cache/
 # and the live flasher always serves the matching firmware.
 dist-cli/
 coverage/
+
+# Working area for scripts/capture-guide-assets.mjs; the curated set is
+# committed under public/about/guide/img/
+.guide-shots/

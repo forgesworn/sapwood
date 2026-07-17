@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sapwood guide: the web console</title>
+<meta name="description" content="The complete guide to running a Heartwood signer from the browser: flash a board, give it an identity, connect apps, shape permissions, pair your phone, and use the advanced console. Real screenshots throughout.">
+<link rel="canonical" href="https://sapwood.forgesworn.dev/about/guide/">
+<meta property="og:title" content="Sapwood guide: the web console">
+<meta property="og:description" content="Flash, provision, connect apps, shape permissions, pair your phone. Everything the Sapwood web console does, step by step, with real screenshots.">
+<meta property="og:url" content="https://sapwood.forgesworn.dev/about/guide/">
+<meta property="og:type" content="article">
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="preload" href="../fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../guide.css">
+</head>
+<body>
+
+<header class="masthead">
+  <a class="wordmark" href="../">SAPWOOD<span class="cursor">_</span></a>
+  <nav class="mastnav" aria-label="Sections">
+    <a href="../">About</a>
+    <a href="./" aria-current="page">Web guide</a>
+    <a href="../cli/">CLI guide</a>
+    <a class="ext" href="https://sapwood.forgesworn.dev">Open the app</a>
+    <a class="ext" href="https://github.com/forgesworn/sapwood">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="page-hero">
+  <p class="kicker reveal r1">// the field guide</p>
+  <h1 class="reveal r2">Run your signer from the <span class="green">browser.</span></h1>
+  <p class="lede reveal r3">
+    This is the complete walk through the Sapwood web console: flashing a new
+    board, giving it an identity, connecting apps, shaping what each app may
+    sign, pairing your phone, and every panel of the advanced console. Each
+    screenshot below is the real interface. If you prefer a terminal, the
+    same console exists as a command line: see the
+    <a href="../cli/">CLI guide</a>.
+  </p>
+  <ul class="toc reveal r4" aria-label="On this page">
+    <li><a href="#before"><span class="toc-no">01</span>Before you start</a></li>
+    <li><a href="#flash"><span class="toc-no">02</span>Flash a new device</a></li>
+    <li><a href="#identity"><span class="toc-no">03</span>Give it an identity</a></li>
+    <li><a href="#home"><span class="toc-no">04</span>The guided Home</a></li>
+    <li><a href="#connect"><span class="toc-no">05</span>Connect an app</a></li>
+    <li><a href="#permissions"><span class="toc-no">06</span>Permissions</a></li>
+    <li><a href="#phone"><span class="toc-no">07</span>Manage from your phone</a></li>
+    <li><a href="#advanced"><span class="toc-no">08</span>The advanced console</a></li>
+    <li><a href="#reconnect"><span class="toc-no">09</span>Reconnecting</a></li>
+    <li><a href="#trouble"><span class="toc-no">10</span>Troubleshooting</a></li>
+  </ul>
+</section>
+
+<!-- ======================= 01 · BEFORE ======================= -->
+<section class="section" id="before">
+  <div class="section-head">
+    <span class="section-no">01</span>
+    <h2>BEFORE YOU START</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      You need three things: a supported board, a USB data cable, and a
+      Chromium browser on a computer. Sapwood talks to the device with the Web
+      Serial API, which ships in Chrome, Edge and other Chromium browsers.
+      Firefox and Safari do not carry it, so flashing and USB management need
+      Chromium; day-to-day remote management works from any modern browser,
+      including your phone.
+    </p>
+    <p>
+      The supported boards: Heltec WiFi LoRa 32 V4, Heltec WiFi LoRa 32 V3,
+      LilyGO T-Display (ESP32) and Waveshare ESP32-C6 (LCD 1.47). An ESP8266 is
+      supported as a USB-tethered, hardened variant with its own guided setup.
+      See <a href="https://heartwood.forgesworn.dev">Heartwood</a> for the
+      hardware itself.
+    </p>
+    <p>
+      Nothing here needs an account and nothing is sent to a server. The app
+      at <a href="https://sapwood.forgesworn.dev">sapwood.forgesworn.dev</a> is
+      a static page; your browser talks straight to the device on your desk, or
+      to your own signer through end-to-end encrypted relay messages.
+    </p>
+    <figure class="shot">
+      <img src="img/landing.png" alt="The Sapwood front page, disconnected: a Set up a new device button, plus Connect by USB cable and Connect by signer address" width="1600" height="1075" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 01</span>The front page. One green door for a new device, quieter doors for one you already run.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ======================= 02 · FLASH ======================= -->
+<section class="section" id="flash">
+  <div class="section-head">
+    <span class="section-no">02</span>
+    <h2>FLASH A NEW DEVICE</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Choose <strong>Set up a new device</strong> and the flasher wizard walks
+      you through four short steps. It installs the signing firmware over the
+      USB cable; your WiFi details are written to the device and never sent
+      over the network.
+    </p>
+    <ol class="walk">
+      <li>
+        <h3>Plug the board in</h3>
+        <p>Use a USB data cable, not a charge-only lead. The wizard's first
+        screen explains what will happen and takes about a minute end to end.</p>
+      </li>
+      <li>
+        <h3>Pick your board</h3>
+        <p>The model name is printed on the board itself. Already plugged in?
+        The wizard can work the board out from the cable for you.</p>
+      </li>
+      <li>
+        <h3>Choose how it connects</h3>
+        <p><strong>Join my Wi-Fi</strong> is the recommended tier: the signer
+        sits on your network, serves apps through relays on its own, and you
+        can manage it from your phone. <strong>USB-only</strong> is the
+        hardened tier: the radio stays off, the key-holding chip never touches
+        a network, and remote reach goes through the
+        <a href="https://heartwood.forgesworn.dev/#daemon">bridge daemon</a>
+        on a computer it stays plugged into.</p>
+        <p>On the WiFi path you enter your network name and password and can
+        adjust the relay list. Use a 2.4&nbsp;GHz network; these boards do not
+        join 5&nbsp;GHz.</p>
+      </li>
+      <li>
+        <h3>Review and flash</h3>
+        <p>A summary shows the device, network choice and relays. Press
+        <strong>Flash</strong> and watch the progress bar; a technical log is
+        one click away if you like detail.</p>
+      </li>
+      <li>
+        <h3>Press RESET on the board</h3>
+        <p>When the wizard says the signer is flashed, press the physical
+        RESET button on the board so it boots into the new firmware. The done
+        screen also shows your <strong>operator key</strong>: twelve words to
+        write down and label "operator". They are your management credential
+        for this signer, separate from any signing key.</p>
+      </li>
+    </ol>
+    <figure class="shot">
+      <img src="img/flash-board.png" alt="Flasher step: Which device do you have, with cards for Heltec V4, Heltec V3, LilyGO T-Display, Waveshare ESP32-C6 and a hardened ESP8266 option" width="1600" height="1075" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 02</span>Board choice. The ESP8266 hands off to its own tethered, hardened setup.</figcaption>
+    </figure>
+    <figure class="shot shot--rec">
+      <img src="img/flash-flow.gif" alt="Recording of the flasher wizard moving through board choice, network details, review and the flashing progress bar" width="960" height="645" loading="lazy">
+      <figcaption><span class="cap-tag">REC 01</span>The whole wizard, start to finish. This is a looping recording.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="img/flash-done.png" alt="Flasher done screen: Your signer is flashed, a callout to press RESET on the board, and the operator key words to write down" width="1600" height="1340" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 03</span>Done. RESET first, then write the operator words down before continuing.</figcaption>
+    </figure>
+    <p class="aside">
+      The device will also show a separate recovery phrase on its own screen
+      when you create a signing key. Two phrases, two jobs: the device's words
+      restore your identity, the operator words restore your management
+      access. Label them and keep them apart.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 03 · IDENTITY ======================= -->
+<section class="section" id="identity">
+  <div class="section-head">
+    <span class="section-no">03</span>
+    <h2>GIVE IT AN IDENTITY</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      A freshly flashed signer holds no keys. The first time you connect it
+      over USB, Home offers two doors: create a fresh key, or restore one you
+      already have. You do this once; afterwards you connect apps and manage
+      the signer from anywhere.
+    </p>
+    <figure class="shot">
+      <img src="img/first-identity.png" alt="The new signer screen: Let's give your signer its identity, with Create a fresh key and Restore a key I already have" width="1600" height="1075" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 04</span>The two doors. An advanced console escape hatch sits underneath.</figcaption>
+    </figure>
+    <h3 class="sub">Create a fresh key</h3>
+    <p>
+      Name the signer if you like, then the device generates the key on its
+      own chip. Its screen shows twelve words; you step through them on the
+      device, write them down, and hold the button to save. The secret is born
+      on the device and never exists in the browser.
+    </p>
+    <h3 class="sub">Restore a key you already have</h3>
+    <p>
+      Four sources are supported. The recommended one is the most private:
+      type your 12 or 24 words on the device itself, using its button and
+      screen, so nothing touches this computer. The faster paths paste a
+      recovery phrase, an nsec, or a password-protected ncryptsec here; the
+      secret goes down the cable once and is wiped from browser memory the
+      moment it is sent.
+    </p>
+    <figure class="shot">
+      <img src="img/restore-sources.png" alt="Restore a key you already have: typed on the device (recommended), pasted words, an nsec, or an encrypted ncryptsec" width="1600" height="1128" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 05</span>Restore sources, most private first.</figcaption>
+    </figure>
+    <p>
+      Restoring from an nsec offers a choice: keep your existing npub and sign
+      as-is, or derive a fresh key from it for a new npub. Either way a
+      confirmation screen shows exactly which address the signer will hold
+      before anything is sent, and pasted keys can be backed up as 24 words
+      first.
+    </p>
+    <div class="callout">
+      <strong>WiFi signers reboot once here.</strong> After provisioning, a
+      WiFi signer restarts to start serving its new identity. Home counts down
+      and connects you over WiFi when it is back; the signer's name and picture
+      sync to its little screen automatically.
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 04 · HOME ======================= -->
+<section class="section" id="home">
+  <div class="section-head">
+    <span class="section-no">04</span>
+    <h2>THE GUIDED HOME</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Once the signer has an identity, connecting to it lands on Home: the
+      guided surface with everything most days need. Top to bottom, it reads
+      as a story.
+    </p>
+    <figure class="shot">
+      <img src="img/home.png" alt="The guided Home: the live signer card with its npub, the operator key backup nudge, the green Connect an app button, three connected app cards and the Manage from your phone card" width="1600" height="1876" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 06</span>Home, connected over USB. Demo identities throughout this guide.</figcaption>
+    </figure>
+    <dl class="spec-rows">
+      <div class="spec-row">
+        <dt>Your signer is live</dt>
+        <dd>The signer card shows its public address, safe to share, and how
+        you are connected: USB cable, the internet, or a bridge. The pencil
+        renames the signer; Disconnect is always here.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>Back up your operator key</dt>
+        <dd>An amber nudge until you have written the operator words down.
+        This browser holds the key that manages the signer; if the browser's
+        storage is lost, so is your access, unless the words are on paper.
+        The phrase stays available under Identity, Operator key in the
+        advanced console.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>Connect an app</dt>
+        <dd>The green hero button starts the guided pairing flow. Section 05
+        walks through it.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>Connected apps</dt>
+        <dd>Every app that can sign with this device, its current mood
+        (automatic, asks each time, waiting), a per-app permissions panel,
+        and Copy link, Ask each time and Disconnect actions. With more than
+        one identity a picker chooses whose apps you are looking at.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>Manage from your phone</dt>
+        <dd>Pairs another device with a PIN-protected QR. Section 07.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>Firmware nudge</dt>
+        <dd>When the app bundles a newer firmware than the signer runs, one
+        amber line offers the update and deep-links to the Device panel.</dd>
+      </div>
+    </dl>
+    <p class="aside">
+      Anything Home does not surface lives behind Advanced, top right. Home
+      returns on every fresh connection; the console remembers nothing about
+      you between visits beyond what your own browser stores.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 05 · CONNECT ======================= -->
+<section class="section" id="connect">
+  <div class="section-head">
+    <span class="section-no">05</span>
+    <h2>CONNECT AN APP</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Connecting an app takes three steps: name it, choose what it may do,
+      then hand it the pairing link. The link is a standard NIP-46
+      <code>bunker://</code> URI, so anything that speaks Nostr Connect can
+      use it: <a href="https://bark.forgesworn.dev">Bark</a>,
+      <a href="https://cambium.forgesworn.dev">Cambium</a>, Damus, Amethyst,
+      noStrudel, Coracle and the rest.
+    </p>
+    <figure class="shot shot--rec">
+      <img src="img/connect-app.gif" alt="Recording: pressing Connect an app, naming the connection Damus on my phone, and choosing the Posting only permission preset" width="960" height="645" loading="lazy">
+      <figcaption><span class="cap-tag">REC 02</span>Name it, scope it. The name is for you: the app and where it runs.</figcaption>
+    </figure>
+    <p>
+      The permission step offers four presets. Posting only covers notes,
+      reactions, reposts, articles and app settings while keeping the app away
+      from your profile and contacts. Everything is for a personal app you
+      trust fully. Messages only suits a chat app. Let me choose opens the
+      exact kind picker.
+    </p>
+    <figure class="shot">
+      <img src="img/connect-permissions.png" alt="The What can this app do step with presets: Posting only, Everything, Messages only, Let me choose" width="1600" height="861" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 07</span>Presets at pairing time. All of it is adjustable later, per app.</figcaption>
+    </figure>
+    <p>
+      The final step shows a QR to scan and the link to copy, and the new app
+      appears in the list as waiting until it first connects. Over USB, each
+      app's first signature is approved with a press of the physical button on
+      the device; after that its policy applies automatically.
+    </p>
+    <div class="callout">
+      <strong>App gives you a link instead?</strong> Some clients start the
+      pairing themselves with a <code>nostrconnect://</code> link. When you are
+      connected to the signer over the internet, the connect flow has a paste
+      option: Sapwood reads the app's link, checks the app shares a relay with
+      your signer, and pairs it from this side.
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 06 · PERMISSIONS ======================= -->
+<section class="section" id="permissions">
+  <div class="section-head">
+    <span class="section-no">06</span>
+    <h2>PERMISSIONS, EXACTLY</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Every app card carries a Signing panel. Each event kind is a chip:
+      green means auto-signed, amber means the device's button must approve
+      it, red means denied. The summary line keeps the score, and Allow all
+      or a custom kind number are one action away.
+    </p>
+    <figure class="shot">
+      <img src="img/kind-permissions.png" alt="An app card with the Signing panel open: colour-coded kind chips for Profile, Contacts, Note, Repost, Reaction and more, a custom kind input and the Auto-sign, Button required, Denied legend" width="1600" height="477" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 08</span>An exact policy. Six kinds auto-sign; everything else this app asks for is refused.</figcaption>
+    </figure>
+    <p>
+      Policies fail closed. An app with an exact policy cannot sign a kind you
+      never listed, and unlisted methods are refused outright; the ceiling is
+      enforced by the signer itself, not by the page. Switching an app to Ask
+      each time keeps it connected but routes every request through the
+      device's button; switching back to automatic restores the policy.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 07 · PHONE ======================= -->
+<section class="section" id="phone">
+  <div class="section-head">
+    <span class="section-no">07</span>
+    <h2>MANAGE FROM YOUR PHONE</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      A WiFi signer does not need this computer once it is set up. The phone
+      handoff moves your management credential to another device through a
+      protected QR: you set a PIN of six characters or more, the operator key
+      is encrypted with it, and the QR opens the console on the phone, which
+      asks for the PIN. A photograph of the QR alone is useless.
+    </p>
+    <figure class="shot shot--rec">
+      <img src="img/handoff.gif" alt="Recording: pressing Pair a device, typing a PIN, and the protected QR appearing" width="960" height="645" loading="lazy">
+      <figcaption><span class="cap-tag">REC 03</span>Pair a device. The QR hides itself after two minutes.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="img/handoff-qr.png" alt="The Manage from your phone card showing the protected QR code with Copy link instead and Hide actions" width="1600" height="588" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 09</span>Scan with the phone's camera. The PIN travels in your head, not in the link.</figcaption>
+    </figure>
+    <p>
+      Pairing only unlocks when the connection has proven exactly which
+      operator and relays the signer trusts: over USB the cable proves it,
+      over the internet an authenticated status reply does. If the card says
+      pairing is locked, that proof is missing, and the card says why.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 08 · ADVANCED ======================= -->
+<section class="section" id="advanced">
+  <div class="section-head">
+    <span class="section-no">08</span>
+    <h2>THE ADVANCED CONSOLE</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Advanced, top right, opens the full console: four sections, every
+      setting and tool. Home hides nothing you need daily; Advanced hides
+      nothing at all.
+    </p>
+    <figure class="shot shot--rec">
+      <img src="img/advanced-tour.gif" alt="Recording: switching between the Apps, Identity, Device and Logs sections of the advanced console" width="960" height="645" loading="lazy">
+      <figcaption><span class="cap-tag">REC 04</span>Apps, Identity, Device, Logs.</figcaption>
+    </figure>
+
+    <h3 class="sub">Apps</h3>
+    <p>
+      The working surface for connections. Create a new connection with a
+      name, pre-authorise signing when your operator key allows it, approve
+      or deny anything the signer queues for a decision, and manage every
+      connected app: its link, its permissions, its automatic or manual mood,
+      and its removal.
+    </p>
+    <figure class="shot">
+      <img src="img/advanced-apps.png" alt="The Apps section: identity picker, new connection card, and connected app cards with CAN SIGN, AUTO and BUTTON tags" width="1600" height="1533" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 10</span>Apps. The BUTTON tag marks an app still waiting for its first physical approval.</figcaption>
+    </figure>
+
+    <h3 class="sub">Identity</h3>
+    <p>
+      Everything about who the signer is. The identity list shows each slot
+      with its type and full npub. The identity card pushes your name and
+      picture to the signer's screen. The short address panel generates the
+      <code>nostr.json</code> for a NIP-05 name you host anywhere. Add an
+      identity provisions another key: from a phrase, an nsec, or best of all
+      derived by name on the device itself, where typing a name mints a new
+      identity from a master the signer already holds and no secret exists
+      anywhere else. The operator key panel shows, restores and regenerates
+      the management credential, and profile relays tune where names are
+      looked up.
+    </p>
+
+    <h3 class="sub">Device</h3>
+    <p>
+      The machine itself. Connection details with uptime, restart reason and
+      memory health. Network mode: WiFi-standalone or USB-only radio-off, with
+      an SSID scan, relay editor with live health dots, and rollback-safe
+      saves; a network change is staged, tried, and abandoned automatically if
+      the signer cannot reach the new route. Firmware updates flash the
+      version bundled with the app, verified against its SHA-256 and release
+      signature before a byte is committed, and approved by holding the
+      device's button for two seconds. Security holds the boot PIN and bridge
+      secret. The danger zone disconnects every app at once, or factory
+      resets the device.
+    </p>
+    <figure class="shot">
+      <img src="img/advanced-device.png" alt="The Device section: connection table, network mode and relay editor, firmware update panel, security settings and the danger zone" width="1600" height="3144" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 11</span>Device, top to bottom. The red card stays honest about what cannot be undone.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="img/danger-zone.png" alt="The danger zone: Disconnect all apps, and Factory reset which asks for the device's button" width="1600" height="347" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 12</span>Factory reset needs the button, in your hand, on the device. A browser cannot do this to you.</figcaption>
+    </figure>
+
+    <h3 class="sub">Logs</h3>
+    <p>
+      Two views of the signer at work. Signer activity decodes recent
+      requests: which app, which kind, signed or denied and why. The device
+      log is the raw stream underneath. Both make policy visible: watch a
+      request arrive, meet its policy, and leave signed, or stop at the line
+      it broke.
+    </p>
+    <figure class="shot">
+      <img src="img/advanced-logs.png" alt="The Logs section: Signer Activity cards showing signed and denied requests per app, above the raw device log stream" width="1600" height="1476" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 13</span>A denied contact-list request, and exactly which policy line stopped it.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ======================= 09 · RECONNECT ======================= -->
+<section class="section" id="reconnect">
+  <div class="section-head">
+    <span class="section-no">09</span>
+    <h2>RECONNECTING, THREE WAYS</h2>
+  </div>
+  <div class="section-body three-col">
+    <p>
+      <span class="green mono-label">USB.</span> Plug the cable in and choose
+      Connect by USB cable. The browser asks which port; pick the board.
+      Everything works over the cable, including the operations that
+      deliberately need it: provisioning, firmware, PIN, factory reset.
+    </p>
+    <p>
+      <span class="green mono-label">SIGNER ADDRESS.</span> Connect by signer
+      address reaches a WiFi signer from anywhere: enter its npub, or a NIP-05
+      name like <code>you@example.com</code>, and the relays it uses.
+      Management commands travel end-to-end encrypted; relays carry
+      ciphertext they cannot read. Your operator key, in this browser, is
+      what makes the signer answer.
+    </p>
+    <p>
+      <span class="green mono-label">BRIDGE.</span> For a tethered signer on
+      a Pi or any Linux box, Other ways to connect reaches the keyless bridge
+      daemon on your LAN: the same console plus daemon health and restarts.
+    </p>
+  </div>
+  <p class="aside">
+    A phone that scanned the handoff QR skips all of this: the link carries
+    the address and relays, the PIN unlocks the operator key, and the console
+    connects itself.
+  </p>
+</section>
+
+<!-- ======================= 10 · TROUBLE ======================= -->
+<section class="section" id="trouble">
+  <div class="section-head">
+    <span class="section-no">10</span>
+    <h2>WHEN SOMETHING FIGHTS BACK</h2>
+  </div>
+  <dl class="spec-rows">
+    <div class="spec-row">
+      <dt>Just flashed, not found</dt>
+      <dd>Press RESET on the board first; the new firmware only runs after a
+      reboot. Then connect by USB cable again.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Silent over the cable</dt>
+      <dd>A WiFi signer can take up to a minute to answer while it brings its
+      radio up. Home offers a retry, and can reach a known WiFi signer over
+      the network instead. Check the cable carries data, not just charge.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Relay connects, signer does not answer</dt>
+      <dd>Almost always the operator key. The signer only answers the exact
+      operator it was flashed with; restore that recovery phrase in this
+      browser, then disconnect and reconnect. The other suspects: the signer
+      lost WiFi, or you listed relays it does not use.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>WiFi join fails</dt>
+      <dd>The console lifts the reason out of the log for you. Usual causes:
+      a 5&nbsp;GHz-only network, a captive portal, or a mistyped password.
+      Use a 2.4&nbsp;GHz WPA2 network or a phone hotspot.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Firmware shows unknown</dt>
+      <dd>Firmware older than the version query reports nothing. Update over
+      USB from Device, Update firmware; every later update can happen over
+      the air.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Factory reset refused over WiFi</dt>
+      <dd>By design. Wiping the signer requires it in your hands, on a USB
+      cable, with its button held. The same is true of firmware, PIN and
+      provisioning: physical-presence gates do not negotiate.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>No USB option in this browser</dt>
+      <dd>Firefox and Safari do not ship Web Serial. Use Chrome or Edge for
+      cable work, connect by signer address from any browser, or use the
+      <a href="../cli/">CLI</a>, which needs no browser at all.</dd>
+    </div>
+  </dl>
+  <p class="aside">
+    Still stuck? The <a href="https://github.com/forgesworn/sapwood/issues">issue
+    tracker</a> is read by the people who wrote the firmware. Include the
+    device log from the Logs section; it carries no secrets.
+  </p>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <p class="colophon-links">
+    <a href="../">About</a> ·
+    <a href="../cli/">CLI guide</a> ·
+    <a href="https://sapwood.forgesworn.dev">App</a> ·
+    <a href="https://github.com/forgesworn/sapwood">Source</a> ·
+    <a href="https://heartwood.forgesworn.dev">Heartwood</a> ·
+    <a href="https://forgesworn.dev">forgesworn.dev</a>
+  </p>
+  <p class="colophon-note">
+    Every screenshot on this page is the real console rendered with
+    demonstration identities; no real keys were involved. Like the console,
+    this page is static: no scripts, no cookies, no analytics, no third-party
+    requests.
+  </p>
+</footer>
+
+</body>
+</html>

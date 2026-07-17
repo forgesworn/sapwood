@@ -5,5 +5,8 @@ Sapwood is a browser-based management UI for Heartwood ESP32 signing devices.
 ## Links
 
 - [Sapwood app](https://sapwood.forgesworn.dev/)
+- [About Sapwood](https://sapwood.forgesworn.dev/about/)
+- [Web console guide](https://sapwood.forgesworn.dev/about/guide/)
+- [Command line guide](https://sapwood.forgesworn.dev/about/cli/)
 - [Sapwood source](https://github.com/forgesworn/sapwood)
 - [Heartwood firmware](https://github.com/forgesworn/heartwood-esp32)

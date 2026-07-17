@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sapwood guide: the command line</title>
+<meta name="description" content="The complete guide to the sapwood CLI: install it, read your Heartwood signer's state, derive identities on-device, manage apps, stream logs, update firmware, and script everything with --json. Linux, macOS and Windows.">
+<link rel="canonical" href="https://sapwood.forgesworn.dev/about/cli/">
+<meta property="og:title" content="Sapwood guide: the command line">
+<meta property="og:description" content="The signer console at a shell prompt: every command, every flag, real output, and the same security model. No browser required.">
+<meta property="og:url" content="https://sapwood.forgesworn.dev/about/cli/">
+<meta property="og:type" content="article">
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="preload" href="../fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../guide.css">
+</head>
+<body>
+
+<header class="masthead">
+  <a class="wordmark" href="../">SAPWOOD<span class="cursor">_</span></a>
+  <nav class="mastnav" aria-label="Sections">
+    <a href="../">About</a>
+    <a href="../guide/">Web guide</a>
+    <a href="./" aria-current="page">CLI guide</a>
+    <a class="ext" href="https://sapwood.forgesworn.dev">Open the app</a>
+    <a class="ext" href="https://github.com/forgesworn/sapwood">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="page-hero">
+  <p class="kicker reveal r1">// the console at a shell prompt</p>
+  <h1 class="reveal r2">The same signer, <span class="green">scripted.</span></h1>
+  <p class="lede reveal r3">
+    The sapwood CLI is the management console as a command: the same frame
+    protocol, the same cable, the same security model, with no browser in
+    sight. It runs on Linux, macOS and Windows, starts in about 30
+    milliseconds, and speaks JSON when you ask it to. Everything the
+    <a href="../guide/">web console</a> promises holds here too: secrets never
+    cross the cable, and destructive operations answer only to the physical
+    button.
+  </p>
+  <figure class="term reveal r4" aria-label="A sapwood CLI session: finding the port, reading device status, deriving an identity on-device">
+    <figcaption class="term-bar">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="term-title">sapwood cli · usb</span>
+    </figcaption>
+    <div class="term-body term-anim"><span class="line"><span class="p">$</span> sapwood ports</span><span class="line">/dev/cu.usbmodem3301  (Espressif)</span><span class="line">&nbsp;</span><span class="line"><span class="p">$</span> sapwood device</span><span class="line"><span class="ok">✓</span> HEARTWOOD v0.13.7 · heltec-v4</span><span class="line"><span class="dim">  uptime 33m 12s · last reset software restart</span></span><span class="line"><span class="dim">  identities 2 · connected apps 4</span></span><span class="line">&nbsp;</span><span class="line"><span class="p">$</span> sapwood derive forge</span><span class="line"><span class="ok">✓</span> derived 'forge' under 'daybreak'</span><span class="line"><span class="dim">  npub1wm3fy3m02rkw98qtu7j6s4zvj5q49sx3u7tu6785u2fwva98v2wqxddum6</span></span><span class="line"><span class="dim">  The same name always derives the same key. No secret left the device.</span></span><span class="line">&nbsp;</span><span class="line cursor-line"><span class="p">$</span> </span></div>
+  </figure>
+  <ul class="toc reveal r5" aria-label="On this page">
+    <li><a href="#install"><span class="toc-no">01</span>Install</a></li>
+    <li><a href="#first"><span class="toc-no">02</span>First contact</a></li>
+    <li><a href="#identities"><span class="toc-no">03</span>Identities</a></li>
+    <li><a href="#apps"><span class="toc-no">04</span>Apps</a></li>
+    <li><a href="#logs"><span class="toc-no">05</span>Logs</a></li>
+    <li><a href="#firmware"><span class="toc-no">06</span>Firmware</a></li>
+    <li><a href="#scripting"><span class="toc-no">07</span>Scripting</a></li>
+    <li><a href="#security"><span class="toc-no">08</span>Security</a></li>
+    <li><a href="#errors"><span class="toc-no">09</span>When it says no</a></li>
+    <li><a href="#reference"><span class="toc-no">10</span>Reference</a></li>
+  </ul>
+</section>
+
+<!-- ======================= 01 · INSTALL ======================= -->
+<section class="section" id="install">
+  <div class="section-head">
+    <span class="section-no">01</span>
+    <h2>INSTALL</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      The CLI ships in the Sapwood repository and builds in under a second.
+      You need Node 20 or newer and a git clone; the only native dependency
+      is <code>serialport</code>, which npm compiles or fetches for your
+      platform during install.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">install</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> git clone https://github.com/forgesworn/sapwood
+<span class="p">$</span> cd sapwood
+<span class="p">$</span> npm install && npm run build:cli
+<span class="dim">  dist-cli/sapwood.mjs  36.3kb</span>
+<span class="p">$</span> npm link          <span class="dim"># puts `sapwood` on PATH; or run node dist-cli/sapwood.mjs</span>
+<span class="p">$</span> sapwood --version
+0.14.0</code></pre>
+    </figure>
+    <p>
+      That is the whole install. The bundle is around 36 kilobytes,
+      cold-starts in about 30 milliseconds, and works the same on Linux,
+      macOS and Windows. <code>--help</code> and <code>--version</code> never
+      touch the serial port, so they work with nothing plugged in.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 02 · FIRST CONTACT ======================= -->
+<section class="section" id="first">
+  <div class="section-head">
+    <span class="section-no">02</span>
+    <h2>FIRST CONTACT</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Plug the signer in and ask what the machine can see.
+      <code>ports</code> lists serial ports that look like a signer, filtered
+      to the USB bridges these boards actually use; <code>--all</code> lifts
+      the filter and shows every serial port. <code>device</code> is the
+      health check: firmware, board, uptime, and what the signer holds.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">status</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood ports
+/dev/cu.usbmodem3301  (Espressif)
+
+<span class="p">$</span> sapwood device
+<span class="ok">✓</span> HEARTWOOD v0.13.7 · heltec-v4
+<span class="dim">  uptime 33m 12s · last reset software restart</span>
+<span class="dim">  identities 2 · connected apps 4</span></code></pre>
+    </figure>
+    <p>
+      With one signer connected, every command finds it on its own. With
+      several, or an unusual adapter, pass <code>--port /dev/ttyACM0</code>
+      (or <code>COM3</code> on Windows) and the guessing stops. Older
+      firmware that predates the version query still answers:
+      <code>✓ HEARTWOOD connected (firmware predates the version query)</code>.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 03 · IDENTITIES ======================= -->
+<section class="section" id="identities">
+  <div class="section-head">
+    <span class="section-no">03</span>
+    <h2>IDENTITIES</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      <code>identities</code> lists every key the signer holds: its slot, its
+      npub, whether it is a master or a persona derived from one, and how
+      many apps hang off it.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">identities</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood identities
+<span class="dim">SLOT  NAME      NPUB            TYPE    APPS</span>
+0     daybreak  npub16yza…3tcu  master  3
+1     workshop  npub194r0…j8yh  master  1</code></pre>
+    </figure>
+    <h3 class="sub">Derive a new identity on-device</h3>
+    <p>
+      <code>derive</code> is the quiet star of the CLI. Give it a name and
+      the signer derives a child key from a master it already holds, on its
+      own chip. The name is the derivation path: the same name always
+      produces the same key, and nothing secret ever crosses the cable. With
+      one master the parent is implied; with more, pick one with
+      <code>--parent &lt;slot&gt;</code>.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">derive</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood derive forge --parent 0
+<span class="ok">✓</span> derived 'forge' under 'daybreak'
+<span class="dim">  npub1wm3fy3m02rkw98qtu7j6s4zvj5q49sx3u7tu6785u2fwva98v2wqxddum6</span>
+<span class="dim">  The same name always derives the same key. No secret left the device.</span></code></pre>
+    </figure>
+    <h3 class="sub">Remove an identity</h3>
+    <p>
+      Removal is deliberate. The CLI shows what is about to happen, then asks
+      you to type the identity's name; anything else aborts with nothing
+      sent. The signer journals the removal, reboots, and renumbers the
+      remaining slots to close the gap. The key itself is not destroyed
+      knowledge: it remains derivable from its parent or its phrase.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">identities remove</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood identities remove 1
+<span class="warn">Removing 'workshop' (slot 1)</span>
+<span class="dim">  npub194r00xagm7fspd7eydgpsstdluzfme6eww5wrut508h7lqe5qmdqhsj8yh</span>
+<span class="dim">  1 connected app(s) will stop working.</span>
+<span class="dim">  The key itself remains derivable from its parent or phrase.</span>
+Type the identity's name to confirm: workshop
+<span class="ok">✓</span> removed 'workshop' (slot 1)
+<span class="dim">  The signer is rebooting to reload its state. Remaining identities renumber to close the gap.</span></code></pre>
+    </figure>
+    <p class="aside">
+      <code>--yes</code> skips the typed confirmation for scripts that have
+      already done their own asking. Use it the way you would use
+      <code>rm -f</code>.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 04 · APPS ======================= -->
+<section class="section" id="apps">
+  <div class="section-head">
+    <span class="section-no">04</span>
+    <h2>APPS</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      <code>apps</code> lists every connected app across every identity: how
+      many methods it may call, which event kinds it may sign
+      (<code>all</code> means no kind restriction, a list or count means an
+      exact policy), whether it signs automatically, and whether the app has
+      actually paired yet.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">apps</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood apps
+<span class="dim">IDENTITY  SLOT  APP       METHODS  KINDS  AUTO  PAIRED</span>
+daybreak  0     gossip    6        all    yes   yes
+daybreak  1     coracle   4        6      yes   yes
+daybreak  2     amethyst  2        1,7    no    no
+workshop  0     obsidian  6        all    yes   yes
+
+<span class="p">$</span> sapwood apps revoke 2 --identity 0
+<span class="ok">✓</span> revoked app slot 2 on 'daybreak'</code></pre>
+    </figure>
+    <p>
+      <code>apps revoke</code> cuts a single app's access immediately; the
+      identity and every other app are untouched. With one identity on the
+      signer, <code>--identity</code> is optional. Creating connections and
+      editing kind policies remain jobs for the
+      <a href="../guide/#permissions">web console</a>, where the QR and the
+      kind picker live.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 05 · LOGS ======================= -->
+<section class="section" id="logs">
+  <div class="section-head">
+    <span class="section-no">05</span>
+    <h2>LOGS</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      <code>logs</code> streams the device's own log until you stop it. This
+      is the firmware speaking, live: WiFi coming up, requests arriving,
+      policy decisions as they happen. Pipe it through your usual tools;
+      that is what it is for.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">logs</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood logs
+<span class="dim">Streaming the device log. Ctrl-C to stop.</span>
+I (184201) heartwood: wifi up: HOMENET, ip 192.168.1.44
+I (198122) heartwood: relay: request from 9f21a3c1 (gossip)
+sign_event signed: short text note (1) for gossip — gm from the workshop
+<span class="warn">sign_event denied: contact list (3) for amethyst</span>
+I (231008) heartwood: policy: kind 3 not allowed for slot 2
+^C
+
+<span class="p">$</span> sapwood logs | grep denied     <span class="dim"># or --json for one object per line</span></code></pre>
+    </figure>
+  </div>
+</section>
+
+<!-- ======================= 06 · FIRMWARE ======================= -->
+<section class="section" id="firmware">
+  <div class="section-head">
+    <span class="section-no">06</span>
+    <h2>FIRMWARE</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      <code>firmware update</code> pushes a release image over USB. A
+      matching <code>.sig</code> file beside the image is picked up
+      automatically, or point at one with <code>--signature</code>. The
+      device shows the update size on its screen and waits: the update only
+      begins when you hold its button for two seconds. The image's SHA-256
+      and its ed25519 release signature are verified on the device before a
+      byte is committed, and it rolls back on its own if anything is wrong.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">firmware update</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood firmware update heartwood-v4.bin
+<span class="dim">Waiting for approval. Hold the button on the device for two seconds.</span>
+<span class="dim">Uploading 100% (409600/409600 bytes)</span>
+<span class="dim">Verifying on the device.</span>
+<span class="ok">✓</span> Firmware verified. The device is rebooting into it.</code></pre>
+    </figure>
+    <div class="callout--warn callout">
+      <strong>No signature, no update</strong>, on firmware that enforces
+      signing. Without a usable signature the CLI warns you up front:
+      signature-enforcing firmware will refuse the image, keep its current
+      version, and say so. Release images from the official firmware bundle
+      always carry their signature.
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 07 · SCRIPTING ======================= -->
+<section class="section" id="scripting">
+  <div class="section-head">
+    <span class="section-no">07</span>
+    <h2>SCRIPTING WITH --JSON</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Every command accepts <code>--json</code> and prints machine-readable
+      output on stdout, with progress and prompts kept on stderr where they
+      belong. Exit codes are honest: 0 for success, 1 for a runtime failure,
+      2 for a usage error. Cron jobs, monitoring, and shell pipelines all
+      compose naturally.
+    </p>
+    <figure class="term">
+      <figcaption class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title">--json</span>
+      </figcaption>
+      <pre class="term-body"><code><span class="p">$</span> sapwood device --json
+{
+  "firmware": {
+    "version": "0.13.7",
+    "board": "heltec-v4",
+    "uptime_s": 2006,
+    "last_reset": "software restart"
+  },
+  "identities": 2,
+  "personas": 0,
+  "apps": 4
+}
+
+<span class="p">$</span> sapwood apps --json | jq -r '.[].apps[].label'
+gossip
+coracle
+amethyst
+
+<span class="p">$</span> sapwood device --json | jq -e '.firmware.version' >/dev/null \
+    || echo "signer wants a firmware update"</code></pre>
+    </figure>
+  </div>
+</section>
+
+<!-- ======================= 08 · SECURITY ======================= -->
+<section class="section" id="security">
+  <div class="section-head">
+    <span class="section-no">08</span>
+    <h2>THE SAME SECURITY MODEL</h2>
+  </div>
+  <dl class="spec-rows">
+    <div class="spec-row">
+      <dt>No secrets on this side</dt>
+      <dd>The cable carries public keys, policy metadata, log lines and
+      firmware chunks. Master secrets never leave the ESP32; the CLI has no
+      command that could ask for one, and the firmware has no frame that
+      would answer.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>The button still outranks you</dt>
+      <dd>A firmware update begins only after a two-second hold on the
+      device's physical button. Root shell, no root shell: software asks,
+      your thumb decides.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Deliberate friction where it counts</dt>
+      <dd>Removing an identity demands its name typed back, spelled exactly.
+      A script can pass <code>--yes</code>, and owns that choice.</dd>
+    </div>
+    <div class="spec-row">
+      <dt>Derivation without disclosure</dt>
+      <dd><code>derive</code> sends a name and receives an npub. The parent
+      key, the child key and the derivation all stay on the chip.</dd>
+    </div>
+  </dl>
+</section>
+
+<!-- ======================= 09 · ERRORS ======================= -->
+<section class="section" id="errors">
+  <div class="section-head">
+    <span class="section-no">09</span>
+    <h2>WHEN IT SAYS NO</h2>
+  </div>
+  <div class="section-body">
+    <p>
+      Errors go to stderr, prefixed <code>sapwood:</code>, and say what to do
+      next. The ones you will actually meet:
+    </p>
+    <div class="ref-wrap">
+      <table class="ref-table">
+        <thead>
+          <tr><th>Message</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>no signer found</code></td>
+            <td>Nothing on the cable looked like a signer. Plug it in, or pass
+            <code>--port</code>; <code>sapwood ports --all</code> lists every
+            serial port the machine has.</td>
+          </tr>
+          <tr>
+            <td><code>several possible signers found</code></td>
+            <td>More than one candidate port. The message lists them; pick one
+            with <code>--port &lt;path&gt;</code>.</td>
+          </tr>
+          <tr>
+            <td><code>No response from the device.</code></td>
+            <td>The port opened but nothing answered. Check the board runs
+            Heartwood firmware and that no other program holds the port,
+            including a Sapwood browser tab.</td>
+          </tr>
+          <tr>
+            <td><code>Device disconnected</code></td>
+            <td>The cable dropped mid-conversation. Reconnect and rerun; every
+            read command is safe to repeat.</td>
+          </tr>
+          <tr>
+            <td><code>names do not match; nothing removed</code></td>
+            <td>The typed confirmation did not match the identity's name. The
+            signer was never contacted.</td>
+          </tr>
+          <tr>
+            <td><code>The device declined the update. Did you hold its button to approve?</code></td>
+            <td>The firmware update's 60-second approval window passed without
+            a two-second button hold.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="aside">
+      One port, one program. The signer serialises its conversations, so
+      close the web console's USB connection before pointing the CLI at the
+      same cable, and the other way round.
+    </p>
+  </div>
+</section>
+
+<!-- ======================= 10 · REFERENCE ======================= -->
+<section class="section" id="reference">
+  <div class="section-head">
+    <span class="section-no">10</span>
+    <h2>REFERENCE</h2>
+  </div>
+  <div class="section-body">
+    <div class="ref-wrap">
+      <table class="ref-table">
+        <thead>
+          <tr><th>Command</th><th>Does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>sapwood ports</code></td><td>List signer serial ports; <code>--all</code> includes every serial port.</td></tr>
+          <tr><td><code>sapwood device</code></td><td>Signer status: firmware, board, uptime, identities, apps.</td></tr>
+          <tr><td><code>sapwood identities</code></td><td>List identities on the signer.</td></tr>
+          <tr><td><code>sapwood identities remove &lt;slot&gt;</code></td><td>Remove an identity, behind a typed-name confirmation. The signer reboots and remaining slots renumber.</td></tr>
+          <tr><td><code>sapwood derive &lt;name&gt;</code></td><td>Derive a new identity on-device from a master. Deterministic; no secret crosses the cable.</td></tr>
+          <tr><td><code>sapwood apps</code></td><td>List connected apps and their permissions across identities.</td></tr>
+          <tr><td><code>sapwood apps revoke &lt;slot&gt;</code></td><td>Revoke one connected app's slot.</td></tr>
+          <tr><td><code>sapwood logs</code></td><td>Stream the device log until Ctrl-C.</td></tr>
+          <tr><td><code>sapwood firmware update &lt;file.bin&gt;</code></td><td>Update firmware over USB. Button-approved, hash- and signature-verified, self-rolling-back.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ref-wrap">
+      <table class="ref-table">
+        <thead>
+          <tr><th>Option</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>--port &lt;path&gt;</code></td><td>Serial port; auto-detected when one signer is present.</td></tr>
+          <tr><td><code>--identity &lt;slot&gt;</code></td><td>Identity slot for app commands. Default: the only master.</td></tr>
+          <tr><td><code>--parent &lt;slot&gt;</code></td><td>Parent identity slot for <code>derive</code>. Default: the only master.</td></tr>
+          <tr><td><code>--signature &lt;path&gt;</code></td><td>ed25519 release signature for a firmware update; <code>&lt;file.bin&gt;.sig</code> is picked up automatically.</td></tr>
+          <tr><td><code>--timeout &lt;ms&gt;</code></td><td>Round-trip timeout. Default 10000.</td></tr>
+          <tr><td><code>--baud &lt;rate&gt;</code></td><td>Serial baud rate. Default 115200.</td></tr>
+          <tr><td><code>--all</code></td><td><code>ports</code>: include non-signer serial ports.</td></tr>
+          <tr><td><code>--yes</code></td><td><code>identities remove</code>: skip the typed-name confirmation.</td></tr>
+          <tr><td><code>--json</code></td><td>Machine-readable output, on every command.</td></tr>
+          <tr><td><code>-h, --help</code> / <code>--version</code></td><td>Help and version; neither touches the serial port.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="aside">
+      Exit codes: 0 success, 1 runtime failure, 2 usage error. JSON and
+      tables on stdout; prompts, progress and errors on stderr.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <p class="colophon-links">
+    <a href="../">About</a> ·
+    <a href="../guide/">Web guide</a> ·
+    <a href="https://sapwood.forgesworn.dev">App</a> ·
+    <a href="https://github.com/forgesworn/sapwood">Source</a> ·
+    <a href="https://heartwood.forgesworn.dev">Heartwood</a> ·
+    <a href="https://forgesworn.dev">forgesworn.dev</a>
+  </p>
+  <p class="colophon-note">
+    Every session on this page is real output from the shipped CLI, with
+    demonstration identities. This page is static: no scripts, no cookies,
+    no analytics, no third-party requests.
+  </p>
+</footer>
+
+</body>
+</html>

@@ -25,3 +25,31 @@ test('deploy routes missing hashed assets before the SPA fallback', async () => 
   expect(assetsHandle).toBeLessThan(spaFallback)
   expect(caddy).toMatch(/@assets\s*\{[\s\S]*path \/assets\/\*[\s\S]*file[\s\S]*\}/)
 })
+
+// The support pages under /about/ are static files in public/; they must
+// deploy with the app and keep their assets self-hosted (the /about/* CSP
+// allows nothing third-party).
+test('serves the web and CLI guides with their assets', async ({ page }) => {
+  const guide = await page.request.get('/about/guide/')
+  expect(guide.status()).toBe(200)
+  await expect(guide.text()).resolves.toContain('<title>Sapwood guide: the web console</title>')
+
+  const cli = await page.request.get('/about/cli/')
+  expect(cli.status()).toBe(200)
+  await expect(cli.text()).resolves.toContain('<title>Sapwood guide: the command line</title>')
+
+  const css = await page.request.get('/about/guide.css')
+  expect(css.status()).toBe(200)
+
+  // One still and one recording, standing in for the asset set.
+  const still = await page.request.get('/about/guide/img/home.png')
+  expect(still.status()).toBe(200)
+  expect(still.headers()['content-type']).toContain('image/png')
+  const rec = await page.request.get('/about/guide/img/connect-app.gif')
+  expect(rec.status()).toBe(200)
+  expect(rec.headers()['content-type']).toContain('image/gif')
+
+  // The about page links to both guides.
+  const about = await page.request.get('/about/')
+  await expect(about.text()).resolves.toMatch(/href="guide\/"[\s\S]*href="cli\/"/)
+})

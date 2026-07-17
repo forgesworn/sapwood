@@ -1,0 +1,222 @@
+/* Sapwood guides: sapwood.forgesworn.dev/about/guide/ and /about/cli/
+   Additions layered over styles.css for the two support pages. Same rules as
+   the about page: CSS only, self-hosted font, nothing third-party. The /about/*
+   CSP forbids inline styles, so every style lives here. */
+
+/* ---------- page hero (single column, tighter than the about hero) -------- */
+
+.page-hero {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: clamp(3rem, 8vh, 5.5rem) var(--gutter) clamp(2rem, 5vh, 3.5rem);
+}
+.page-hero h1 {
+  font-weight: 700;
+  font-size: clamp(2rem, 4.6vw, 3.2rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.4rem;
+  text-wrap: balance;
+}
+.page-hero .lede { margin-bottom: 1.6rem; }
+
+/* ---------- table of contents chips ---------- */
+
+.toc {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  max-width: 1080px;
+}
+.toc a {
+  display: inline-block;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  text-decoration: none;
+  border: 1px solid var(--line-bright);
+  border-radius: 999px;
+  padding: 0.32rem 0.85rem;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.toc a:hover { border-color: var(--green-dim); color: var(--green); }
+.toc .toc-no { color: var(--green); margin-right: 0.4rem; }
+
+/* ---------- screenshots and recordings ---------- */
+
+.shot {
+  margin: clamp(1.6rem, 4vh, 2.4rem) 0 0;
+  border: 1px solid var(--line-bright);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 0 32px rgba(0, 232, 123, 0.05);
+}
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption {
+  font-size: 0.78rem;
+  color: var(--ink-mute);
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--raised);
+}
+.shot figcaption .cap-tag {
+  color: var(--green);
+  letter-spacing: 0.12em;
+  margin-right: 0.6rem;
+}
+/* A recording is looping; badge it so nobody waits for it to "finish". */
+.shot--rec figcaption .cap-tag { color: var(--amber); }
+
+/* Two shots side by side where the flow reads better that way. */
+.shot-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(1rem, 3vw, 2rem);
+  align-items: start;
+}
+.shot-pair .shot { margin-top: clamp(1.6rem, 4vh, 2.4rem); }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  max-width: var(--measure);
+  margin-top: 1.6rem;
+  padding: 0.95rem 1.15rem;
+  border: 1px solid var(--line-bright);
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+}
+.callout strong { color: var(--ink); }
+.callout--warn { border-left-color: var(--amber); }
+.callout--danger { border-left-color: var(--red); }
+
+/* ---------- vertical walkthrough steps ---------- */
+
+.walk {
+  list-style: none;
+  counter-reset: walk;
+  margin-top: 1.8rem;
+  max-width: 74ch;
+}
+.walk > li {
+  counter-increment: walk;
+  position: relative;
+  padding: 0 0 1.5rem 3.2rem;
+  border-left: 1px solid var(--line);
+  margin-left: 0.9rem;
+}
+.walk > li:last-child { padding-bottom: 0.4rem; }
+.walk > li::before {
+  content: counter(walk, decimal-leading-zero);
+  position: absolute;
+  left: -0.95rem;
+  top: -0.15rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  color: var(--green);
+  background: var(--bg);
+  border: 1px solid var(--line-bright);
+  border-radius: 50%;
+}
+.walk h3 {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.4rem;
+}
+.walk p { font-size: 0.92rem; color: var(--ink-dim); max-width: var(--measure); }
+.walk p + p { margin-top: 0.6rem; }
+.walk p a { color: var(--ink); }
+
+/* ---------- sub-headings inside sections ---------- */
+
+.sub {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: clamp(2rem, 5vh, 3rem) 0 0.8rem;
+}
+.sub::before { content: "▸ "; color: var(--green); }
+.section-body .sub + p { margin-top: 0; }
+
+/* ---------- reference table ---------- */
+
+.ref-wrap { overflow-x: auto; margin-top: 1.6rem; }
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.ref-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  font-weight: 400;
+  padding: 0.55rem 1.2rem 0.55rem 0;
+  border-bottom: 1px solid var(--line-bright);
+}
+.ref-table td {
+  vertical-align: top;
+  padding: 0.6rem 1.2rem 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-dim);
+}
+.ref-table td:first-child { white-space: nowrap; color: var(--ink); }
+.ref-table code { white-space: nowrap; }
+
+/* ---------- animated hero terminal (CLI page) ---------- */
+
+/* Lines appear in sequence, as if the session is being replayed. The cursor
+   keeps blinking on the last line. Reduced motion shows everything at once. */
+@keyframes line-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+.term-anim .line { display: block; white-space: pre; opacity: 0; animation: line-in 0.28s ease-out forwards; }
+.term-anim .line:nth-child(1)  { animation-delay: 0.4s; }
+.term-anim .line:nth-child(2)  { animation-delay: 1.0s; }
+.term-anim .line:nth-child(3)  { animation-delay: 1.5s; }
+.term-anim .line:nth-child(4)  { animation-delay: 2.2s; }
+.term-anim .line:nth-child(5)  { animation-delay: 2.8s; }
+.term-anim .line:nth-child(6)  { animation-delay: 3.3s; }
+.term-anim .line:nth-child(7)  { animation-delay: 3.8s; }
+.term-anim .line:nth-child(8)  { animation-delay: 4.5s; }
+.term-anim .line:nth-child(9)  { animation-delay: 5.0s; }
+.term-anim .line:nth-child(10) { animation-delay: 5.5s; }
+.term-anim .line:nth-child(11) { animation-delay: 6.0s; }
+.term-anim .line:nth-child(12) { animation-delay: 6.6s; }
+.term-anim .line:nth-child(13) { animation-delay: 7.1s; }
+.term-anim .line:nth-child(14) { animation-delay: 7.6s; }
+.term-anim .line:nth-child(15) { animation-delay: 8.1s; }
+.term-anim .line:nth-child(16) { animation-delay: 8.7s; }
+.term-anim .cursor-line::after {
+  content: "▌";
+  color: var(--green);
+  animation: blink 1.1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-anim .line { animation: none; opacity: 1; }
+  .term-anim .cursor-line::after { animation: none; }
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 980px) {
+  .shot-pair { grid-template-columns: 1fr; }
+  .shot-pair .shot { margin-top: 1.2rem; }
+  .shot-pair .shot:first-child { margin-top: clamp(1.6rem, 4vh, 2.4rem); }
+}
+@media (max-width: 640px) {
+  .walk > li { padding-left: 2.6rem; }
+}

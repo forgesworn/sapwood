@@ -2897,6 +2897,9 @@ if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: bool
       relayConfiguredRelays?: string[] | null
       relayStatus?: RelayStatus | null
       error?: string | null
+      usbNetworkSupport?: 'unknown' | 'supported' | 'unsupported'
+      usbNetworkState?: UsbNetworkState | null
+      logs?: string[]
     } = {},
   ) => {
     device.connected = true
@@ -2919,5 +2922,17 @@ if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: bool
       : ''
     device.relayStatus = opts.relayStatus ?? null
     device.error = opts.error ?? null
+    // Optional extras, only applied when given: USB network state (drives the
+    // Device > Network panel and phone-handoff gating over serial) and canned
+    // log lines, fed through addLog so signer activity derives as in real use.
+    if (opts.usbNetworkSupport) device.usbNetworkSupport = opts.usbNetworkSupport
+    if (opts.usbNetworkState !== undefined) device.usbNetworkState = opts.usbNetworkState
+    opts.logs?.forEach(addLog)
+  }
+  // Panel mounts probe the (absent) transport and surface the failure in
+  // device.error; this lets a test dismiss that banner without resetting the
+  // rest of the faked state the way a full __sapwoodConnect call would.
+  ;(window as unknown as { __sapwoodClearError?: unknown }).__sapwoodClearError = () => {
+    device.error = null
   }
 }
