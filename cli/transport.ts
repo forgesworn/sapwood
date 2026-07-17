@@ -29,19 +29,41 @@ export interface PortCandidate {
 // bridges on tethered boards.
 const KNOWN_VENDORS = new Set(['303a', '1a86', '10c4', '0403'])
 
-/** List serial ports, filtered to known signer hardware unless `all`. */
-export async function listPorts(all = false): Promise<PortCandidate[]> {
-  const { SerialPort } = await import('serialport')
-  const ports = await SerialPort.list()
+interface RawPortInfo {
+  path: string
+  vendorId?: string
+  productId?: string
+  manufacturer?: string
+}
+
+/** Normalise a port listing: filter to known signer hardware unless `all`. */
+export function toCandidates(ports: RawPortInfo[], platform: string, all: boolean): PortCandidate[] {
   const mapped: PortCandidate[] = ports.map((p) => ({
     // macOS: open the call-up device, not the modem-style tty (which blocks
     // waiting for carrier detect).
-    path: process.platform === 'darwin' ? p.path.replace('/dev/tty.', '/dev/cu.') : p.path,
+    path: platform === 'darwin' ? p.path.replace('/dev/tty.', '/dev/cu.') : p.path,
     ...(p.vendorId ? { vendorId: p.vendorId.toLowerCase() } : {}),
     ...(p.productId ? { productId: p.productId.toLowerCase() } : {}),
     ...(p.manufacturer ? { manufacturer: p.manufacturer } : {}),
   }))
   return all ? mapped : mapped.filter((p) => p.vendorId && KNOWN_VENDORS.has(p.vendorId))
+}
+
+/** List serial ports, filtered to known signer hardware unless `all`. */
+export async function listPorts(all = false): Promise<PortCandidate[]> {
+  const { SerialPort } = await import('serialport')
+  return toCandidates(await SerialPort.list(), process.platform, all)
+}
+
+/** Pick the port to open: an explicit choice wins; otherwise exactly one
+ *  candidate must exist. Throws a message ready for the terminal. */
+export function pickPort(candidates: PortCandidate[], explicit: string | undefined): string {
+  if (explicit) return explicit
+  if (candidates.length === 1) return candidates[0]!.path
+  if (candidates.length === 0) {
+    throw new Error('no signer found. Plug the device in, or pass --port <path>. `sapwood ports --all` lists every serial port.')
+  }
+  throw new Error(`several possible signers found. Pass --port <path>:\n${candidates.map((c) => `  ${c.path}${c.manufacturer ? `  (${c.manufacturer})` : ''}`).join('\n')}`)
 }
 
 export type TransportEvent =

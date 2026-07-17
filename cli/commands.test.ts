@@ -11,6 +11,7 @@ import {
   cmdDerive,
   cmdDevice,
   cmdIdentities,
+  parseSignature,
 } from './commands.js'
 import type { CommandTransport } from './commands.js'
 
@@ -73,6 +74,18 @@ describe('cmdDevice', () => {
     })
     const r = await cmdDevice(t, O)
     expect(r.lines[0]).toContain('predates the version query')
+  })
+
+  it('reports apps as unknown when the slot list is refused', async () => {
+    const bare = MASTERS.map(({ apps: _apps, ...m }) => m)
+    const t = fakeTransport({
+      [FrameType.FIRMWARE_INFO]: nack(),
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, bare),
+      [FrameType.CONNSLOT_LIST]: nack(),
+    })
+    const r = await cmdDevice(t, O)
+    expect(r.lines.at(-1)).toContain('connected apps unknown')
+    expect(r.data).toMatchObject({ apps: null })
   })
 
   it('counts apps via the slot list when the masters carry no counts', async () => {
@@ -150,6 +163,20 @@ describe('cmdDerive', () => {
     })
     await expect(cmdDerive(t, 'writer', undefined, O)).rejects.toThrow('slots full')
   })
+
+  it('flags a namesake identity that is not this key', async () => {
+    // A persona named 'blog' exists with a different npub; deriving 'blog'
+    // creates a distinct identity and must say so.
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, MASTERS),
+      [FrameType.DERIVE_IDENTITY]: jsonFrame(FrameType.DERIVE_IDENTITY_RESPONSE, {
+        slot: 3, label: 'blog', npub: 'npub1freshfreshfreshfreshq2m8', existing: false,
+      }),
+    })
+    const r = await cmdDerive(t, 'blog', 0, O)
+    expect(r.lines.at(-1)).toContain("named 'blog' already existed")
+    expect(r.data).toMatchObject({ namesakes: 1 })
+  })
 })
 
 describe('cmdApps', () => {
@@ -172,6 +199,28 @@ describe('cmdApps', () => {
     expect(r.lines[1]).toContain('gossip')
     expect(r.lines[1]).toContain('1,7')
     expect(t.seen.filter((f) => f.type === FrameType.CONNSLOT_LIST)).toHaveLength(2)
+  })
+
+  it('shows an empty kind list as all (no ceiling on kinds)', async () => {
+    const open: ConnectSlot = { ...gossip, label: 'primal', allowed_kinds: [] }
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[0]!]),
+      [FrameType.CONNSLOT_LIST]: jsonFrame(FrameType.CONNSLOT_LIST_RESP, [open]),
+    })
+    const r = await cmdApps(t, undefined, O)
+    expect(r.lines[1]).toContain('all')
+  })
+
+  it('limits the listing to --identity and asks the right slot', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, MASTERS),
+      [FrameType.CONNSLOT_LIST]: jsonFrame(FrameType.CONNSLOT_LIST_RESP, [gossip]),
+    })
+    const r = await cmdApps(t, 1, O)
+    expect(r.lines[1]).toContain('market')
+    const asked = t.seen.filter((f) => f.type === FrameType.CONNSLOT_LIST)
+    expect(asked).toHaveLength(1)
+    expect(asked[0]!.payload[0]).toBe(1)
   })
 
   it('reports an empty console honestly', async () => {
@@ -209,5 +258,24 @@ describe('cmdAppsRevoke', () => {
       [FrameType.CONNSLOT_REVOKE]: nack('no such slot'),
     })
     await expect(cmdAppsRevoke(t, 7, undefined, O)).rejects.toThrow('no such slot')
+  })
+})
+
+describe('parseSignature', () => {
+  it('passes 64 raw bytes through', () => {
+    const sig = new Uint8Array(64).fill(7)
+    expect(parseSignature(sig, 'x.sig')).toEqual(sig)
+  })
+
+  it('decodes 128 hex characters', () => {
+    const hex = 'ab'.repeat(64)
+    const parsed = parseSignature(new TextEncoder().encode(`${hex}\n`), 'x.sig')
+    expect(parsed).toHaveLength(64)
+    expect(parsed[0]).toBe(0xab)
+  })
+
+  it('rejects anything else, naming the source', () => {
+    expect(() => parseSignature(new TextEncoder().encode('not a signature'), 'x.sig'))
+      .toThrow(/x\.sig/)
   })
 })

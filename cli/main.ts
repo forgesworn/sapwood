@@ -8,7 +8,7 @@
 import { readFile } from 'node:fs/promises'
 import process from 'node:process'
 import { HELP, UsageError, intFlag, parseArgs } from './args.js'
-import { NodeSerialTransport, listPorts } from './transport.js'
+import { NodeSerialTransport, listPorts, pickPort } from './transport.js'
 import {
   CommandError,
   cmdApps,
@@ -16,6 +16,7 @@ import {
   cmdDerive,
   cmdDevice,
   cmdIdentities,
+  parseSignature,
 } from './commands.js'
 import type { CommandResult } from './commands.js'
 import { OtaError, streamOta } from '../src/lib/ota.js'
@@ -37,24 +38,16 @@ function printResult(result: CommandResult, json: boolean): void {
 
 /** Pick the serial port: --port wins; otherwise exactly one known signer. */
 async function resolvePort(flag: string | undefined): Promise<string> {
-  if (flag) return flag
-  const candidates = await listPorts()
-  if (candidates.length === 1) return candidates[0]!.path
-  if (candidates.length === 0) {
-    fail('no signer found. Plug the device in, or pass --port <path>. `sapwood ports --all` lists every serial port.')
+  try {
+    return pickPort(flag ? [] : await listPorts(), flag)
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e))
   }
-  fail(`several possible signers found. Pass --port <path>:\n${candidates.map((c) => `  ${c.path}${c.manufacturer ? `  (${c.manufacturer})` : ''}`).join('\n')}`)
 }
 
 /** Read the ed25519 release signature: 64 raw bytes, or 128 hex chars. */
 async function readSignature(path: string): Promise<Uint8Array> {
-  const raw = await readFile(path)
-  if (raw.length === 64) return new Uint8Array(raw)
-  const hex = raw.toString('utf8').trim()
-  if (/^[0-9a-fA-F]{128}$/.test(hex)) {
-    return new Uint8Array(hex.match(/.{2}/g)!.map((b) => parseInt(b, 16)))
-  }
-  throw new CommandError(`${path} is not a 64-byte signature or 128-char hex file.`)
+  return parseSignature(new Uint8Array(await readFile(path)), path)
 }
 
 async function cmdLogs(transport: NodeSerialTransport, json: boolean): Promise<never> {
@@ -163,6 +156,33 @@ async function main(): Promise<void> {
   }
   const o = { timeoutMs }
 
+  // Validate the command's shape BEFORE touching the port: a usage mistake
+  // must not open (or contend for) the device.
+  let deriveName = ''
+  let revokeSlot: number | undefined
+  switch (command) {
+    case 'device':
+    case 'identities':
+    case 'logs':
+      break
+    case 'derive':
+      deriveName = rest.join(' ').trim()
+      if (!deriveName) fail('usage: sapwood derive <name> [--parent <slot>]', 2)
+      break
+    case 'apps':
+      if (rest.length > 0) {
+        if (rest[0] !== 'revoke') fail(`unknown apps subcommand '${rest.join(' ')}'`, 2)
+        revokeSlot = Number(rest[1])
+        if (!Number.isInteger(revokeSlot) || revokeSlot < 0) fail('usage: sapwood apps revoke <slot> [--identity <slot>]', 2)
+      }
+      break
+    case 'firmware':
+      if (rest[0] !== 'update' || !rest[1]) fail('usage: sapwood firmware update <file.bin> [--signature <path>]', 2)
+      break
+    default:
+      fail(`unknown command '${command}'. Try: sapwood --help`, 2)
+  }
+
   const portPath = await resolvePort(typeof flags['port'] === 'string' ? flags['port'] : undefined)
   let transport: NodeSerialTransport
   try {
@@ -179,35 +199,24 @@ async function main(): Promise<void> {
       case 'identities':
         printResult(await cmdIdentities(transport, o), json)
         break
-      case 'derive': {
-        const name = rest.join(' ').trim()
-        if (!name) fail('usage: sapwood derive <name> [--parent <slot>]', 2)
-        printResult(await cmdDerive(transport, name, parent, o), json)
+      case 'derive':
+        printResult(await cmdDerive(transport, deriveName, parent, o), json)
         break
-      }
-      case 'apps': {
-        if (rest[0] === 'revoke') {
-          const slot = Number(rest[1])
-          if (!Number.isInteger(slot) || slot < 0) fail('usage: sapwood apps revoke <slot> [--identity <slot>]', 2)
-          printResult(await cmdAppsRevoke(transport, slot, identity, o), json)
-        } else if (rest.length === 0) {
-          printResult(await cmdApps(transport, identity, o), json)
+      case 'apps':
+        if (revokeSlot !== undefined) {
+          printResult(await cmdAppsRevoke(transport, revokeSlot, identity, o), json)
         } else {
-          fail(`unknown apps subcommand '${rest.join(' ')}'`, 2)
+          printResult(await cmdApps(transport, identity, o), json)
         }
         break
-      }
       case 'logs':
         await cmdLogs(transport, json)
         break
       case 'firmware': {
-        if (rest[0] !== 'update' || !rest[1]) fail('usage: sapwood firmware update <file.bin> [--signature <path>]', 2)
         const sig = typeof flags['signature'] === 'string' ? flags['signature'] : undefined
-        await cmdFirmwareUpdate(transport, rest[1], sig, json)
+        await cmdFirmwareUpdate(transport, rest[1]!, sig, json)
         break
       }
-      default:
-        fail(`unknown command '${command}'. Try: sapwood --help`, 2)
     }
   } catch (e) {
     if (e instanceof CommandError || e instanceof OtaError || e instanceof UsageError) {

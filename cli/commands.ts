@@ -41,6 +41,16 @@ function nackReason(frame: Frame): string {
   return decoder.decode(frame.payload).trim()
 }
 
+/** Interpret a signature file's bytes: 64 raw bytes, or 128 hex chars. */
+export function parseSignature(raw: Uint8Array, source: string): Uint8Array {
+  if (raw.length === 64) return raw
+  const hex = decoder.decode(raw).trim()
+  if (/^[0-9a-fA-F]{128}$/.test(hex)) {
+    return new Uint8Array(hex.match(/.{2}/g)!.map((b) => parseInt(b, 16)))
+  }
+  throw new CommandError(`${source} is not a 64-byte signature or 128-char hex file.`)
+}
+
 interface FirmwareInfo {
   version: string
   board?: string
@@ -232,17 +242,20 @@ export async function cmdDerive(
     npub: string
     existing?: boolean
   }
-  const verb = derived.existing ? 'already exists' : 'derived'
-  return {
-    data: derived,
-    lines: [
-      derived.existing
-        ? `✓ '${derived.label}' ${verb} under '${parent.label}'`
-        : `✓ ${verb} '${derived.label}' under '${parent.label}'`,
-      `  ${derived.npub}`,
-      '  The same name always derives the same key. No secret left the device.',
-    ],
+  const lines = [
+    derived.existing
+      ? `✓ '${derived.label}' already exists under '${parent.label}'`
+      : `✓ derived '${derived.label}' under '${parent.label}'`,
+    `  ${derived.npub}`,
+    '  The same name always derives the same key. No secret left the device.',
+  ]
+  // A persona or provisioned identity can share the name without being this
+  // derived key. Say so, or two same-named identities look interchangeable.
+  const namesakes = masters.filter((m) => m.label === derived.label && m.npub !== derived.npub)
+  if (!derived.existing && namesakes.length > 0) {
+    lines.push(`  Note: ${namesakes.length === 1 ? 'another identity' : `${namesakes.length} other identities`} named '${derived.label}' already existed with a different npub. This new one is distinct.`)
   }
+  return { data: { ...derived, namesakes: namesakes.length }, lines }
 }
 
 export async function cmdApps(
@@ -269,7 +282,9 @@ export async function cmdApps(
         String(app.slot_index),
         app.label || '(unnamed)',
         String(app.allowed_methods.length),
-        app.allowed_kinds.length <= 4 ? app.allowed_kinds.join(',') || 'none' : String(app.allowed_kinds.length),
+        // An empty kind list means every kind is allowed (the strict ceiling
+        // applies to methods; kinds fail closed only when listed).
+        app.allowed_kinds.length === 0 ? 'all' : app.allowed_kinds.length <= 4 ? app.allowed_kinds.join(',') : String(app.allowed_kinds.length),
         app.auto_approve ? 'yes' : 'no',
         app.current_pubkey ? 'yes' : 'no',
       ])

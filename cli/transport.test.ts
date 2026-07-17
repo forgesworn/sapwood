@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { FrameType, buildFrame } from '../src/lib/frame.js'
 import { PACE_THRESHOLD } from '../src/lib/pacing.js'
-import { NodeSerialTransport } from './transport.js'
+import { NodeSerialTransport, pickPort, toCandidates } from './transport.js'
 import type { PortLike } from './transport.js'
 
 type Handler = (arg?: unknown) => void
@@ -121,5 +121,59 @@ describe('NodeSerialTransport', () => {
     const pending = t.sendAndReceive(buildFrame(FrameType.PROVISION_LIST), [FrameType.PROVISION_LIST_RESPONSE], 1_000)
     await t.close()
     await expect(pending).rejects.toThrow(/disconnected/i)
+  })
+
+  it('rejects the round trip when the port write fails', async () => {
+    const f = fakePort()
+    f.port.write = (_data, cb) => cb(new Error('EIO'))
+    const t = NodeSerialTransport.wrap(f.port)
+    await expect(
+      t.sendAndReceive(buildFrame(FrameType.PROVISION_LIST), [FrameType.PROVISION_LIST_RESPONSE], 1_000),
+    ).rejects.toThrow('EIO')
+  })
+})
+
+describe('toCandidates', () => {
+  const raw = [
+    { path: '/dev/tty.usbserial-5B01', vendorId: '1A86', productId: '55D4' },
+    { path: '/dev/tty.Bluetooth-Incoming-Port' },
+    { path: 'COM7', vendorId: '303a', productId: '1001', manufacturer: 'Espressif' },
+    { path: '/dev/ttyUSB0', vendorId: 'dead', productId: 'beef' },
+  ]
+
+  it('filters to known signer vendors and lowercases ids', () => {
+    const c = toCandidates(raw, 'linux', false)
+    expect(c.map((p) => p.path)).toEqual(['/dev/tty.usbserial-5B01', 'COM7'])
+    expect(c[0]!.vendorId).toBe('1a86')
+  })
+
+  it('maps macOS tty devices to their call-up form', () => {
+    const c = toCandidates(raw, 'darwin', false)
+    expect(c[0]!.path).toBe('/dev/cu.usbserial-5B01')
+  })
+
+  it('returns everything unfiltered with all', () => {
+    expect(toCandidates(raw, 'linux', true)).toHaveLength(4)
+  })
+})
+
+describe('pickPort', () => {
+  const one = [{ path: '/dev/cu.usbserial-5B01', vendorId: '1a86' }]
+
+  it('honours an explicit --port', () => {
+    expect(pickPort([], '/dev/cu.custom')).toBe('/dev/cu.custom')
+  })
+
+  it('auto-picks a single candidate', () => {
+    expect(pickPort(one, undefined)).toBe('/dev/cu.usbserial-5B01')
+  })
+
+  it('explains when no signer is present', () => {
+    expect(() => pickPort([], undefined)).toThrow(/no signer found/)
+  })
+
+  it('lists the choices when several are present', () => {
+    expect(() => pickPort([...one, { path: 'COM7', manufacturer: 'Espressif' }], undefined))
+      .toThrow(/COM7 {2}\(Espressif\)/)
   })
 })
