@@ -4,8 +4,9 @@
 // Reads incoming bytes, hunts for frame magic, and emits parsed frames.
 // Non-frame bytes (ESP-IDF log output) are emitted as log lines.
 
-import { MAGIC, MAX_PAYLOAD, HEADER_SIZE, CRC_SIZE, parseFrame } from './frame.js'
 import type { Frame, FrameTypeValue } from './frame.js'
+import { FrameStream } from './frame-stream.js'
+import { paceSlices } from './pacing.js'
 import { releaseGrantedPorts } from './serial-ports.js'
 
 export type SerialEvent =
@@ -26,19 +27,6 @@ interface SerialRequest {
   /** Installed only while this request owns the response listener. */
   cancel?: (error: Error) => void
 }
-
-// Write pacing for frames that could overrun a UART board's 4KB driver ring
-// (identity-card avatars ~8KB, OTA chunks 4KB). Two phases, measured against a
-// live T-Display (v0.9.10) in wifi mode: its relay loop polls USB as rarely as
-// once a second, so the HEAD of a frame must drip in slower than 4KB/s or the
-// ring overflows before the firmware latches on. Once latched, the firmware
-// blocks draining the rest of the frame continuously, so the tail can cruise
-// at heartwood-bridge's proven 64B/6ms.
-const PACE_THRESHOLD = 512
-const PACE_CHUNK = 64
-const PACE_HEAD_BYTES = 3072
-const PACE_HEAD_GAP_MS = 24
-const PACE_GAP_MS = 6
 
 /** Web Serial connection to the ESP32. */
 export class SerialTransport {
@@ -61,10 +49,11 @@ export class SerialTransport {
   private activeRequest: SerialRequest | null = null
   private requestDraining = false
 
-  // Buffer for accumulating incoming bytes.
-  private buffer = new Uint8Array(0)
-  // Buffer for accumulating non-frame text (ESP-IDF log lines).
-  private logBuffer = ''
+  // Splits the raw byte stream into frames and log lines.
+  private stream = new FrameStream({
+    onFrame: (frame) => this.emit({ kind: 'frame', frame }),
+    onLog: (line) => this.emit({ kind: 'log', line }),
+  })
 
   get connected(): boolean {
     return this.port !== null && this.running
@@ -140,8 +129,7 @@ export class SerialTransport {
       }
       this.port = port
       this.running = true
-      this.buffer = new Uint8Array(0)
-      this.logBuffer = ''
+      this.stream.reset()
       this.writeChain = Promise.resolve() // fresh write queue for this session
 
       const info = port.getInfo()
@@ -217,20 +205,14 @@ export class SerialTransport {
     }, timeoutMs)
     let writeErr: unknown
     try {
-      if (data.length <= PACE_THRESHOLD) {
-        await writer.write(data)
-      } else {
-        // Pace large frames: the UART-bridge boards (T-Display, Heltec V3,
-        // ESP8266) have a 4KB driver ring the firmware may be slow to drain,
-        // so a burst bigger than the ring silently loses bytes and the frame
-        // dies on CRC. Head slices drip (see PACE_HEAD_* above), the rest
-        // cruise once the firmware is committed to reading the frame.
-        for (let o = 0; o < data.length; o += PACE_CHUNK) {
-          await writer.write(data.subarray(o, Math.min(o + PACE_CHUNK, data.length)))
-          if (o + PACE_CHUNK < data.length) {
-            await new Promise((r) => setTimeout(r, o < PACE_HEAD_BYTES ? PACE_HEAD_GAP_MS : PACE_GAP_MS))
-          }
-        }
+      // Pace large frames: the UART-bridge boards (T-Display, Heltec V3,
+      // ESP8266) have a 4KB driver ring the firmware may be slow to drain,
+      // so a burst bigger than the ring silently loses bytes and the frame
+      // dies on CRC. Head slices drip, the rest cruise once the firmware is
+      // committed to reading the frame (cadence in pacing.ts).
+      for (const { bytes, gapMs } of paceSlices(data)) {
+        await writer.write(bytes)
+        if (gapMs > 0) await new Promise((r) => setTimeout(r, gapMs))
       }
     } catch (e) {
       writeErr = e
@@ -366,77 +348,7 @@ export class SerialTransport {
   }
 
   private processBytes(chunk: Uint8Array) {
-    // Append to buffer.
-    const combined = new Uint8Array(this.buffer.length + chunk.length)
-    combined.set(this.buffer)
-    combined.set(chunk, this.buffer.length)
-    this.buffer = combined
-
-    // Process as many frames as possible from the buffer.
-    while (this.buffer.length > 0) {
-      // Hunt for magic bytes.
-      const magicIdx = this.findMagic()
-      if (magicIdx === -1) {
-        // No magic found -- everything is log output.
-        this.emitLogBytes(this.buffer)
-        this.buffer = new Uint8Array(0)
-        return
-      }
-
-      // Emit any bytes before the magic as log output.
-      if (magicIdx > 0) {
-        this.emitLogBytes(this.buffer.slice(0, magicIdx))
-        this.buffer = this.buffer.slice(magicIdx)
-      }
-
-      // Do we have enough bytes for a header?
-      if (this.buffer.length < HEADER_SIZE) return // Wait for more data.
-
-      // Read the payload length from the header.
-      const payloadLen = (this.buffer[3]! << 8) | this.buffer[4]!
-      if (payloadLen > MAX_PAYLOAD) {
-        // Corrupt -- skip past this magic and keep hunting.
-        this.buffer = this.buffer.slice(2)
-        continue
-      }
-
-      const frameLen = HEADER_SIZE + payloadLen + CRC_SIZE
-      if (this.buffer.length < frameLen) return // Wait for more data.
-
-      // Try to parse the frame.
-      try {
-        const frame = parseFrame(this.buffer.slice(0, frameLen))
-        this.emit({ kind: 'frame', frame })
-        this.buffer = this.buffer.slice(frameLen)
-      } catch {
-        // Bad CRC or other parse error -- skip past magic and keep hunting.
-        this.buffer = this.buffer.slice(2)
-      }
-    }
-  }
-
-  private findMagic(): number {
-    for (let i = 0; i <= this.buffer.length - 2; i++) {
-      if (this.buffer[i] === MAGIC[0] && this.buffer[i + 1] === MAGIC[1]) {
-        return i
-      }
-    }
-    return -1
-  }
-
-  private emitLogBytes(bytes: Uint8Array) {
-    // Accumulate text and emit complete lines.
-    const text = new TextDecoder().decode(bytes)
-    this.logBuffer += text
-    const lines = this.logBuffer.split('\n')
-    // Emit all complete lines, keep the last (potentially incomplete) fragment.
-    for (let i = 0; i < lines.length - 1; i++) {
-      const line = lines[i]!.trim()
-      if (line.length > 0) {
-        this.emit({ kind: 'log', line })
-      }
-    }
-    this.logBuffer = lines[lines.length - 1] ?? ''
+    this.stream.feed(chunk)
   }
 }
 
