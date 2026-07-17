@@ -54,24 +54,24 @@
   </div>
 
   <!-- the console, in the app's own voice -->
-  <figure class="term reveal r3" aria-label="A Sapwood session: device status, identities, a pending approval, a firmware update">
+  <figure class="term reveal r3" aria-label="The Sapwood console: device status, identities, a pending approval, a firmware update">
     <figcaption class="term-bar">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="term-title">sapwood · usb</span>
+      <span class="term-title">sapwood · connected over usb</span>
     </figcaption>
-    <pre class="term-body"><code><span class="p">$</span> sapwood <span class="dim">▸ device</span>
+    <pre class="term-body"><code><span class="p">▸</span> DEVICE
 <span class="ok">✓</span> HEARTWOOD v0.13.7 · Heltec V4 · serial connected
 <span class="dim">2 masters provisioned. 5 approved clients.</span>
 
-<span class="p">$</span> sapwood <span class="dim">▸ identities</span>
+<span class="p">▸</span> IDENTITIES
   forge     <span class="dim">npub1q3k…x7d0</span>   tree m/0
   market    <span class="dim">npub1zzj…p2q4</span>   tree m/1
 
-<span class="p">$</span> sapwood <span class="dim">▸ approvals</span>
+<span class="p">▸</span> APPROVALS
 <span class="warn">!</span> kind 1 (note) · client "gossip" · waiting
   <span class="ok">[approve]</span> <span class="err">[deny]</span>
 
-<span class="p">$</span> sapwood <span class="dim">▸ firmware --update</span>
+<span class="p">▸</span> FIRMWARE UPDATE
 <span class="ok">✓</span> signature verified · sha-256 ok
 <span class="ok">✓</span> Firmware updated. Rebooting.</code></pre>
   </figure>
@@ -114,7 +114,8 @@
     <li>
       <h3>Backups</h3>
       <p>An imported key writes out as 24 BIP&#8209;39 words that restore the
-      identical npub, in Sapwood or the offline CLI, never on a server.</p>
+      identical npub, in Sapwood or Heartwood's offline CLI, never on a
+      server.</p>
     </li>
     <li>
       <h3>Connectivity</h3>
