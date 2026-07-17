@@ -7,6 +7,7 @@
 
 import { readFile } from 'node:fs/promises'
 import process from 'node:process'
+import { createInterface } from 'node:readline/promises'
 import { HELP, UsageError, intFlag, parseArgs } from './args.js'
 import { NodeSerialTransport, listPorts, pickPort } from './transport.js'
 import {
@@ -16,6 +17,8 @@ import {
   cmdDerive,
   cmdDevice,
   cmdIdentities,
+  cmdIdentitiesRemove,
+  findRemovalTarget,
   parseSignature,
 } from './commands.js'
 import type { CommandResult } from './commands.js'
@@ -160,10 +163,17 @@ async function main(): Promise<void> {
   // must not open (or contend for) the device.
   let deriveName = ''
   let revokeSlot: number | undefined
+  let removeSlot: number | undefined
   switch (command) {
     case 'device':
-    case 'identities':
     case 'logs':
+      break
+    case 'identities':
+      if (rest.length > 0) {
+        if (rest[0] !== 'remove') fail(`unknown identities subcommand '${rest.join(' ')}'`, 2)
+        removeSlot = Number(rest[1])
+        if (!Number.isInteger(removeSlot) || removeSlot < 0) fail('usage: sapwood identities remove <slot> [--yes]', 2)
+      }
       break
     case 'derive':
       deriveName = rest.join(' ').trim()
@@ -197,7 +207,26 @@ async function main(): Promise<void> {
         printResult(await cmdDevice(transport, o), json)
         break
       case 'identities':
-        printResult(await cmdIdentities(transport, o), json)
+        if (removeSlot !== undefined) {
+          const { target, personas } = await findRemovalTarget(transport, removeSlot, o)
+          if (flags['yes'] !== true) {
+            process.stderr.write(`Removing '${target.label}' (slot ${target.slot})\n  ${target.npub}\n`)
+            if (typeof target.apps === 'number' && target.apps > 0) {
+              process.stderr.write(`  ${target.apps} connected app${target.apps === 1 ? '' : 's'} will stop working.\n`)
+            }
+            if (personas > 0) {
+              process.stderr.write(`  ${personas} persona${personas === 1 ? '' : 's'} under this identity will be removed with it.\n`)
+            }
+            process.stderr.write('  The key itself remains derivable from its parent or phrase.\n')
+            const rl = createInterface({ input: process.stdin, output: process.stderr })
+            const answer = (await rl.question(`Type the identity's name to confirm: `)).trim()
+            rl.close()
+            if (answer !== target.label) fail('names do not match; nothing removed')
+          }
+          printResult(await cmdIdentitiesRemove(transport, target, o), json)
+        } else {
+          printResult(await cmdIdentities(transport, o), json)
+        }
         break
       case 'derive':
         printResult(await cmdDerive(transport, deriveName, parent, o), json)

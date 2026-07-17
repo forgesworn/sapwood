@@ -9,6 +9,7 @@ import {
   buildPolicyRevoke,
   buildPolicyUpdate,
   buildProvisionList,
+  buildProvisionRemove,
   buildFactoryReset,
   buildSetNetConfig,
   buildGetNetConfig,
@@ -142,6 +143,15 @@ describe('policy management frames', () => {
     const frame = parseFrame(bytes)
     expect(frame.type).toBe(FrameType.PROVISION_LIST)
     expect(frame.payload.length).toBe(0)
+  })
+
+  it('roundtrips PROVISION_REMOVE with the slot byte', () => {
+    const bytes = buildProvisionRemove(3)
+    const frame = parseFrame(bytes)
+    expect(frame.type).toBe(FrameType.PROVISION_REMOVE)
+    expect(Array.from(frame.payload)).toEqual([3])
+    expect(() => buildProvisionRemove(-1)).toThrow(RangeError)
+    expect(() => buildProvisionRemove(256)).toThrow(RangeError)
   })
 
   it('roundtrips FACTORY_RESET', () => {

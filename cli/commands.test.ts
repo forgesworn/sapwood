@@ -11,6 +11,8 @@ import {
   cmdDerive,
   cmdDevice,
   cmdIdentities,
+  cmdIdentitiesRemove,
+  findRemovalTarget,
   parseSignature,
 } from './commands.js'
 import type { CommandTransport } from './commands.js'
@@ -258,6 +260,44 @@ describe('cmdAppsRevoke', () => {
       [FrameType.CONNSLOT_REVOKE]: nack('no such slot'),
     })
     await expect(cmdAppsRevoke(t, 7, undefined, O)).rejects.toThrow('no such slot')
+  })
+})
+
+describe('identities remove', () => {
+  it('finds the target with its persona count', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, MASTERS),
+    })
+    const { target, personas } = await findRemovalTarget(t, 0, O)
+    expect(target.label).toBe('forge')
+    expect(personas).toBe(1)
+  })
+
+  it('refuses a slot that only a persona occupies or none at all', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, MASTERS),
+    })
+    await expect(findRemovalTarget(t, 9, O)).rejects.toThrow('Slots: 0, 1')
+  })
+
+  it('sends the slot byte and reports the reboot', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, MASTERS),
+      [FrameType.PROVISION_REMOVE]: { type: FrameType.ACK, payload: new Uint8Array(0) },
+    })
+    const { target } = await findRemovalTarget(t, 1, O)
+    const r = await cmdIdentitiesRemove(t, target, O)
+    expect(r.lines[0]).toBe("✓ removed 'market' (slot 1)")
+    expect(r.lines[1]).toContain('rebooting')
+    const sent = t.seen.find((f) => f.type === FrameType.PROVISION_REMOVE)!
+    expect(Array.from(sent.payload)).toEqual([1])
+  })
+
+  it('surfaces a refusal', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_REMOVE]: nack('journal busy'),
+    })
+    await expect(cmdIdentitiesRemove(t, MASTERS[0]!, O)).rejects.toThrow('journal busy')
   })
 })
 

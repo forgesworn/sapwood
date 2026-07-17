@@ -5,7 +5,7 @@
 export class UsageError extends Error {}
 
 const VALUE_FLAGS = new Set(['port', 'parent', 'identity', 'signature', 'timeout', 'baud'])
-const BOOL_FLAGS = new Set(['json', 'all', 'help', 'version'])
+const BOOL_FLAGS = new Set(['json', 'all', 'help', 'version', 'yes'])
 
 export interface ParsedArgs {
   positionals: string[]
@@ -59,6 +59,7 @@ COMMANDS
   ports                       List signer serial ports
   device                      Signer status: firmware, board, identities, apps
   identities                  List identities on the signer
+  identities remove <slot>    Remove an identity (typed-name confirmation)
   derive <name>               Derive a new identity on-device
   apps                        List connected apps and their permissions
   apps revoke <slot>          Revoke a connected app's slot
@@ -74,6 +75,7 @@ OPTIONS
   --timeout <ms>      Round-trip timeout (default 10000)
   --baud <rate>       Serial baud rate (default 115200)
   --all               ports: include non-signer serial ports
+  --yes               identities remove: skip the typed-name confirmation
   --json              Machine-readable output
   -h, --help          Show this help
   --version           Show the version

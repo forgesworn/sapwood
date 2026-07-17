@@ -179,6 +179,19 @@ export function buildProvisionList(): Uint8Array {
 }
 
 /**
+ * Build a PROVISION_REMOVE frame (0x04). Payload: [slot_u8], matching
+ * firmware/src/provision.rs::handle_remove. The device journals the removal
+ * across every slot-indexed record, ACKs, and reboots to reload state;
+ * remaining masters are renumbered to close the gap.
+ */
+export function buildProvisionRemove(slot: number): Uint8Array {
+  if (!Number.isInteger(slot) || slot < 0 || slot > 255) {
+    throw new RangeError(`Invalid slot ${slot}`)
+  }
+  return buildFrame(FrameType.PROVISION_REMOVE, new Uint8Array([slot]))
+}
+
+/**
  * Build a GENERATE_IDENTITY frame (0x57). The device generates its own seed,
  * shows the recovery phrase on its OWN screen, and stores it — no secret is
  * sent either way. Payload: [label_len][label].

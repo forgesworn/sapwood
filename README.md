@@ -59,6 +59,7 @@ npm link                               # puts `sapwood` on PATH (or run node dis
 
 sapwood device                         # firmware, board, identities, connected apps
 sapwood identities                     # slots, npubs, personas
+sapwood identities remove 3            # remove an identity (typed-name confirmation, device reboots)
 sapwood derive blog                    # derive an identity on-device, no secret leaves the signer
 sapwood apps                           # connected apps and their permissions
 sapwood apps revoke 2 --identity 0     # revoke an app slot

@@ -11,6 +11,7 @@ import {
   buildDeriveIdentity,
   buildFirmwareInfo,
   buildProvisionList,
+  buildProvisionRemove,
 } from '../src/lib/frame.js'
 import type { Frame, FrameTypeValue } from '../src/lib/frame.js'
 import type { ConnectSlot, MasterInfo } from '../src/lib/types.js'
@@ -294,6 +295,45 @@ export async function cmdApps(
     return { data, lines: ['No connected apps.'] }
   }
   return { data, lines: table(rows) }
+}
+
+/** Look up the removal target so the caller can confirm before sending. */
+export async function findRemovalTarget(
+  t: CommandTransport,
+  slot: number,
+  o: CommandOptions,
+): Promise<{ target: MasterInfo; personas: number }> {
+  const masters = await fetchMasters(t, o)
+  const target = masters.find((m) => !m.persona && m.slot === slot)
+  if (!target) {
+    const slots = masters.filter((m) => !m.persona).map((m) => m.slot).join(', ') || 'none'
+    throw new CommandError(`No identity in slot ${slot}. Slots: ${slots}.`)
+  }
+  return { target, personas: masters.filter((m) => m.persona && m.slot === slot).length }
+}
+
+/** Remove a master slot. The device journals, ACKs, then reboots; the caller
+ *  is responsible for having confirmed against findRemovalTarget first. */
+export async function cmdIdentitiesRemove(
+  t: CommandTransport,
+  target: MasterInfo,
+  o: CommandOptions,
+): Promise<CommandResult> {
+  const resp = await t.sendAndReceive(
+    buildProvisionRemove(target.slot),
+    [FrameType.ACK, FrameType.NACK],
+    Math.max(o.timeoutMs, 20_000),
+  )
+  if (resp.type !== FrameType.ACK) {
+    throw new CommandError(nackReason(resp) || `The signer refused to remove slot ${target.slot}.`)
+  }
+  return {
+    data: { removed: target.slot, label: target.label, npub: target.npub },
+    lines: [
+      `✓ removed '${target.label}' (slot ${target.slot})`,
+      '  The signer is rebooting to reload its state. Remaining identities renumber to close the gap.',
+    ],
+  }
 }
 
 export async function cmdAppsRevoke(

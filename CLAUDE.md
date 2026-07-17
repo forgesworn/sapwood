@@ -39,7 +39,7 @@ The 19 frame.test.ts tests verify byte-level compatibility with the Rust impleme
 
 ### Command line (`cli/`)
 
-`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, derive, apps, apps revoke, logs, firmware update. `--json` everywhere. Same security model: management frames only, button gates destructive operations.
+`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, identities remove, derive, apps, apps revoke, logs, firmware update. `--json` everywhere. Same security model: management frames only, button gates destructive operations.
 
 ## Build & run
 
@@ -105,6 +105,7 @@ BLE connectivity planned for portable mode (child key only, short range). Additi
 
 | Frame | Type | Direction | Payload |
 |-------|------|-----------|---------|
+| PROVISION_REMOVE | 0x04 | host -> device | slot_u8 (ACK, then device reboots; remaining slots renumber) |
 | PROVISION_LIST | 0x05 | host -> device | (empty) |
 | PROVISION_LIST_RESPONSE | 0x07 | device -> host | JSON `Vec<MasterInfo>` (masters, then derived personas with `persona: true`) |
 | DERIVE_IDENTITY | 0x60 | host -> device | parent_slot (1) + name utf8; device derives the nsec-tree child on-device |

@@ -54,6 +54,12 @@ describe('sapwood bundle', () => {
     expect(r.stderr).toContain('--frobnicate')
   })
 
+  it('demands a valid slot for identities remove', async () => {
+    const r = await sapwood('identities', 'remove', 'x')
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('usage: sapwood identities remove')
+  })
+
   it('demands a name for derive', async () => {
     const r = await sapwood('derive', '--port', '/dev/null')
     expect(r.code).toBe(2)
