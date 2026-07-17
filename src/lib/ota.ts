@@ -7,9 +7,11 @@
 // [offset_be32][bytes] per 4 KB, each acked CHUNK_OK; then OTA_FINISH, which
 // re-hashes the written image, re-checks the signature over the computed
 // digest, and replies VERIFIED (or an error and an automatic rollback).
-// Pre-signature firmware only understands the 36-byte unsigned OTA_BEGIN and
-// answers the signed form with ERR_SIZE — streamOta falls back to the legacy
-// form on that reply, which is how a device gets updated INTO enforcement.
+// Pre-signature firmware only understands the 36-byte unsigned OTA_BEGIN.
+// Later pre-signature builds answer the signed form with ERR_SIZE; the oldest
+// (v0.9.7 on a live Heltec V4) drop it without replying at all. streamOta
+// falls back to the legacy form on either signal — an ERR_SIZE reply or a
+// begin timeout — which is how a device gets updated INTO enforcement.
 // The device never accepts OTA over the relay — this is USB-only by design.
 
 import { FrameType, buildFrame, type FrameTypeValue } from './frame.js'
@@ -125,21 +127,32 @@ export async function streamOta(
     if (sig) p.set(sig, 36)
     return p
   }
-  let beginResp = await transport.sendAndReceive(
-    buildFrame(FrameType.OTA_BEGIN, beginPayload(signature)),
+  const begin = (sig?: Uint8Array) => transport.sendAndReceive(
+    buildFrame(FrameType.OTA_BEGIN, beginPayload(sig)),
     [FrameType.OTA_STATUS],
     60_000,
   )
-  if (signature && beginResp.payload[0] === OtaStatus.ERR_SIZE) {
-    // Pre-signature firmware rejects the 100-byte signed BEGIN as a bad
-    // payload length (before asking for approval). Retry the legacy unsigned
+  let beginResp: Awaited<ReturnType<typeof begin>>
+  if (!signature) {
+    beginResp = await begin()
+  } else {
+    // Pre-signature firmware doesn't understand the 100-byte signed BEGIN.
+    // Later builds reject it as a bad payload length (ERR_SIZE, before asking
+    // for approval); v0.9.7-era builds drop it without replying, so the only
+    // signal is the begin timing out. On either, retry the legacy unsigned
     // form — that firmware can't verify signatures anyway, and this path is
-    // exactly how a device gets updated INTO signature enforcement.
-    beginResp = await transport.sendAndReceive(
-      buildFrame(FrameType.OTA_BEGIN, beginPayload()),
-      [FrameType.OTA_STATUS],
-      60_000,
-    )
+    // exactly how a device gets updated INTO signature enforcement. A
+    // disconnect is not such a signal: the retry would go to a dead port.
+    let signedResp: Awaited<ReturnType<typeof begin>> | null = null
+    try {
+      signedResp = await begin(signature)
+    } catch (e) {
+      const silentDrop = e instanceof Error && e.message.startsWith('No response from the device')
+      if (!silentDrop) throw e
+    }
+    beginResp = signedResp !== null && signedResp.payload[0] !== OtaStatus.ERR_SIZE
+      ? signedResp
+      : await begin() // exactly one unsigned fallback; its own failures propagate
   }
   if (beginResp.payload[0] !== OtaStatus.READY) {
     throw new OtaError(beginError(beginResp.payload[0]), beginResp.payload[0])

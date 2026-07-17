@@ -141,6 +141,44 @@ describe('streamOta', () => {
     expect(calls).toHaveLength(1)
   })
 
+  it('falls back to the legacy unsigned BEGIN when old firmware drops the signed form silently', async () => {
+    // v0.9.7 never replies to the 100-byte signed BEGIN, so the only signal
+    // is the round trip timing out (observed live on a Heltec V4).
+    const data = bytes(4096)
+    const signature = new Uint8Array(64).fill(0xab)
+    const inner = scripted([OtaStatus.READY, OtaStatus.CHUNK_OK, OtaStatus.VERIFIED])
+    const calls: Uint8Array[] = []
+    const transport: OtaTransport = {
+      async sendAndReceive(frame, expected, timeoutMs) {
+        calls.push(frame)
+        if (calls.length === 1) {
+          throw new Error('No response from the device. Check it is running Heartwood firmware and not held by another program.')
+        }
+        return inner.transport.sendAndReceive(frame, expected, timeoutMs)
+      },
+    }
+
+    await streamOta(transport, data, {}, signature)
+
+    expect(payloadOf(calls[0]!).length).toBe(100)
+    expect(frameType(calls[1]!)).toBe(FrameType.OTA_BEGIN)
+    expect(payloadOf(calls[1]!).length).toBe(36)
+    expect(frameType(calls.at(-1)!)).toBe(FrameType.OTA_FINISH)
+  })
+
+  it('does not fall back to unsigned on a disconnect', async () => {
+    const signature = new Uint8Array(64).fill(0xab)
+    const calls: Uint8Array[] = []
+    const transport: OtaTransport = {
+      async sendAndReceive(frame) {
+        calls.push(frame)
+        throw new Error('Device disconnected')
+      },
+    }
+    await expect(streamOta(transport, bytes(4096), {}, signature)).rejects.toThrow('Device disconnected')
+    expect(calls).toHaveLength(1) // the retry would go to a dead port
+  })
+
   it('explains a signature rejection in plain language', async () => {
     const signature = new Uint8Array(64).fill(0xab)
     const { transport } = scripted([OtaStatus.ERR_SIG])
