@@ -65,6 +65,7 @@ COMMANDS
   apps revoke <slot>          Revoke a connected app's slot
   logs                        Stream the device log (Ctrl-C to stop)
   firmware update <file.bin>  Update firmware over USB (button approval)
+  key backup                  Make a 24-word backup of an nsec/ncryptsec (offline)
 
 OPTIONS
   --port <path>       Serial port; auto-detected when one signer is present
@@ -81,4 +82,8 @@ OPTIONS
   --version           Show the version
 
 The signer's secrets never travel over this connection. Destructive
-operations require the physical button on the device.`
+operations require the physical button on the device. 'key backup' works
+offline on a key you supply and never opens the device.
+
+Backup and restore guide:
+https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md`

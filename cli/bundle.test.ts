@@ -1,9 +1,10 @@
 // The built bundle, spawned as a user would run it. Hardware-free paths only;
 // the build itself is part of the test (esbuild, ~15ms).
 
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { nip19 } from 'nostr-tools'
 
 const run = promisify(execFile)
 const BUNDLE = 'dist-cli/sapwood.mjs'
@@ -15,6 +16,17 @@ async function sapwood(...args: string[]): Promise<{ code: number; stdout: strin
   } catch (e) {
     const err = e as { code?: number; stdout?: string; stderr?: string }
     return { code: err.code ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' }
+  }
+}
+
+/** Run the bundle with `input` on stdin, synchronously (so stdin gets EOF). */
+function sapwoodStdin(input: string, ...args: string[]): { code: number; stdout: string; stderr: string } {
+  try {
+    const stdout = execFileSync('node', [BUNDLE, ...args], { input, encoding: 'utf8' })
+    return { code: 0, stdout, stderr: '' }
+  } catch (e) {
+    const err = e as { status?: number; stdout?: string; stderr?: string }
+    return { code: err.status ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' }
   }
 }
 
@@ -70,5 +82,38 @@ describe('sapwood bundle', () => {
     const r = await sapwood('ports', '--json')
     expect(r.code).toBe(0)
     expect(Array.isArray(JSON.parse(r.stdout))).toBe(true)
+  })
+
+  it('rejects an unknown key subcommand with exit 2', async () => {
+    const r = await sapwood('key', 'wat')
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('usage: sapwood key backup')
+  })
+
+  it('makes a 24-word key backup from an nsec on stdin, no device', () => {
+    const secret = new Uint8Array(32)
+    secret[31] = 1
+    const nsec = nip19.nsecEncode(secret)
+    const r = sapwoodStdin(`${nsec}\n`, 'key', 'backup')
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('24-word key backup')
+    expect(r.stdout).toContain('diesel')
+  })
+
+  it('emits the words as JSON on request', () => {
+    const secret = new Uint8Array(32)
+    secret[31] = 1
+    const nsec = nip19.nsecEncode(secret)
+    const r = sapwoodStdin(`${nsec}\n`, 'key', 'backup', '--json')
+    expect(r.code).toBe(0)
+    const parsed = JSON.parse(r.stdout) as { words: string[] }
+    expect(parsed.words).toHaveLength(24)
+    expect(parsed.words[23]).toBe('diesel')
+  })
+
+  it('fails clearly when no key is piped in', () => {
+    const r = sapwoodStdin('', 'key', 'backup')
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('No key given')
   })
 })

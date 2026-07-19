@@ -15,6 +15,19 @@ import {
 } from '../src/lib/frame.js'
 import type { Frame, FrameTypeValue } from '../src/lib/frame.js'
 import type { ConnectSlot, MasterInfo } from '../src/lib/types.js'
+import {
+  isValidNsec,
+  isValidNcryptsec,
+  isValidPhrase,
+  isKeyBackupCandidate,
+  keyToWords,
+  decryptNcryptsec,
+} from '../src/lib/restore.js'
+import { decodeNsec, zeroize } from '../src/lib/provision.js'
+
+/** The backup and restore guide, printed so CLI users can find the full story. */
+export const BACKUP_GUIDE_URL =
+  'https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md'
 
 /** The slice of the transport commands need (NodeSerialTransport satisfies it). */
 export interface CommandTransport {
@@ -334,6 +347,73 @@ export async function cmdIdentitiesRemove(
       '  The signer is rebooting to reload its state. Remaining identities renumber to close the gap.',
     ],
   }
+}
+
+/** Format a 24-word key backup: numbered words, then the same safety and
+ *  restore guidance the web import flow gives. Pure; no device involved. */
+function keyBackupResult(words: string): CommandResult {
+  const list = words.split(' ')
+  const numbered = list.map((w, i) => `  ${String(i + 1).padStart(2)}  ${w}`)
+  return {
+    data: { words: list },
+    lines: [
+      '24-word key backup. Write these down in order and keep them offline:',
+      '',
+      ...numbered,
+      '',
+      'These words are the key itself, unencrypted: anyone who has them controls the identity.',
+      'To restore, paste them into Sapwood (Restore a key I already have, marked as a key',
+      'backup) or into heartwood-provision.',
+      `Guide: ${BACKUP_GUIDE_URL}`,
+    ],
+  }
+}
+
+/**
+ * Make a 24-word BIP-39 key backup of a key you already hold: an `nsec1…`, or a
+ * password-encrypted `ncryptsec1…`. Offline and device-free, the same maths the
+ * web import screen runs — the words are the key's own bytes, so decoding them
+ * later restores the identical npub. A key already on a signer can never be read
+ * back out, so this only ever operates on a secret you supply here.
+ */
+export function cmdKeyBackup(secretInput: string, password?: string): CommandResult {
+  const secret = secretInput.trim()
+  if (!secret) {
+    throw new CommandError('No key given. Pipe an nsec or ncryptsec on stdin, or run it interactively.')
+  }
+  if (isValidNsec(secret)) {
+    const bytes = decodeNsec(secret)
+    try {
+      return keyBackupResult(keyToWords(bytes))
+    } finally {
+      zeroize(bytes)
+    }
+  }
+  if (isValidNcryptsec(secret)) {
+    if (!password) {
+      throw new CommandError('That is an encrypted key (ncryptsec). Provide its password: interactively, or as the second line of stdin.')
+    }
+    let bytes: Uint8Array
+    try {
+      bytes = decryptNcryptsec(secret, password)
+    } catch {
+      throw new CommandError('That password did not unlock the encrypted key. Check it and try again.')
+    }
+    try {
+      return keyBackupResult(keyToWords(bytes))
+    } finally {
+      zeroize(bytes)
+    }
+  }
+  // Words the owner already holds are already a backup; say so rather than
+  // re-encoding or, worse, deriving a different key from them.
+  if (isKeyBackupCandidate(secret)) {
+    throw new CommandError('That is already a 24-word key backup: it is the key itself, so keep it as is.')
+  }
+  if (isValidPhrase(secret)) {
+    throw new CommandError('That is a recovery phrase, which is already your backup: keep the words safe. This command backs up an nsec or ncryptsec.')
+  }
+  throw new CommandError('Provide an nsec (nsec1…) or an encrypted key (ncryptsec1…).')
 }
 
 export async function cmdAppsRevoke(

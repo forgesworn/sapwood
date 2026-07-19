@@ -18,11 +18,13 @@ import {
   cmdDevice,
   cmdIdentities,
   cmdIdentitiesRemove,
+  cmdKeyBackup,
   findRemovalTarget,
   parseSignature,
 } from './commands.js'
 import type { CommandResult } from './commands.js'
 import { OtaError, streamOta } from '../src/lib/ota.js'
+import { isValidNcryptsec } from '../src/lib/restore.js'
 
 declare const __SAPWOOD_VERSION__: string
 const VERSION = typeof __SAPWOOD_VERSION__ === 'string' ? __SAPWOOD_VERSION__ : 'dev'
@@ -68,6 +70,79 @@ async function cmdLogs(transport: NodeSerialTransport, json: boolean): Promise<n
       void transport.close().finally(() => process.exit(0))
     })
   })
+}
+
+/** Read all of stdin to a string. Used when a key is piped in, not typed. */
+async function readAllStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+/** Prompt on stderr and read a line without echoing it (for a key password).
+ *  Falls back to a plain readline when stdin is not a TTY. Control keys are
+ *  matched by code point so no raw control characters live in this source. */
+function questionHidden(query: string): Promise<string> {
+  const stdin = process.stdin
+  if (!stdin.isTTY) {
+    const rl = createInterface({ input: stdin, output: process.stderr })
+    return rl.question(query).finally(() => rl.close())
+  }
+  return new Promise<string>((resolve) => {
+    process.stderr.write(query)
+    const prevRaw = stdin.isRaw
+    stdin.setRawMode(true)
+    stdin.resume()
+    let value = ''
+    const finish = (): void => {
+      stdin.setRawMode(prevRaw)
+      stdin.pause()
+      stdin.removeListener('data', onData)
+      process.stderr.write('\n')
+    }
+    const onData = (buf: Buffer): void => {
+      for (const ch of buf.toString('utf8')) {
+        const code = ch.charCodeAt(0)
+        if (code === 13 || code === 10 || code === 4) {
+          finish() // CR, LF, Ctrl-D: submit
+          resolve(value)
+          return
+        } else if (code === 3) {
+          finish() // Ctrl-C: abort
+          process.exit(130)
+        } else if (code === 127 || code === 8) {
+          value = value.slice(0, -1) // DEL / backspace
+        } else if (code >= 32) {
+          value += ch // printable
+        }
+      }
+    }
+    stdin.on('data', onData)
+  })
+}
+
+/** `key backup`: turn an nsec/ncryptsec into a 24-word key backup. Offline; the
+ *  secret is read from stdin (piped) or a prompt, never from argv, so it does
+ *  not land in shell history or `ps`. The device is never opened. */
+async function runKeyBackup(json: boolean): Promise<never> {
+  let secret: string
+  let password: string | undefined
+  if (process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stderr })
+    secret = (await rl.question('Paste an nsec or an encrypted key (ncryptsec): ')).trim()
+    rl.close()
+    if (isValidNcryptsec(secret)) password = await questionHidden('Password for the encrypted key: ')
+  } else {
+    const lines = (await readAllStdin()).split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
+    secret = lines[0] ?? ''
+    password = lines[1]
+  }
+  try {
+    printResult(cmdKeyBackup(secret, password), json)
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e))
+  }
+  process.exit(0)
 }
 
 async function cmdFirmwareUpdate(
@@ -142,6 +217,16 @@ async function main(): Promise<void> {
     } else {
       process.stdout.write(`${ports.map((p) => `${p.path}${p.manufacturer ? `  (${p.manufacturer})` : ''}`).join('\n')}\n`)
     }
+    return
+  }
+
+  // `key backup` is offline crypto on a key you supply — it never opens the
+  // port, so it is handled here, before any device work.
+  if (command === 'key') {
+    if (rest[0] !== 'backup' || rest.length > 1) {
+      fail('usage: sapwood key backup   (reads an nsec or ncryptsec on stdin)', 2)
+    }
+    await runKeyBackup(json)
     return
   }
 

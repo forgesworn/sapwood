@@ -48,6 +48,10 @@ The offer only appears while you are importing. Once a key is on the signer it c
 never be read back out, so if you skip the backup the only way to make one later is
 to re-import the key from its original source.
 
+You can also make this backup offline, from a key you already hold, without a
+device: pipe it into the command line console, `... | sapwood key backup`. It runs
+the same encoding and never opens the signer.
+
 ## 2. The operator key
 
 The operator key is separate from, and lower-stakes than, the identity key. It is

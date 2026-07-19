@@ -49,6 +49,10 @@ signer it can never be read back out, over any interface. That is the security
 model, not a missing feature: if you skipped the backup, the only way to make
 one is to re-import the key from wherever it came from.
 
+At the command line, the same conversion is available offline for a key you
+already hold: `... | sapwood key backup` reads an `nsec` (or an `ncryptsec` and
+its password) on stdin and prints the 24 words. It never touches a device.
+
 ## Restoring
 
 Three interchangeable ways, all producing the same npub:

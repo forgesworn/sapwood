@@ -5,6 +5,7 @@ import { FrameType, parseFrame } from '../src/lib/frame.js'
 import type { Frame, FrameTypeValue } from '../src/lib/frame.js'
 import type { ConnectSlot, MasterInfo } from '../src/lib/types.js'
 import {
+  BACKUP_GUIDE_URL,
   CommandError,
   cmdApps,
   cmdAppsRevoke,
@@ -12,10 +13,13 @@ import {
   cmdDevice,
   cmdIdentities,
   cmdIdentitiesRemove,
+  cmdKeyBackup,
   findRemovalTarget,
   parseSignature,
 } from './commands.js'
 import type { CommandTransport } from './commands.js'
+import { nip19 } from 'nostr-tools'
+import { encrypt as nip49Encrypt } from 'nostr-tools/nip49'
 
 const enc = new TextEncoder()
 const O = { timeoutMs: 1_000 }
@@ -317,5 +321,61 @@ describe('parseSignature', () => {
   it('rejects anything else, naming the source', () => {
     expect(() => parseSignature(new TextEncoder().encode('not a signature'), 'x.sig'))
       .toThrow(/x\.sig/)
+  })
+})
+
+describe('cmdKeyBackup', () => {
+  // The scalar-1 key is the frozen cross-implementation vector: it encodes as
+  // 23 'abandon' and 'diesel' (see docs/key-backup.md).
+  const scalarOne = new Uint8Array(32)
+  scalarOne[31] = 1
+  const nsec = nip19.nsecEncode(scalarOne)
+
+  it('turns an nsec into a 24-word key backup', () => {
+    const r = cmdKeyBackup(nsec)
+    const words = (r.data as { words: string[] }).words
+    expect(words).toHaveLength(24)
+    expect(words.slice(0, 23).every((w) => w === 'abandon')).toBe(true)
+    expect(words[23]).toBe('diesel')
+  })
+
+  it('prints the safety note and the guide link', () => {
+    const r = cmdKeyBackup(nsec)
+    expect(r.lines.join('\n')).toContain('the key itself, unencrypted')
+    expect(r.lines.at(-1)).toContain(BACKUP_GUIDE_URL)
+  })
+
+  it('decrypts an ncryptsec with its password to the same words', () => {
+    const ncryptsec = nip49Encrypt(scalarOne, 'correct horse')
+    const r = cmdKeyBackup(ncryptsec, 'correct horse')
+    expect((r.data as { words: string[] }).words[23]).toBe('diesel')
+  })
+
+  it('demands a password for an encrypted key', () => {
+    const ncryptsec = nip49Encrypt(scalarOne, 'correct horse')
+    expect(() => cmdKeyBackup(ncryptsec)).toThrow(/password/)
+  })
+
+  it('rejects a wrong password', () => {
+    const ncryptsec = nip49Encrypt(scalarOne, 'correct horse')
+    expect(() => cmdKeyBackup(ncryptsec, 'wrong')).toThrow(CommandError)
+  })
+
+  it('refuses empty input', () => {
+    expect(() => cmdKeyBackup('   ')).toThrow(/No key/)
+  })
+
+  it('tells the owner a 24-word backup is already a backup', () => {
+    const words = (cmdKeyBackup(nsec).data as { words: string[] }).words.join(' ')
+    expect(() => cmdKeyBackup(words)).toThrow(/already a 24-word key backup/)
+  })
+
+  it('tells the owner a recovery phrase is already a backup', () => {
+    const phrase = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    expect(() => cmdKeyBackup(phrase)).toThrow(/recovery phrase/)
+  })
+
+  it('rejects input that is neither key nor phrase', () => {
+    expect(() => cmdKeyBackup('just some text')).toThrow(/nsec/)
   })
 })
