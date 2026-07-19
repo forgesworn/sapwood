@@ -16,6 +16,8 @@ import {
   buildPatchNetConfig,
   buildSetOperator,
   buildWifiScan,
+  buildBackupExportRequest,
+  buildBackupImportRequest,
 } from './frame.js'
 
 describe('crc32', () => {
@@ -273,5 +275,27 @@ describe('wifi scan frame', () => {
     const frame = parseFrame(bytes)
     expect(frame.type).toBe(FrameType.WIFI_SCAN_REQUEST)
     expect(frame.payload.length).toBe(0)
+  })
+})
+
+describe('backup frames', () => {
+  it('BACKUP frame type values match Rust 0x50-0x53', () => {
+    expect(FrameType.BACKUP_EXPORT_REQUEST).toBe(0x50)
+    expect(FrameType.BACKUP_EXPORT_RESPONSE).toBe(0x51)
+    expect(FrameType.BACKUP_IMPORT_REQUEST).toBe(0x52)
+    expect(FrameType.BACKUP_IMPORT_RESPONSE).toBe(0x53)
+  })
+
+  it('buildBackupExportRequest is an empty-payload 0x50 frame', () => {
+    const frame = parseFrame(buildBackupExportRequest())
+    expect(frame.type).toBe(FrameType.BACKUP_EXPORT_REQUEST)
+    expect(frame.payload.length).toBe(0)
+  })
+
+  it('buildBackupImportRequest carries the payload JSON as a 0x52 frame', () => {
+    const json = '{"created_at":0,"masters":[]}'
+    const frame = parseFrame(buildBackupImportRequest(json))
+    expect(frame.type).toBe(FrameType.BACKUP_IMPORT_REQUEST)
+    expect(new TextDecoder().decode(frame.payload)).toBe(json)
   })
 })

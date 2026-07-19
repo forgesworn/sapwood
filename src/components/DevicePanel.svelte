@@ -12,6 +12,7 @@
   import { describeReset, formatUptime } from '../lib/reset-reason.js'
   import Connectivity from './Connectivity.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
+  import Backup from './Backup.svelte'
   import PasswordReveal from './PasswordReveal.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
 
@@ -326,6 +327,11 @@
       {#if secretStatus}<p class="hint-sm status">{secretStatus}</p>{/if}
     {/if}
   </section>
+
+  <!-- Backup and restore app pairings (USB only) -->
+  {#if overUsb}
+    <Backup />
+  {/if}
 
   <!-- Bridge (bridge mode only) -->
   {#if overBridge && device.bridgeInfo}

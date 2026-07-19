@@ -8,7 +8,7 @@ Two surfaces: a guided **Home** (signer card, connect-an-app flow, connected app
 
 - **Apps** -- create connections, approve/revoke apps, per-kind signing permissions (one surface for USB, WiFi and bridge transports); when the signer holds more than one identity, an identity picker chooses which one new connections bind to
 - **Identity** -- identities (master slots) on the signer, add-identity (provision, including derive-by-name: the signer derives the nsec-tree child from a master it already holds via DERIVE_IDENTITY 0x60, no secret in the browser; browser-side phrase/nsec derivation is the fallback for older firmware), identity-card sync, NIP-05 short-address generator (nostr.json for bunker discovery), operator key, profile relays
-- **Device** -- connection info, network mode, OTA firmware updates (SHA-256 verified), security (boot PIN, bridge secret), bridge control, danger zone (disconnect all apps, factory reset -- physical button confirm)
+- **Device** -- connection info, network mode, OTA firmware updates (SHA-256 verified), security (boot PIN, bridge secret), backup and restore (app pairings + bridge secret to an encrypted file, USB only, button-confirmed), bridge control, danger zone (disconnect all apps, factory reset -- physical button confirm)
 - **Logs** -- real-time ESP-IDF log output from the device
 
 UI copy says "apps" and "identities"; code and the wire protocol keep the frame/struct names (clients, masters, slots). Shared design primitives (buttons, cards, fields, tags) live in `src/app.css`; components keep only layout in scoped styles.
@@ -39,7 +39,7 @@ The 19 frame.test.ts tests verify byte-level compatibility with the Rust impleme
 
 ### Command line (`cli/`)
 
-`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, identities remove, derive, apps, apps revoke, logs, firmware update, key backup (offline nsec/ncryptsec -> 24 words, no device), operator new / operator restore (offline operator-key mint/recover, no device). The pure operator-key derivation is shared with the browser keyring in `src/lib/operator-key.ts`. `--json` everywhere. Same security model: management frames only, button gates destructive operations.
+`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, identities remove, derive, apps, apps revoke, logs, firmware update, key backup (offline nsec/ncryptsec -> 24 words, no device), operator new / operator restore (offline operator-key mint/recover, no device), backup export / backup import (app-pairing backup/restore to an encrypted file, button-confirmed). The pure operator-key derivation is shared with the browser keyring in `src/lib/operator-key.ts`; the backup engine + encrypted envelope (Argon2id + XChaCha20-Poly1305) is shared with the web UI in `src/lib/backup.ts`. `--json` everywhere. Same security model: management frames only, button gates destructive operations.
 
 ## Build & run
 
@@ -119,6 +119,10 @@ BLE connectivity planned for portable mode (child key only, short range). Additi
 | OTA_CHUNK | 0x31 | host -> device | offset_u32_be + data |
 | OTA_FINISH | 0x32 | host -> device | (empty) |
 | OTA_STATUS | 0x33 | device -> host | status_byte |
+| BACKUP_EXPORT_REQUEST | 0x50 | host -> device | (empty, requires button; device replies 0x51 with JSON `BackupPayload`) |
+| BACKUP_EXPORT_RESPONSE | 0x51 | device -> host | JSON `BackupPayload` (masters + connection slots + bridge secret) |
+| BACKUP_IMPORT_REQUEST | 0x52 | host -> device | JSON `BackupPayload` (masters pre-filtered to those the device holds; requires button) |
+| BACKUP_IMPORT_RESPONSE | 0x53 | device -> host | 1 byte: 0x01 ok / 0x00 fail |
 
 ## Grant status
 

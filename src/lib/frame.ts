@@ -64,6 +64,10 @@ export const FrameType = {
   SET_NET_CONFIG:        0x54,
   WIFI_SCAN_REQUEST:     0x55,
   WIFI_SCAN_RESPONSE:    0x56,
+  BACKUP_EXPORT_REQUEST:  0x50,
+  BACKUP_EXPORT_RESPONSE: 0x51,
+  BACKUP_IMPORT_REQUEST:  0x52,
+  BACKUP_IMPORT_RESPONSE: 0x53,
 } as const
 
 export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType]
@@ -367,4 +371,26 @@ export function buildConnSlotUri(masterSlot: number, slotIndex: number, relays: 
   payload[1] = slotIndex
   payload.set(relayBytes, 2)
   return buildFrame(FrameType.CONNSLOT_URI, payload)
+}
+
+// --- Connection-slot backup (mirrors firmware/src/backup.rs) ---
+
+/**
+ * BACKUP_EXPORT_REQUEST (0x50, empty payload). The device shows an OLED confirm
+ * and, on a physical button-hold, replies BACKUP_EXPORT_RESPONSE (0x51) with the
+ * full backup JSON (all masters' connection slots plus the bridge secret). It
+ * NACKs if the button is not pressed.
+ */
+export function buildBackupExportRequest(): Uint8Array {
+  return buildFrame(FrameType.BACKUP_EXPORT_REQUEST)
+}
+
+/**
+ * BACKUP_IMPORT_REQUEST (0x52). Payload: the backup payload as JSON, with masters
+ * pre-filtered to those the device currently holds. The device confirms on the
+ * button and replies BACKUP_IMPORT_RESPONSE (0x53) with [0x01] on success or
+ * [0x00] on failure/refusal.
+ */
+export function buildBackupImportRequest(payloadJson: string): Uint8Array {
+  return buildFrame(FrameType.BACKUP_IMPORT_REQUEST, new TextEncoder().encode(payloadJson))
 }

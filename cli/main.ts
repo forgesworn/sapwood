@@ -5,7 +5,7 @@
 // security model applies — no secrets on this side of the cable, destructive
 // operations gated by the device's physical button.
 
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { createInterface } from 'node:readline/promises'
 import { HELP, UsageError, intFlag, parseArgs } from './args.js'
@@ -21,12 +21,20 @@ import {
   cmdKeyBackup,
   cmdOperatorNew,
   cmdOperatorRestore,
+  deviceMastersForBackup,
   findRemovalTarget,
   parseSignature,
 } from './commands.js'
 import type { CommandResult } from './commands.js'
 import { OtaError, streamOta } from '../src/lib/ota.js'
 import { isValidNcryptsec } from '../src/lib/restore.js'
+import {
+  decryptBackup,
+  encryptBackup,
+  exportBackup,
+  importBackup,
+  parseBackupEnvelope,
+} from '../src/lib/backup.js'
 
 declare const __SAPWOOD_VERSION__: string
 const VERSION = typeof __SAPWOOD_VERSION__ === 'string' ? __SAPWOOD_VERSION__ : 'dev'
@@ -164,6 +172,56 @@ async function runOperatorRestore(json: boolean): Promise<never> {
     fail(e instanceof Error ? e.message : String(e))
   }
   process.exit(0)
+}
+
+/** Read a backup passphrase. Interactive prompts (twice, to confirm, when
+ *  `confirm`); non-interactive reads it from the first line of stdin. */
+async function readBackupPassphrase(confirm: boolean): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const passphrase = (await readAllStdin()).split(/\r?\n/)[0]?.trim() ?? ''
+    if (!passphrase) fail('a passphrase is required (pipe it on stdin, or run interactively)')
+    return passphrase
+  }
+  const passphrase = await questionHidden(confirm ? 'Passphrase to encrypt the backup: ' : 'Backup passphrase: ')
+  if (!passphrase) fail('a passphrase is required')
+  if (confirm && (await questionHidden('Confirm passphrase: ')) !== passphrase) fail('passphrases do not match')
+  return passphrase
+}
+
+/** `backup export`: read the signer's connection slots (button-confirmed on the
+ *  device), encrypt them under a passphrase, and write the file. */
+async function runBackupExport(transport: NodeSerialTransport, outPath: string | undefined, json: boolean): Promise<void> {
+  const passphrase = await readBackupPassphrase(true)
+  process.stderr.write('Confirm the export on the signer: press its button when prompted.\n')
+  const payload = await exportBackup(transport)
+  const envelope = encryptBackup(payload, passphrase)
+  const file = outPath ?? `heartwood-backup-${payload.device_id.slice(0, 8) || 'signer'}.json`
+  await writeFile(file, `${JSON.stringify(envelope, null, 2)}\n`)
+  const slots = payload.masters.reduce((total, m) => total + m.connection_slots.length, 0)
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ file, masters: payload.masters.length, slots })}\n`)
+  } else {
+    process.stdout.write(`✓ Encrypted backup written to ${file}. ${payload.masters.length} identities, ${slots} app slots.\n`)
+  }
+}
+
+/** `backup import <file>`: decrypt a backup, match it against the signer's
+ *  current identities, and restore the matching slots (button-confirmed). */
+async function runBackupImport(transport: NodeSerialTransport, file: string, json: boolean): Promise<void> {
+  const envelope = parseBackupEnvelope(await readFile(file, 'utf8'))
+  const passphrase = await readBackupPassphrase(false)
+  const payload = decryptBackup(envelope, passphrase)
+  const masters = await deviceMastersForBackup(transport, { timeoutMs: 10_000 })
+  process.stderr.write('Confirm the restore on the signer: press its button when prompted.\n')
+  const result = await importBackup(transport, payload, masters)
+  if (json) {
+    process.stdout.write(`${JSON.stringify(result)}\n`)
+  } else {
+    process.stdout.write(`✓ Restored ${result.restored} app slots.\n`)
+    for (const m of result.masters) {
+      process.stdout.write(`  ${m.matched ? '✓' : '·'} ${m.label}: ${m.slots} slot${m.slots === 1 ? '' : 's'}${m.matched ? '' : ' (not on this signer, skipped)'}\n`)
+    }
+  }
 }
 
 async function cmdFirmwareUpdate(
@@ -309,6 +367,12 @@ async function main(): Promise<void> {
     case 'firmware':
       if (rest[0] !== 'update' || !rest[1]) fail('usage: sapwood firmware update <file.bin> [--signature <path>]', 2)
       break
+    case 'backup':
+      if (rest[0] !== 'export' && rest[0] !== 'import') {
+        fail('usage: sapwood backup export [--out <file>]   |   sapwood backup import <file>', 2)
+      }
+      if (rest[0] === 'import' && !rest[1]) fail('usage: sapwood backup import <file>', 2)
+      break
     default:
       fail(`unknown command '${command}'. Try: sapwood --help`, 2)
   }
@@ -366,6 +430,13 @@ async function main(): Promise<void> {
         await cmdFirmwareUpdate(transport, rest[1]!, sig, json)
         break
       }
+      case 'backup':
+        if (rest[0] === 'export') {
+          await runBackupExport(transport, typeof flags['out'] === 'string' ? flags['out'] : undefined, json)
+        } else {
+          await runBackupImport(transport, rest[1]!, json)
+        }
+        break
     }
   } catch (e) {
     if (e instanceof CommandError || e instanceof OtaError || e instanceof UsageError) {

@@ -16,6 +16,7 @@ import {
   cmdKeyBackup,
   cmdOperatorNew,
   cmdOperatorRestore,
+  deviceMastersForBackup,
   findRemovalTarget,
   parseSignature,
 } from './commands.js'
@@ -422,5 +423,23 @@ describe('operator commands', () => {
 
   it('refuses empty input', () => {
     expect(() => cmdOperatorRestore('   ')).toThrow(/No phrase/)
+  })
+})
+
+describe('deviceMastersForBackup', () => {
+  it('returns hex pubkeys and labels, excluding personas', async () => {
+    const pub0 = 'aa'.repeat(32)
+    const pub1 = 'bb'.repeat(32)
+    const masters = [
+      { slot: 0, label: 'Personal', npub: nip19.npubEncode(pub0), apps: 2 },
+      { slot: 1, label: 'Work', npub: nip19.npubEncode(pub1) },
+      { slot: 0, label: 'persona', npub: nip19.npubEncode(pub0), persona: true },
+    ]
+    const t = fakeTransport({ [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, masters) })
+    const result = await deviceMastersForBackup(t, O)
+    expect(result).toEqual([
+      { pubkeyHex: pub0, label: 'Personal' },
+      { pubkeyHex: pub1, label: 'Work' },
+    ])
   })
 })

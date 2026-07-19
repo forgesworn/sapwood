@@ -15,8 +15,10 @@ different way:
 | **Identity key** (imported) | a 24-word [key backup](key-backup.md) of an `nsec`/`ncryptsec` you brought in | choosing **Back up this key as 24 words** while importing | pasting the 24 words (marked as a key backup), or the original `nsec`/`ncryptsec` | if you skipped it, re-import the key from wherever it came from |
 | **Operator key** | this browser's authority to manage the signer over WiFi | writing down its 12-word recovery phrase (Home nudge, or Identity › Operator key) | pasting the phrase into Identity › Operator key › **Restore key** | you cannot manage the signer remotely until you rotate the operator over USB |
 
-A fourth case, **derived (named) identities**, needs no secret of its own: see
-[below](#3-derived-named-identities).
+Two more things round it out, covered below: **derived (named) identities**, which
+need no secret of their own ([section 3](#3-derived-named-identities)), and your
+**app pairings**, which can be backed up to an encrypted file
+([section 4](#4-connected-apps-app-pairings)).
 
 ## 1. The identity key
 
@@ -97,16 +99,35 @@ master). Keep it written down alongside the master's recovery phrase; both are
 needed to recreate the identity. Restore the master, derive the same name, and the
 same npub returns.
 
+## 4. Connected apps (app pairings)
+
+Each app you connect gets its own **connection slot** on the signer: a random
+per-app secret plus its signing policy (allowed methods, kinds, auto-approve).
+These live only in the device's storage, so a factory reset or a reflash wipes
+them and every app has to pair again. Unlike the keys above, the pairings **can**
+be backed up and restored.
+
+Back it up: **Device › Backup and restore › Export a backup** (USB only). You set a
+passphrase; the signer asks you to confirm on its button, then Sapwood downloads an
+**encrypted** file (Argon2id + XChaCha20-Poly1305). The file holds the app secrets
+and the bridge secret, so it is only ever written encrypted; keep the file and its
+passphrase together, and safe. Losing the passphrase makes the file unrecoverable.
+
+Restore it: re-provision your identities first (a backup only restores pairings for
+identities the signer already holds), then **Device › Backup and restore › Restore a
+backup**. Pick the file, enter the passphrase, and Sapwood previews which identities
+match before you confirm the restore on the signer's button.
+
+At the command line: `sapwood backup export` writes the encrypted file, and
+`sapwood backup import <file>` restores it. Both are button-confirmed on the device.
+
 ## What is not backed up
 
-- **Connected apps.** Per-app connection slots and their signing policies live only
-  on the device. A factory reset or a reflash wipes them, and each app must connect
-  again. Backing them up is not yet available in Sapwood; keep a note of which apps
-  you had connected.
-- **Device settings.** The boot PIN and bridge secret are local device state, not
-  part of any key backup.
-- **Anything, after the fact.** Secrets cannot be read back off the signer over any
-  interface. Every backup above is made at creation or import time. Plan for it then.
+- **Device settings.** The boot PIN is local device state and is not part of any
+  backup. (The bridge secret *is* included in the app-pairing backup above.)
+- **Anything, after the fact.** Key secrets cannot be read back off the signer over
+  any interface. Every key backup above is made at creation or import time. Plan for
+  it then. (App-pairing backup is the exception: it can be taken any time over USB.)
 
 ## Quick reference: where each control lives
 
@@ -115,6 +136,8 @@ same npub returns.
 | See the 12 words for a **created** identity | the device's own screen, at creation |
 | Make a **24-word backup** of a key you are importing | the "Check the address" step, while importing |
 | See or copy the **operator** recovery phrase | Home backup card, or Identity › Operator key › Reveal |
+| Back up **connected apps** | Device › Backup and restore › Export a backup |
 | **Restore an identity** | Home › Restore a key I already have |
 | **Restore the operator key** | Identity › Operator key › Restore key |
+| **Restore connected apps** | Device › Backup and restore › Restore a backup |
 | Recreate a **named** identity | Identity › add identity, same master, same name |

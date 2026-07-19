@@ -4,7 +4,7 @@
 
 export class UsageError extends Error {}
 
-const VALUE_FLAGS = new Set(['port', 'parent', 'identity', 'signature', 'timeout', 'baud'])
+const VALUE_FLAGS = new Set(['port', 'parent', 'identity', 'signature', 'timeout', 'baud', 'out'])
 const BOOL_FLAGS = new Set(['json', 'all', 'help', 'version', 'yes'])
 
 export interface ParsedArgs {
@@ -68,6 +68,8 @@ COMMANDS
   key backup                  Make a 24-word backup of an nsec/ncryptsec (offline)
   operator new                Mint an operator (management) key: phrase, pubkey, secret
   operator restore            Recover the operator key from a phrase (offline)
+  backup export               Save the signer's app pairings to an encrypted file
+  backup import <file>        Restore app pairings from an encrypted backup file
 
 OPTIONS
   --port <path>       Serial port; auto-detected when one signer is present
@@ -75,6 +77,7 @@ OPTIONS
   --parent <slot>     Parent identity slot for derive (default: the only master)
   --signature <path>  ed25519 release signature for firmware update
                       (<file.bin>.sig is picked up automatically)
+  --out <path>        backup export: file to write (default heartwood-backup-*.json)
   --timeout <ms>      Round-trip timeout (default 10000)
   --baud <rate>       Serial baud rate (default 115200)
   --all               ports: include non-signer serial ports

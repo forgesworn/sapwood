@@ -30,6 +30,8 @@ import {
   normaliseMnemonic,
   operatorFromMnemonic,
 } from '../src/lib/operator-key.js'
+import { nip19 } from 'nostr-tools'
+import type { DeviceMaster } from '../src/lib/backup.js'
 
 /** The backup and restore guide, printed so CLI users can find the full story. */
 export const BACKUP_GUIDE_URL =
@@ -420,6 +422,19 @@ export function cmdKeyBackup(secretInput: string, password?: string): CommandRes
     throw new CommandError('That is a recovery phrase, which is already your backup: keep the words safe. This command backs up an nsec or ncryptsec.')
   }
   throw new CommandError('Provide an nsec (nsec1…) or an encrypted key (ncryptsec1…).')
+}
+
+/** The provisioned masters as backup-restore match targets: hex pubkey + label.
+ *  Personas share their owner's slot table, so they are excluded. */
+export async function deviceMastersForBackup(t: CommandTransport, o: CommandOptions): Promise<DeviceMaster[]> {
+  const masters = await fetchMasters(t, o)
+  return masters
+    .filter((m) => !m.persona)
+    .map((m) => {
+      const decoded = nip19.decode(m.npub)
+      if (decoded.type !== 'npub') throw new CommandError(`Signer returned a non-npub identity: ${m.npub}`)
+      return { pubkeyHex: decoded.data, label: m.label }
+    })
 }
 
 /** Shared tail for the operator commands: where the pubkey and secret go. */

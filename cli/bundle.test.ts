@@ -145,4 +145,16 @@ describe('sapwood bundle', () => {
     expect(r.code).toBe(1)
     expect(r.stderr).toContain('No phrase given')
   })
+
+  it('rejects an unknown backup subcommand with exit 2', async () => {
+    const r = await sapwood('backup', 'wat')
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('usage: sapwood backup')
+  })
+
+  it('demands a file for backup import', async () => {
+    const r = await sapwood('backup', 'import')
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('usage: sapwood backup import')
+  })
 })
