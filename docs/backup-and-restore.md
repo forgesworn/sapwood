@@ -75,6 +75,11 @@ field. After restoring, disconnect and reconnect over WiFi. This is also the fix
 means this browser holds a different operator key than the one the signer was
 flashed with.
 
+At the command line, `sapwood operator new` mints an operator key (phrase, pubkey
+and secret) and `sapwood operator restore` recovers it from the phrase. Both are
+offline. This suits a headless bridge host: the pubkey goes into the signer at flash
+time, and the secret into the bridge daemon as `NOSTR_SECRET_KEY`.
+
 > Operators created before recovery phrases existed are a raw 64-hex secret with no
 > phrase. They keep working, but there is nothing to write down; back up the 64-hex
 > secret instead, or **Regenerate** to a phrase-backed key (which needs a re-flash to

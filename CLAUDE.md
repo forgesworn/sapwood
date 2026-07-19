@@ -39,7 +39,7 @@ The 19 frame.test.ts tests verify byte-level compatibility with the Rust impleme
 
 ### Command line (`cli/`)
 
-`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, identities remove, derive, apps, apps revoke, logs, firmware update, key backup (offline nsec/ncryptsec -> 24 words, no device). `--json` everywhere. Same security model: management frames only, button gates destructive operations.
+`sapwood` — the console as a cross-platform CLI (Linux/macOS/Windows, Node 20+) over node-serialport. Shares `src/lib` (frame, frame-stream, pacing, ota, types); its own transport is `cli/transport.ts`, commands in `cli/commands.ts` (pure, tested against a fake transport). Build with `npm run build:cli` (esbuild bundle to `dist-cli/sapwood.mjs`, serialport external), typecheck with `npm run check:cli`. Commands: ports, device, identities, identities remove, derive, apps, apps revoke, logs, firmware update, key backup (offline nsec/ncryptsec -> 24 words, no device), operator new / operator restore (offline operator-key mint/recover, no device). The pure operator-key derivation is shared with the browser keyring in `src/lib/operator-key.ts`. `--json` everywhere. Same security model: management frames only, button gates destructive operations.
 
 ## Build & run
 

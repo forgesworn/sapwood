@@ -19,6 +19,8 @@ import {
   cmdIdentities,
   cmdIdentitiesRemove,
   cmdKeyBackup,
+  cmdOperatorNew,
+  cmdOperatorRestore,
   findRemovalTarget,
   parseSignature,
 } from './commands.js'
@@ -145,6 +147,25 @@ async function runKeyBackup(json: boolean): Promise<never> {
   process.exit(0)
 }
 
+/** `operator restore`: derive the operator key from a recovery phrase read on
+ *  stdin (piped) or a prompt, never from argv. Offline; no device is opened. */
+async function runOperatorRestore(json: boolean): Promise<never> {
+  let phrase: string
+  if (process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stderr })
+    phrase = (await rl.question('Paste the operator recovery phrase: ')).trim()
+    rl.close()
+  } else {
+    phrase = (await readAllStdin()).trim()
+  }
+  try {
+    printResult(cmdOperatorRestore(phrase), json)
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e))
+  }
+  process.exit(0)
+}
+
 async function cmdFirmwareUpdate(
   transport: NodeSerialTransport,
   file: string,
@@ -228,6 +249,20 @@ async function main(): Promise<void> {
     }
     await runKeyBackup(json)
     return
+  }
+
+  // `operator` derives the management key offline: `new` mints one, `restore`
+  // recovers it from a phrase. Neither opens the device.
+  if (command === 'operator') {
+    if (rest[0] === 'new' && rest.length === 1) {
+      printResult(cmdOperatorNew(), json)
+      return
+    }
+    if (rest[0] === 'restore' && rest.length === 1) {
+      await runOperatorRestore(json)
+      return
+    }
+    fail('usage: sapwood operator new   |   sapwood operator restore', 2)
   }
 
   let timeoutMs: number

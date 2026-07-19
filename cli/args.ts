@@ -66,6 +66,8 @@ COMMANDS
   logs                        Stream the device log (Ctrl-C to stop)
   firmware update <file.bin>  Update firmware over USB (button approval)
   key backup                  Make a 24-word backup of an nsec/ncryptsec (offline)
+  operator new                Mint an operator (management) key: phrase, pubkey, secret
+  operator restore            Recover the operator key from a phrase (offline)
 
 OPTIONS
   --port <path>       Serial port; auto-detected when one signer is present

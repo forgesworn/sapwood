@@ -14,6 +14,8 @@ import {
   cmdIdentities,
   cmdIdentitiesRemove,
   cmdKeyBackup,
+  cmdOperatorNew,
+  cmdOperatorRestore,
   findRemovalTarget,
   parseSignature,
 } from './commands.js'
@@ -377,5 +379,48 @@ describe('cmdKeyBackup', () => {
 
   it('rejects input that is neither key nor phrase', () => {
     expect(() => cmdKeyBackup('just some text')).toThrow(/nsec/)
+  })
+})
+
+describe('operator commands', () => {
+  // Pinned in operator-key.test.ts: the canonical phrase and its derived key.
+  const CANONICAL = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+  const CANONICAL_SK = '5f29af3b9676180290e77a4efad265c4c2ff28a5302461f73597fda26bb25731'
+  const CANONICAL_PUB = 'e8bcf3823669444d0b49ad45d65088635d9fd8500a75b5f20b59abefa56a144f'
+
+  it('mints a fresh operator key with a 12-word phrase, pubkey and secret', () => {
+    const r = cmdOperatorNew()
+    const d = r.data as { mnemonic: string; pubHex: string; skHex: string }
+    expect(d.mnemonic.split(' ')).toHaveLength(12)
+    expect(d.pubHex).toMatch(/^[0-9a-f]{64}$/)
+    expect(d.skHex).toMatch(/^[0-9a-f]{64}$/)
+    // The printed key round-trips through restore.
+    expect(cmdOperatorRestore(d.mnemonic).data).toMatchObject({ pubHex: d.pubHex, skHex: d.skHex })
+  })
+
+  it('names where the pubkey and secret go, and links the guide', () => {
+    const text = cmdOperatorNew().lines.join('\n')
+    expect(text).toContain('bake into the signer')
+    expect(text).toContain('NOSTR_SECRET_KEY')
+    expect(text).toContain(BACKUP_GUIDE_URL)
+  })
+
+  it('restores the pinned key from the canonical phrase, no phrase echoed back', () => {
+    const r = cmdOperatorRestore(CANONICAL)
+    expect(r.data).toEqual({ pubHex: CANONICAL_PUB, skHex: CANONICAL_SK })
+    expect(r.lines.join('\n')).not.toContain('abandon')
+  })
+
+  it('normalises case and spacing before deriving', () => {
+    const messy = `  ABANDON   ${'abandon '.repeat(10)}about `
+    expect(cmdOperatorRestore(messy).data).toMatchObject({ pubHex: CANONICAL_PUB })
+  })
+
+  it('rejects an invalid phrase', () => {
+    expect(() => cmdOperatorRestore('not a valid phrase at all today here now')).toThrow(CommandError)
+  })
+
+  it('refuses empty input', () => {
+    expect(() => cmdOperatorRestore('   ')).toThrow(/No phrase/)
   })
 })

@@ -24,6 +24,12 @@ import {
   decryptNcryptsec,
 } from '../src/lib/restore.js'
 import { decodeNsec, zeroize } from '../src/lib/provision.js'
+import {
+  generateOperatorMnemonic,
+  isValidOperatorMnemonic,
+  normaliseMnemonic,
+  operatorFromMnemonic,
+} from '../src/lib/operator-key.js'
 
 /** The backup and restore guide, printed so CLI users can find the full story. */
 export const BACKUP_GUIDE_URL =
@@ -414,6 +420,61 @@ export function cmdKeyBackup(secretInput: string, password?: string): CommandRes
     throw new CommandError('That is a recovery phrase, which is already your backup: keep the words safe. This command backs up an nsec or ncryptsec.')
   }
   throw new CommandError('Provide an nsec (nsec1…) or an encrypted key (ncryptsec1…).')
+}
+
+/** Shared tail for the operator commands: where the pubkey and secret go. */
+function operatorGuidance(): string[] {
+  return [
+    'The pubkey is baked into the signer when you flash it. The secret is the',
+    'management authority: load it into the bridge daemon as NOSTR_SECRET_KEY.',
+    'This is not a signing key and never signs your events.',
+    `Guide: ${BACKUP_GUIDE_URL}`,
+  ]
+}
+
+/** Present a derived operator key. `phrase` is included only when it was just
+ *  generated (on restore the owner already holds the words). */
+function operatorResult(op: { skHex: string; pubHex: string }, phrase?: string): CommandResult {
+  const lines: string[] = []
+  if (phrase) {
+    lines.push('Operator recovery phrase. Write it down, in order, and keep it offline:', '')
+    phrase.split(' ').forEach((w, i) => lines.push(`  ${String(i + 1).padStart(2)}  ${w}`))
+    lines.push('')
+  }
+  lines.push(
+    'Operator pubkey (bake into the signer when you flash it):',
+    `  ${op.pubHex}`,
+    'Operator secret (load into the bridge daemon as NOSTR_SECRET_KEY):',
+    `  ${op.skHex}`,
+    '',
+    ...operatorGuidance(),
+  )
+  return { data: { ...(phrase ? { mnemonic: phrase } : {}), pubHex: op.pubHex, skHex: op.skHex }, lines }
+}
+
+/**
+ * `operator new`: mint a fresh operator recovery phrase and show the phrase,
+ * pubkey and secret. Offline; the same NIP-06 derivation the browser uses, so a
+ * key made here manages a signer flashed with its pubkey, and the phrase
+ * restores it anywhere.
+ */
+export function cmdOperatorNew(): CommandResult {
+  const mnemonic = generateOperatorMnemonic()
+  return operatorResult(operatorFromMnemonic(mnemonic), mnemonic)
+}
+
+/**
+ * `operator restore`: derive the operator key from a recovery phrase and show
+ * its pubkey and secret. For recovering the key on a new host, or reading the
+ * secret to load into the bridge daemon. Offline; never opens a device.
+ */
+export function cmdOperatorRestore(phrase: string): CommandResult {
+  const clean = normaliseMnemonic(phrase)
+  if (!clean) throw new CommandError('No phrase given. Pipe the operator recovery phrase on stdin, or run it interactively.')
+  if (!isValidOperatorMnemonic(clean)) {
+    throw new CommandError('That is not a valid recovery phrase. Check the words and their order.')
+  }
+  return operatorResult(operatorFromMnemonic(clean))
 }
 
 export async function cmdAppsRevoke(

@@ -32,15 +32,19 @@
 // use the current key. A phone handoff uses the exact candidate proven by that
 // live relay connection.
 
-import { schnorr } from '@noble/curves/secp256k1.js'
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
-import {
-  generateMnemonic as bip39GenerateMnemonic,
-  mnemonicToSeedSync,
-  validateMnemonic,
-} from '@scure/bip39'
+import { validateMnemonic } from '@scure/bip39'
 import { wordlist } from '@scure/bip39/wordlists/english.js'
-import { HDKey } from '@scure/bip32'
+import {
+  generateOperatorMnemonic,
+  normaliseMnemonic,
+  operatorFromMnemonic,
+  operatorFromSk,
+  pubFromSk,
+} from './operator-key.js'
+
+// The pure key derivation now lives in operator-key.ts (shared with the CLI).
+// Re-exported so existing importers of op-mgmt keep working unchanged.
+export { generateOperatorMnemonic }
 
 /** localStorage key for a phrase-backed operator (the recovery phrase). */
 const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
@@ -48,10 +52,6 @@ const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
 const LS_SK = 'heartwood.opMgmt.skHex'
 /** Versioned pubkey-keyed operator credential keyring. */
 const LS_KEYRING = 'heartwood.opMgmt.keyring.v1'
-
-/** BIP-32 derivation path for the operator key — NIP-06 default external chain.
- *  Distinct from the device master path (`…/727'/0'/0'`) so they never collide. */
-const OP_MGMT_PATH = "m/44'/1237'/0'/0/0"
 
 export interface Operator {
   /** Operator secret (hex). Load into bray: NOSTR_SECRET_KEY=<skHex>. */
@@ -76,29 +76,8 @@ interface OperatorKeyring {
   credentials: Record<string, StoredOperatorCredential>
 }
 
-function pubFromSk(skHex: string): string {
-  return bytesToHex(schnorr.getPublicKey(hexToBytes(skHex)))
-}
-
-function operatorFromSk(skHex: string): Operator {
-  return { skHex, pubHex: pubFromSk(skHex) }
-}
-
-/** Derive the operator key from a recovery phrase (deterministic, synchronous). */
-function operatorFromMnemonic(mnemonic: string): Operator {
-  const seed = mnemonicToSeedSync(mnemonic) // no passphrase
-  const child = HDKey.fromMasterSeed(seed).derive(OP_MGMT_PATH)
-  if (!child.privateKey) throw new Error('operator key derivation failed')
-  const skHex = bytesToHex(child.privateKey)
-  return { skHex, pubHex: pubFromSk(skHex), mnemonic }
-}
-
 function emptyKeyring(): OperatorKeyring {
   return { version: 1, currentPubHex: null, credentials: Object.create(null) }
-}
-
-function normaliseMnemonic(mnemonic: string): string {
-  return mnemonic.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 function validRawOperator(value: unknown): Operator | null {
@@ -283,11 +262,6 @@ export function migrateOperatorStorage(): void {
 
 function storedOperators(): Operator[] {
   return operatorsFromKeyring(loadKeyring())
-}
-
-/** Generate a fresh operator recovery phrase. 128 bits → 12 words, 256 → 24. */
-export function generateOperatorMnemonic(strength: 128 | 256 = 128): string {
-  return bip39GenerateMnemonic(wordlist, strength)
 }
 
 /**
