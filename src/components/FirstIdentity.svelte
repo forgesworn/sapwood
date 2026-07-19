@@ -282,6 +282,11 @@
       <button class="btn btn-primary" onclick={startCreate}>Create a fresh key →</button>
       <button class="btn btn-secondary" onclick={startRestore}>Restore a key I already have</button>
     </div>
+    <p class="fi-guide">
+      Writing down your recovery words is what brings an identity back later. See
+      <a href="https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md"
+        target="_blank" rel="noopener">the backup and restore guide</a>.
+    </p>
     <button class="fi-advanced" onclick={() => onadvanced?.()}>Open the advanced console</button>
 
   {:else if step === 'restore-source'}
@@ -621,6 +626,8 @@
   }
   .fi-title { font-size: 1.35rem; font-weight: 700; color: #fff; margin: 0 0 0.6rem; letter-spacing: 0.01em; }
   .fi-lede { font-size: 0.92rem; color: var(--text-dim); line-height: 1.65; margin: 0 0 1.2rem; }
+  .fi-guide { font-size: 0.8rem; color: var(--text-muted); line-height: 1.55; margin: 0 0 1rem; }
+  .fi-guide a { color: var(--green); }
   .fi-lede strong { color: var(--text); }
   .fi-working { font-size: 0.85rem; color: var(--green-dim); line-height: 1.55; margin: 0.6rem 0 0; }
 

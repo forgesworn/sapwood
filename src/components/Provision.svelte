@@ -348,7 +348,9 @@
             <p class="backup-note">
               These 24 words are the nsec itself, unencrypted. Anyone who has them controls the
               identity. To restore, paste them where an nsec goes, or mark them as a key backup
-              in the guided flow.
+              in the guided flow. See
+              <a href="https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md"
+                target="_blank" rel="noopener">the backup and restore guide</a>.
             </p>
             <ol class="backup-words">
               {#each backupWords.split(' ') as word}
@@ -552,6 +554,7 @@
   }
   .backup-toggle:hover { color: var(--green); }
   .backup-note { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; margin: 0.5rem 0 0; }
+  .backup-note a { color: var(--green); }
   .backup-words {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.2rem 1.4rem;
     margin: 0.6rem 0 0; padding: 0.7rem 0.9rem 0.7rem 2.2rem;

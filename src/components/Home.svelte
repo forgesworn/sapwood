@@ -426,6 +426,11 @@
         and keep them somewhere safe. You can see it again any time under
         Identity › Operator key in the Advanced console.
       </p>
+      <p class="hint-sm backup-guide">
+        This is one of three things worth backing up. See
+        <a href="https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md"
+          target="_blank" rel="noopener">the backup and restore guide</a>.
+      </p>
       {#if !backupOpen}
         <button class="btn btn-warn" onclick={() => (backupOpen = true)}>
           {opMnemonic ? 'Show my recovery phrase' : 'Show my operator secret'}
@@ -694,6 +699,8 @@
     font-size: 0.72rem; user-select: none;
   }
   .backup .uri-box { margin-bottom: 1rem; }
+  .backup-guide { margin: 0 0 1rem; }
+  .backup-guide a { color: var(--green); }
 
   /* Firmware nudge: one quiet line. */
   .fw-nudge {

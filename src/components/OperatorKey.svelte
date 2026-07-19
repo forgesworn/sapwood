@@ -99,6 +99,11 @@
     If Sapwood reaches the relay but the signer never answers, restore the operator recovery phrase
     created when that signer was flashed. After restoring, disconnect and reconnect over WiFi.
   </p>
+  <p class="hint-sm op-guide">
+    See <a href="https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md"
+      target="_blank" rel="noopener">the backup and restore guide</a> for this operator key, your
+    identities, and what a factory reset does not keep.
+  </p>
 
   {#if device.mode === 'serial'}
     <div class="card operator-binding" class:operator-binding--ok={operatorMatchesSigner}>
@@ -230,6 +235,7 @@
   .inline-form { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
   .inline-form input { flex: 1; min-width: 12rem; padding: 0.4rem 0.6rem; font-size: 0.82rem; }
   .status { color: var(--text-dim); }
+  .op-guide a { color: var(--green); }
   .operator-binding { display: flex; flex-direction: column; gap: 0.5rem; }
   .operator-binding p { margin: 0; }
   .operator-binding--ok { border-color: var(--green); }
