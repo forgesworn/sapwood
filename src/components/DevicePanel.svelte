@@ -42,6 +42,14 @@
     : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset, crashed_during: usbHealth?.crashed_during })
   const lastReset = $derived(health.last_reset ? describeReset(health.last_reset) : null)
 
+  // Firmware 0.13.8+ takes a deliberate restart when its relay service has
+  // been unusable for minutes (heap too fragmented to dial or publish), and
+  // names the reason. It arrives as a planned software restart, so surface it
+  // distinctly: the signer healing itself, not a crash, not operator action.
+  const recoveryReason = $derived(!lastReset?.crash && health.crashed_during?.startsWith('relay watchdog')
+    ? health.crashed_during
+    : null)
+
   // Live memory health (relay only). A largest block far below total free is a
   // fragmented heap — the condition behind the bulk-decrypt crashes. Flag it
   // amber so it is visible before it becomes a reboot.
@@ -213,7 +221,7 @@
         <tr><td class="label">Signer up</td><td>{formatUptime(health.uptime_s)}</td></tr>
       {/if}
       {#if lastReset}
-        <tr><td class="label">Last restart</td><td class:crash-reset={lastReset.crash}>{lastReset.text}</td></tr>
+        <tr><td class="label">Last restart</td><td class:crash-reset={lastReset.crash}>{recoveryReason ? 'self-recovery restart' : lastReset.text}</td></tr>
       {/if}
       {#if typeof freeHeap === 'number' && typeof largestBlock === 'number'}
         <tr>
@@ -238,6 +246,12 @@
       <p class="hint-sm crash-hint">The signer's last restart was not planned.{#if health.crashed_during}&#32;It crashed while
         handling <strong>{health.crashed_during}</strong>.{/if} If this repeats, note the pattern; the request log
         below restarts empty each boot.</p>
+    {/if}
+    {#if recoveryReason}
+      <p class="hint-sm crash-hint">The signer restarted itself after its relay service was unusable for
+        several minutes (<strong>{recoveryReason}</strong>) — usually memory too fragmented to place TLS or
+        publish buffers. It now recovers on its own instead of staying unreachable until a power-cycle; if
+        this repeats often, the memory readings above tell the story.</p>
     {/if}
     {#if device.mode === 'relay' && typeof device.relayStatus?.log_quiet === 'boolean'}
       <div class="log-quiet">
