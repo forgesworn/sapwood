@@ -96,10 +96,15 @@ async function newPage(browser, { video = false } = {}) {
     ...(video ? { recordVideo: { dir: OUT + 'video/', size: { width: 1280, height: 860 } } } : {}),
   })
   const page = await ctx.newPage()
-  await page.addInitScript(([mnemonic]) => {
+  await page.addInitScript(([mnemonic, holdErrorsDown]) => {
     window.__sapwoodE2E = true
     localStorage.setItem('heartwood.opMgmt.mnemonic', mnemonic)
-  }, [OPERATOR_MNEMONIC])
+    // Panel mounts probe the absent transport and raise the error banner. A
+    // still just calls clearError() before the shot; a recording cannot pick
+    // its moment, and a probe landing mid-take put "Not connected" under the
+    // status bar for a second or two. Hold the clear down for the whole run.
+    if (holdErrorsDown) setInterval(() => window.__sapwoodClearError?.(), 100)
+  }, [OPERATOR_MNEMONIC, video])
   return { ctx, page }
 }
 
