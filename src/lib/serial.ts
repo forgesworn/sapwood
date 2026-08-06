@@ -7,7 +7,7 @@
 import type { Frame, FrameTypeValue } from './frame.js'
 import { FrameStream } from './frame-stream.js'
 import { paceSlices } from './pacing.js'
-import { releaseGrantedPorts } from './serial-ports.js'
+import { releaseGrantedPorts, releasePortsOnUnload } from './serial-ports.js'
 
 export type SerialEvent =
   | { kind: 'connected'; port: string }
@@ -354,3 +354,9 @@ export class SerialTransport {
 
 /** Singleton transport instance shared across the app. */
 export const transport = new SerialTransport()
+
+// Release the port when the page goes away. Closing the tab or navigating off
+// otherwise leaves it open and claimed by the browser process, and every later
+// attempt — a new tab, the CLI, esptool — fails with "port is busy" until the
+// device is physically unplugged.
+releasePortsOnUnload()

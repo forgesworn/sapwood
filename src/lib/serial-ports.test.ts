@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { releaseGrantedPorts, findAttachedGrantedPort } from './serial-ports'
+import { releaseGrantedPorts, findAttachedGrantedPort, releasePortsOnUnload } from './serial-ports'
 
 function stubSerial(getPorts: () => Promise<unknown[]>) {
   Object.defineProperty(navigator, 'serial', { value: { getPorts }, configurable: true })
@@ -36,6 +36,69 @@ describe('releaseGrantedPorts', () => {
   it('swallows a getPorts() failure', async () => {
     stubSerial(async () => { throw new Error('denied') })
     await expect(releaseGrantedPorts()).resolves.toBeUndefined()
+  })
+
+  it('cancels a locked stream so close() can succeed', async () => {
+    // The bug this fixes: close() rejects while a reader still holds the
+    // lock, the rejection is swallowed, and the port stays open — the
+    // "port is busy, unplug the device" state. Cancelling first is what
+    // actually frees it.
+    let locked = true
+    const reader = { cancel: vi.fn(async () => { locked = false }), releaseLock: vi.fn() }
+    const port = {
+      readable: {
+        cancel: vi.fn(async () => { if (locked) throw new TypeError('stream is locked') }),
+        getReader: vi.fn(() => reader),
+      },
+      writable: { abort: vi.fn(async () => {}) },
+      close: vi.fn(async () => { if (locked) throw new Error('port busy') }),
+    }
+    stubSerial(async () => [port])
+
+    await releaseGrantedPorts()
+
+    expect(port.readable.getReader).toHaveBeenCalled()
+    expect(reader.cancel).toHaveBeenCalled()
+    expect(port.close).toHaveBeenCalled()
+    expect(locked).toBe(false)
+  })
+
+  it('aborts the writable before closing', async () => {
+    const port = {
+      readable: { cancel: vi.fn(async () => {}), getReader: vi.fn() },
+      writable: { abort: vi.fn(async () => {}) },
+      close: vi.fn(async () => {}),
+    }
+    stubSerial(async () => [port])
+    await releaseGrantedPorts()
+    expect(port.writable.abort).toHaveBeenCalled()
+    expect(port.close).toHaveBeenCalled()
+  })
+})
+
+describe('releasePortsOnUnload', () => {
+  it('registers exactly one pagehide handler that closes granted ports', async () => {
+    const port = {
+      readable: { cancel: vi.fn(async () => {}), getReader: vi.fn() },
+      writable: { abort: vi.fn(async () => {}) },
+      close: vi.fn(async () => {}),
+    }
+    stubSerial(async () => [port])
+    const addSpy = vi.spyOn(window, 'addEventListener')
+
+    releasePortsOnUnload()
+    releasePortsOnUnload() // idempotent: callers should not need to guard
+
+    const pagehide = addSpy.mock.calls.filter(([name]) => name === 'pagehide')
+    expect(pagehide).toHaveLength(1)
+
+    // Invoke the registered handler directly rather than dispatching a real
+    // event and waiting on a timer: the assertion is about what the handler
+    // does, and awaiting releaseGrantedPorts() here keeps it deterministic.
+    ;(pagehide[0]![1] as EventListener)(new Event('pagehide'))
+    await releaseGrantedPorts()
+    expect(port.close).toHaveBeenCalled()
+    addSpy.mockRestore()
   })
 })
 
