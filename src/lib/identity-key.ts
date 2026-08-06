@@ -1,4 +1,5 @@
 import type { MasterInfo } from './types.js'
+import { dedupeBy } from './dedupe.js'
 
 /**
  * A stable, unique `{#each}` key for an identity row.
@@ -23,11 +24,5 @@ export function identityKey(m: Pick<MasterInfo, 'slot' | 'npub' | 'persona'>): s
 export function dedupeIdentities<T extends Pick<MasterInfo, 'slot' | 'npub' | 'persona'>>(
   rows: T[],
 ): T[] {
-  const seen = new Set<string>()
-  return rows.filter((row) => {
-    const key = identityKey(row)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return dedupeBy(rows, identityKey)
 }

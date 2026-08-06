@@ -14,6 +14,7 @@ import {
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
 import { policiesEqual } from './client-policy.js'
 import { dedupeIdentities } from './identity-key.js'
+import { dedupeBy } from './dedupe.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
@@ -2415,7 +2416,12 @@ export async function scanWifi(): Promise<WifiNetwork[] | null> {
       }))
     // Strongest first (the device already sorts, but don't rely on it).
     nets.sort((a, b) => b.rssi - a.rssi)
-    return nets
+    // One entry per SSID. A mesh, a repeater or a dual-band AP broadcasts the
+    // same name from several radios, and the picker only fills in the SSID —
+    // the signer chooses the radio — so the extra rows are noise, and a
+    // repeated SSID would break the keyed list that renders them. Sorted
+    // strongest-first above, so the survivor is the best signal for that name.
+    return dedupeBy(nets, (n) => n.ssid)
   } catch {
     return null // no response — treat as "scan unavailable", keep manual entry
   }

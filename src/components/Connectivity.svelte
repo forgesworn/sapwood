@@ -361,6 +361,7 @@
         {#if scanMsg}<p class="hint-sm scan-msg">{scanMsg}</p>{/if}
         {#if scanResults && scanResults.length}
           <ul class="scan-list">
+            <!-- scanWifi() returns one entry per SSID, so the name is a safe key. -->
             {#each scanResults as net (net.ssid)}
               <li>
                 <button type="button" class="scan-item" class:selected={net.ssid === ssid} onclick={() => pick(net)}>

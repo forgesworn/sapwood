@@ -91,7 +91,7 @@ import {
   abortNetworkConfig, device, syncIdentityMeta, configureNetwork, configureNetworkRemotely, getNetworkConfig,
   mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning,
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
-  patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb,
+  patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
 } from './device.svelte.js'
 import { FrameType } from './frame.js'
 import { generateOperatorMnemonic, getOrCreateOperator, pubHexFromSecret } from './op-mgmt.js'
@@ -1855,6 +1855,66 @@ describe('identity card auto-sync on serial master list', () => {
     emitMasterList([master]) // http mode receives the same frame shape
     await new Promise((r) => setTimeout(r, 0))
     expect(resolveMock).not.toHaveBeenCalled()
+    expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
+  })
+})
+
+describe('scanWifi', () => {
+  function scanResponse(nets: unknown[]) {
+    return {
+      type: FrameType.WIFI_SCAN_RESPONSE,
+      payload: new TextEncoder().encode(JSON.stringify(nets)),
+    }
+  }
+
+  beforeEach(() => {
+    device.mode = 'serial'
+  })
+
+  it('returns one entry per SSID, keeping the strongest radio', async () => {
+    // A mesh or dual-band AP broadcasts the same name from several radios. The
+    // picker only fills in the SSID, and a repeated SSID broke the keyed list
+    // that renders it, blanking Device > Network.
+    serialMock.sendAndReceive.mockResolvedValueOnce(scanResponse([
+      { ssid: 'home', rssi: -70, channel: 1, auth: 'wpa2' },
+      { ssid: 'home', rssi: -45, channel: 11, auth: 'wpa2' },
+      { ssid: 'neighbour', rssi: -80, channel: 6, auth: 'wpa3' },
+      { ssid: 'home', rssi: -60, channel: 6, auth: 'wpa2' },
+    ]))
+
+    const nets = await scanWifi()
+
+    expect(nets?.map((n) => n.ssid)).toEqual(['home', 'neighbour'])
+    expect(nets?.[0]).toMatchObject({ ssid: 'home', rssi: -45, channel: 11 })
+  })
+
+  it('keeps distinct networks and sorts them strongest first', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(scanResponse([
+      { ssid: 'far', rssi: -85, channel: 1, auth: 'open' },
+      { ssid: 'near', rssi: -40, channel: 6, auth: 'wpa2' },
+    ]))
+
+    expect((await scanWifi())?.map((n) => n.ssid)).toEqual(['near', 'far'])
+  })
+
+  it('drops entries with no usable SSID', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(scanResponse([
+      { ssid: '', rssi: -50 },
+      { rssi: -50 },
+      { ssid: 'real', rssi: -50, channel: 1, auth: 'wpa2' },
+    ]))
+
+    expect((await scanWifi())?.map((n) => n.ssid)).toEqual(['real'])
+  })
+
+  it('reports "cannot scan" on a NACK rather than an empty result', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce({ type: FrameType.NACK, payload: new Uint8Array() })
+    expect(await scanWifi()).toBeNull()
+  })
+
+  it('does not scan off USB', async () => {
+    device.mode = 'relay'
+    expect(await scanWifi()).toBeNull()
     expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
   })
 })
