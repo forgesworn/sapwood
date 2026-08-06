@@ -189,7 +189,11 @@ describe('FirstIdentity — restore from a pasted nsec', () => {
     expect(screen.getByText(/Anyone who has them controls the identity/)).toBeTruthy()
   })
 
-  it('backs up an ncryptsec as the words of its decrypted key', async () => {
+  // NIP-49 runs scrypt twice here (encrypt to build the fixture, decrypt in the
+  // component), which is deliberately slow. Under the default 5s this test sat
+  // right on the edge and failed whenever the suite was busy enough to delay
+  // it — a scheduling artefact, not a real failure. Give the real work room.
+  it('backs up an ncryptsec as the words of its decrypted key', { timeout: 20_000 }, async () => {
     const ncryptsec = nip49Encrypt(SK, 'hunter2')
     render(FirstIdentity)
     await fireEvent.click(screen.getByText(/Restore a key I already have/))

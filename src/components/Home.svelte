@@ -26,6 +26,7 @@
   import ConfirmButton from './ConfirmButton.svelte'
   import type { ConnectSlot } from '../lib/types.js'
   import { identityKey } from '../lib/identity-key.js'
+  import { isUpgrade } from '../lib/version.js'
 
   type AdvancedTab = 'apps' | 'identity' | 'device' | 'logs'
   interface Props {
@@ -163,9 +164,13 @@
   const fwRunning = $derived(device.mode === 'relay'
     ? device.relayStatus?.version ?? null
     : fwUsbRunning)
+  // Only nudge for a genuine upgrade. A plain `!==` fires in either direction,
+  // so a signer running firmware NEWER than the bundled manifest — a locally
+  // built image, or a manifest lagging a release — was told to install the
+  // older one, silently reverting whatever the newer build fixed.
   const fwUpdateAvailable = $derived(
     (device.mode === 'serial' || device.mode === 'relay')
-    && !!fwRunning && !!fwLatest && fwRunning !== fwLatest,
+    && isUpgrade(fwRunning, fwLatest),
   )
 
   // One-click recovery from a USB hiccup (e.g. after pressing RESET): re-pick the

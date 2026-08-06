@@ -10,6 +10,7 @@
   import { onMount } from 'svelte'
   import { device, serialTransport, httpTransport, getFirmwareVersion } from '../lib/device.svelte.js'
   import { streamOta } from '../lib/ota.js'
+  import { isUpgrade, compareVersions } from '../lib/version.js'
 
   interface BoardAsset { app: string; sha256: string; bytes: number; ota?: boolean; signature?: string }
   interface Manifest { version: string; builtAt?: string; boards: Record<string, BoardAsset> }
@@ -50,7 +51,16 @@
   const deviceBoard = $derived(device.mode === 'relay'
     ? device.relayStatus?.board ?? null
     : usbInfo?.board ?? null)
-  const upToDate = $derived(!!running && !!latest && running === latest)
+  // "Up to date" means the bundle has nothing newer, not that the versions
+  // match exactly. A signer running a NEWER build than the bundled manifest — a
+  // locally built image, or a manifest lagging a release — is up to date, and
+  // must not be offered the older one: installing it would silently revert
+  // whatever the newer build fixed.
+  const upToDate = $derived(!!running && !!latest && !isUpgrade(running, latest))
+  /** The signer is ahead of the bundle, so the offer below is a downgrade. */
+  const runningAhead = $derived(
+    !!running && !!latest && (compareVersions(running, latest) ?? 0) > 0,
+  )
 
   // Pick which board's image to offer: the device's own, else the first
   // OTA-capable board. The served list now also holds factory-only boards, which
@@ -204,9 +214,19 @@
     </tbody></table>
 
     {#if upToDate}
-      <p class="success-text fw-ok">Your signer is up to date.</p>
-      {#if appUrl}
-        <button class="btn btn-secondary" disabled={busy} onclick={updateToLatest}>Re-install v{latest}</button>
+      {#if runningAhead}
+        <p class="success-text fw-ok">
+          Your signer is ahead of the firmware bundled here (v{running} against v{latest}).
+        </p>
+        <p class="hint">
+          Nothing to install. Re-installing v{latest} would take your signer backwards and
+          undo whatever the newer build changed.
+        </p>
+      {:else}
+        <p class="success-text fw-ok">Your signer is up to date.</p>
+        {#if appUrl}
+          <button class="btn btn-secondary" disabled={busy} onclick={updateToLatest}>Re-install v{latest}</button>
+        {/if}
       {/if}
     {:else if latest && appUrl}
       <p class="hint">

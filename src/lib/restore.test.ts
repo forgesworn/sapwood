@@ -69,7 +69,10 @@ describe('resolveRestore', () => {
     expect(derived.result.npub).toBe(viaNsec.result.npub)
   })
 
-  it('rejects a wrong ncryptsec password', async () => {
+  // Two scrypt passes (encrypt the fixture, then a failed decrypt). Slow by
+  // design, and previously flaky against the default 5s whenever the suite was
+  // busy enough to delay it.
+  it('rejects a wrong ncryptsec password', { timeout: 20_000 }, async () => {
     const ncryptsec = nip49Encrypt(SK, 'right')
     expect(() => decryptNcryptsec(ncryptsec, 'wrong')).toThrow()
     await expect(
