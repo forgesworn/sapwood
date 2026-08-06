@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeReset, formatUptime } from './reset-reason.js'
+import { describeReset, formatUptime, formatBytes } from './reset-reason.js'
 
 describe('describeReset', () => {
   it('marks deliberate restarts as non-crashes', () => {
@@ -16,6 +16,30 @@ describe('describeReset', () => {
   it('passes unknown reasons through', () => {
     expect(describeReset('unknown')).toEqual({ text: 'unknown', crash: true })
     expect(describeReset('future-cause')).toEqual({ text: 'future-cause', crash: false })
+  })
+
+  it('treats a USB or JTAG reset as routine, not a crash', () => {
+    // A host re-opening the port resets a native-USB board (V4, C6). Before
+    // the firmware mapped these they arrived as "unknown", which this table
+    // scores as a crash, so an ordinary reconnect looked like a fault.
+    expect(describeReset('usb-peripheral-reset')).toEqual({ text: 'USB reset by host', crash: false })
+    expect(describeReset('jtag-reset').crash).toBe(false)
+  })
+})
+
+describe('formatBytes', () => {
+  it('formats bytes, kilobytes and megabytes', () => {
+    expect(formatBytes(512)).toBe('512 B')
+    expect(formatBytes(1024)).toBe('1.0 KB')
+    expect(formatBytes(20_480)).toBe('20.0 KB')
+    // Past 100 KB the decimal is noise, so it rounds.
+    expect(formatBytes(180 * 1024)).toBe('180 KB')
+    expect(formatBytes(2 * 1024 * 1024)).toBe('2.0 MB')
+  })
+
+  it('rejects nonsense', () => {
+    expect(formatBytes(-1)).toBe('--')
+    expect(formatBytes(NaN)).toBe('--')
   })
 })
 

@@ -9,7 +9,7 @@
   } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
   import { getFirmwareVersion } from '../lib/device.svelte.js'
-  import { describeReset, formatUptime } from '../lib/reset-reason.js'
+  import { describeReset, formatUptime, formatBytes } from '../lib/reset-reason.js'
   import Connectivity from './Connectivity.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import Backup from './Backup.svelte'
@@ -29,7 +29,10 @@
   // Signer uptime + why it last restarted: over WiFi from get_status, over USB
   // from FIRMWARE_INFO. Turns "it keeps rebooting" from an anecdote into data —
   // a planned restart reads differently from a crash.
-  let usbHealth = $state<{ uptime_s?: number; last_reset?: string; crashed_during?: string } | null>(null)
+  let usbHealth = $state<{
+    uptime_s?: number; last_reset?: string; crashed_during?: string
+    max_sign_bytes?: number; free_heap?: number; largest_block?: number
+  } | null>(null)
   $effect(() => {
     if (device.connected && device.mode === 'serial') {
       void getFirmwareVersion().then((info) => { usbHealth = info })
@@ -50,11 +53,19 @@
     ? health.crashed_during
     : null)
 
-  // Live memory health (relay only). A largest block far below total free is a
-  // fragmented heap — the condition behind the bulk-decrypt crashes. Flag it
-  // amber so it is visible before it becomes a reboot.
-  const freeHeap = $derived(device.mode === 'relay' ? device.relayStatus?.free_heap : undefined)
-  const largestBlock = $derived(device.mode === 'relay' ? device.relayStatus?.largest_free_block : undefined)
+  // Live memory health. A largest block far below total free is a fragmented
+  // heap — the condition behind the bulk-decrypt crashes. Flag it amber so it
+  // is visible before it becomes a reboot.
+  //
+  // Relay reports it in get_status; over USB it now rides on FIRMWARE_INFO, so
+  // this is no longer relay-only. That matters because USB is where someone
+  // debugs a signer that is misbehaving.
+  const freeHeap = $derived(device.mode === 'relay' ? device.relayStatus?.free_heap : usbHealth?.free_heap)
+  const largestBlock = $derived(device.mode === 'relay' ? device.relayStatus?.largest_free_block : usbHealth?.largest_block)
+
+  // The signer's structural signing ceiling. Worth showing plainly: a request
+  // over it is refused, and without this the failure is a bare timeout.
+  const maxSignBytes = $derived(usbHealth?.max_sign_bytes)
   const fragmented = $derived(typeof freeHeap === 'number' && typeof largestBlock === 'number'
     && freeHeap > 0 && largestBlock / freeHeap < 0.4)
   // The signer trimmed this poll to the vital fields because its heap was too
@@ -230,6 +241,9 @@
             {kb(freeHeap)}{#if fragmented} · fragmented (largest block {kb(largestBlock)}){/if}
           </td>
         </tr>
+      {/if}
+      {#if typeof maxSignBytes === 'number'}
+        <tr><td class="label">Max signed message</td><td>{formatBytes(maxSignBytes)}</td></tr>
       {/if}
     </tbody></table>
     {#if fragmented}

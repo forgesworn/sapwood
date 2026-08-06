@@ -2062,6 +2062,21 @@ export interface FirmwareInfo {
   last_reset?: string
   /** What the signer was doing when it last crashed, if known. */
   crashed_during?: string
+  /**
+   * Largest event content this signer will sign, in bytes (absent on older
+   * firmware). Structural, per-board. A request over this is refused, so a
+   * client can say so up front rather than let it time out.
+   */
+  max_sign_bytes?: number
+  /** Free heap in bytes (absent on older firmware). */
+  free_heap?: number
+  /**
+   * Largest contiguous free block in bytes (absent on older firmware). The
+   * binding number for a large signature: the response needs one block a
+   * little over its base64-expanded size, so a fragmented heap can refuse a
+   * request that is comfortably inside max_sign_bytes.
+   */
+  largest_block?: number
 }
 
 /**
@@ -2086,6 +2101,9 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
       ...(typeof info.uptime_s === 'number' ? { uptime_s: info.uptime_s } : {}),
       ...(typeof info.last_reset === 'string' ? { last_reset: info.last_reset } : {}),
       ...(typeof info.crashed_during === 'string' ? { crashed_during: info.crashed_during } : {}),
+      ...(typeof info.max_sign_bytes === 'number' ? { max_sign_bytes: info.max_sign_bytes } : {}),
+      ...(typeof info.free_heap === 'number' ? { free_heap: info.free_heap } : {}),
+      ...(typeof info.largest_block === 'number' ? { largest_block: info.largest_block } : {}),
     }
   } catch {
     return null // older firmware, or no response — treat as unknown

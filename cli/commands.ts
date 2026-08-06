@@ -15,6 +15,7 @@ import {
 } from '../src/lib/frame.js'
 import type { Frame, FrameTypeValue } from '../src/lib/frame.js'
 import type { ConnectSlot, MasterInfo } from '../src/lib/types.js'
+import { formatBytes } from '../src/lib/reset-reason.js'
 import {
   isValidNsec,
   isValidNcryptsec,
@@ -79,6 +80,11 @@ interface FirmwareInfo {
   uptime_s?: number
   last_reset?: string
   crashed_during?: string
+  /** Largest event content this signer will sign, in bytes. */
+  max_sign_bytes?: number
+  free_heap?: number
+  /** Largest contiguous free block: what a big signature actually needs. */
+  largest_block?: number
 }
 
 async function fetchFirmwareInfo(t: CommandTransport): Promise<FirmwareInfo | null> {
@@ -200,6 +206,21 @@ export async function cmdDevice(t: CommandTransport, o: CommandOptions): Promise
     if (info.last_reset) health.push(`last reset ${info.last_reset}`)
     if (info.crashed_during) health.push(`crashed during ${info.crashed_during}`)
     if (health.length > 0) lines.push(`  ${health.join(' · ')}`)
+
+    // Signing headroom. max_sign_bytes is the structural per-board ceiling;
+    // largest_block is what actually binds a big signature, because the
+    // response needs one contiguous block a little over its base64-expanded
+    // size. Showing both means a refused request is explicable rather than
+    // mysterious.
+    const capacity: string[] = []
+    if (typeof info.max_sign_bytes === 'number') {
+      capacity.push(`max signed message ${formatBytes(info.max_sign_bytes)}`)
+    }
+    if (typeof info.free_heap === 'number') capacity.push(`free heap ${formatBytes(info.free_heap)}`)
+    if (typeof info.largest_block === 'number') {
+      capacity.push(`largest block ${formatBytes(info.largest_block)}`)
+    }
+    if (capacity.length > 0) lines.push(`  ${capacity.join(' · ')}`)
   } else {
     lines.push('✓ HEARTWOOD connected (firmware predates the version query)')
   }

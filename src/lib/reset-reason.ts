@@ -18,6 +18,10 @@ const REASONS: Record<string, ResetDescription> = {
   'task-watchdog': { text: 'crash (task watchdog)', crash: true },
   'watchdog': { text: 'crash (watchdog)', crash: true },
   'brownout': { text: 'power dip (brownout)', crash: true },
+  // ESP-IDF 5.x. On a native-USB board (V4, C6) a host re-opening the port is
+  // a routine cause, not a fault, so neither counts as a crash.
+  'usb-peripheral-reset': { text: 'USB reset by host', crash: false },
+  'jtag-reset': { text: 'JTAG reset', crash: false },
 }
 
 export function describeReset(reason: string): ResetDescription {
@@ -36,4 +40,15 @@ export function formatUptime(seconds: number): string {
   if (h > 0) return `${h}h ${m}m`
   if (m > 0) return `${m}m`
   return `${s}s`
+}
+
+/** "20.0 KB", "180 KB", "512 B". KB here is 1024 bytes, matching how the
+ *  firmware's own heap figures are reasoned about. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '--'
+  if (bytes < 1024) return `${Math.floor(bytes)} B`
+  const kb = bytes / 1024
+  if (kb < 100) return `${kb.toFixed(1)} KB`
+  if (kb < 1024) return `${Math.round(kb)} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
 }
