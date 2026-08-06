@@ -31,11 +31,17 @@ const OPERATOR_PUB = bytesToHex(schnorr.getPublicKey(opChild.privateKey))
 
 const idA = getPublicKey(generateSecretKey())
 const idB = getPublicKey(generateSecretKey())
+const idC = getPublicKey(generateSecretKey())
 const appPub = () => getPublicKey(generateSecretKey())
 
 const MASTERS = [
   { slot: 0, label: 'daybreak', mode: 0, npub: nip19.npubEncode(idA), apps: 3 },
   { slot: 1, label: 'workshop', mode: 0, npub: nip19.npubEncode(idB), apps: 1 },
+  // A named identity the signer derived from 'daybreak' itself. A persona
+  // carries its OWNING master's slot, so this row repeats slot 0 — the shape
+  // most real signers have, and the one that must render correctly. Capturing
+  // it keeps the guide honest and keeps this pipeline exercising it.
+  { slot: 0, label: 'social', npub: nip19.npubEncode(idC), persona: true },
 ]
 
 const ALL_METHODS = ['sign_event', 'nip44_encrypt', 'nip44_decrypt', 'nip04_encrypt', 'nip04_decrypt', 'get_public_key']

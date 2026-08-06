@@ -49,6 +49,18 @@ test('serves the web and CLI guides with their assets', async ({ page }) => {
   expect(rec.status()).toBe(200)
   expect(rec.headers()['content-type']).toContain('image/gif')
 
+  // Every figure the page references must actually deploy. Status alone proves
+  // nothing here: a missing file under /about/ falls through to the SPA
+  // fallback, which answers 200 with index.html, so the page would render a
+  // broken image while the request looked healthy. Check the type it served.
+  const figures = [...(await guide.text()).matchAll(/<img src="(img\/[^"]+)"/g)].map((m) => m[1])
+  expect(figures.length).toBeGreaterThan(10)
+  for (const src of figures) {
+    const asset = await page.request.get(`/about/guide/${src}`)
+    expect(asset.status(), src).toBe(200)
+    expect(asset.headers()['content-type'], src).toMatch(/^image\//)
+  }
+
   // The about page links to both guides.
   const about = await page.request.get('/about/')
   await expect(about.text()).resolves.toMatch(/href="guide\/"[\s\S]*href="cli\/"/)

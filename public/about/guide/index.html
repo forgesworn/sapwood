@@ -415,16 +415,23 @@
     <h3 class="sub">Identity</h3>
     <p>
       Everything about who the signer is. The identity list shows each slot
-      with its type and full npub. The identity card pushes your name and
-      picture to the signer's screen. The short address panel generates the
-      <code>nostr.json</code> for a NIP-05 name you host anywhere. Add an
-      identity provisions another key: from a phrase, an nsec, or, most private of all,
-      derived by name on the device itself, where typing a name mints a new
-      identity from a master the signer already holds and no secret exists
-      anywhere else. The operator key panel shows, restores and regenerates
-      the management credential, and profile relays tune where names are
-      looked up.
+      with its type and full npub. A key you provisioned holds a slot of its
+      own; one the signer derived by name is tagged <code>DERIVED</code> and
+      reads <code>FROM SLOT n</code>, naming the master it grew from rather
+      than claiming a slot it does not have. The identity card pushes your
+      name and picture to the signer's screen. The short address panel
+      generates the <code>nostr.json</code> for a NIP-05 name you host
+      anywhere. Add an identity provisions another key: from a phrase, an
+      nsec, or, most private of all, derived by name on the device itself,
+      where typing a name mints a new identity from a master the signer
+      already holds and no secret exists anywhere else. The operator key panel
+      shows, restores and regenerates the management credential, and profile
+      relays tune where names are looked up.
     </p>
+    <figure class="shot">
+      <img src="img/advanced-identity.png" alt="The Identity section: two provisioned identities in slots 0 and 1, a derived identity tagged DERIVED and FROM SLOT 0, then the identity card, short address, add-identity, operator key and profile relay panels" width="1600" height="2865" loading="lazy">
+      <figcaption><span class="cap-tag">FIG 11</span>Identity, top to bottom. The derived identity reads FROM SLOT 0: a branch of daybreak, not a key of its own. Relay dots are measured live from your browser.</figcaption>
+    </figure>
 
     <h3 class="sub">Device</h3>
     <p>
@@ -441,11 +448,11 @@
     </p>
     <figure class="shot">
       <img src="img/advanced-device.png" alt="The Device section: connection table, network mode and relay editor, firmware update panel, security settings and the danger zone" width="1600" height="3144" loading="lazy">
-      <figcaption><span class="cap-tag">FIG 11</span>Device, top to bottom. The red card stays honest about what cannot be undone.</figcaption>
+      <figcaption><span class="cap-tag">FIG 12</span>Device, top to bottom. The red card stays honest about what cannot be undone.</figcaption>
     </figure>
     <figure class="shot">
       <img src="img/danger-zone.png" alt="The danger zone: Disconnect all apps, and Factory reset which asks for the device's button" width="1600" height="347" loading="lazy">
-      <figcaption><span class="cap-tag">FIG 12</span>Factory reset needs the button, in your hand, on the device. A browser cannot do this to you.</figcaption>
+      <figcaption><span class="cap-tag">FIG 13</span>Factory reset needs the button, in your hand, on the device. A browser cannot do this to you.</figcaption>
     </figure>
 
     <h3 class="sub">Logs</h3>
@@ -458,7 +465,7 @@
     </p>
     <figure class="shot">
       <img src="img/advanced-logs.png" alt="The Logs section: Signer Activity cards showing signed and denied requests per app, above the raw device log stream" width="1600" height="1476" loading="lazy">
-      <figcaption><span class="cap-tag">FIG 13</span>A denied contact-list request, and exactly which policy line stopped it.</figcaption>
+      <figcaption><span class="cap-tag">FIG 14</span>A denied contact-list request, and exactly which policy line stopped it.</figcaption>
     </figure>
   </div>
 </section>
