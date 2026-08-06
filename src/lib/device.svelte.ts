@@ -2068,6 +2068,7 @@ export interface FirmwareInfo {
    * client can say so up front rather than let it time out.
    */
   max_sign_bytes?: number
+  max_sign_bytes_object?: number
   /** Free heap in bytes (absent on older firmware). */
   free_heap?: number
   /**

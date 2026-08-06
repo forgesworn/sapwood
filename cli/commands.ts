@@ -82,6 +82,7 @@ interface FirmwareInfo {
   crashed_during?: string
   /** Largest event content this signer will sign, in bytes. */
   max_sign_bytes?: number
+  max_sign_bytes_object?: number
   free_heap?: number
   /** Largest contiguous free block: what a big signature actually needs. */
   largest_block?: number
@@ -214,7 +215,16 @@ export async function cmdDevice(t: CommandTransport, o: CommandOptions): Promise
     // mysterious.
     const capacity: string[] = []
     if (typeof info.max_sign_bytes === 'number') {
-      capacity.push(`max signed message ${formatBytes(info.max_sign_bytes)}`)
+      // Two ceilings when the firmware reports one: the second is what a client
+      // earns by sending the event as a JSON object and asking for
+      // sign_event_compact, which skips the two full-size copies NIP-46's
+      // stringified event and echoed-back reply would otherwise cost.
+      const compact = info.max_sign_bytes_object
+      capacity.push(
+        typeof compact === 'number' && compact > info.max_sign_bytes
+          ? `max signed message ${formatBytes(info.max_sign_bytes)} (${formatBytes(compact)} compact)`
+          : `max signed message ${formatBytes(info.max_sign_bytes)}`,
+      )
     }
     if (typeof info.free_heap === 'number') capacity.push(`free heap ${formatBytes(info.free_heap)}`)
     if (typeof info.largest_block === 'number') {

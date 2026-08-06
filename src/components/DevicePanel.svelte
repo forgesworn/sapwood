@@ -31,7 +31,8 @@
   // a planned restart reads differently from a crash.
   let usbHealth = $state<{
     uptime_s?: number; last_reset?: string; crashed_during?: string
-    max_sign_bytes?: number; free_heap?: number; largest_block?: number
+    max_sign_bytes?: number; max_sign_bytes_object?: number
+    free_heap?: number; largest_block?: number
   } | null>(null)
   $effect(() => {
     if (device.connected && device.mode === 'serial') {
@@ -66,6 +67,7 @@
   // The signer's structural signing ceiling. Worth showing plainly: a request
   // over it is refused, and without this the failure is a bare timeout.
   const maxSignBytes = $derived(usbHealth?.max_sign_bytes)
+  const maxSignBytesObject = $derived(usbHealth?.max_sign_bytes_object)
   const fragmented = $derived(typeof freeHeap === 'number' && typeof largestBlock === 'number'
     && freeHeap > 0 && largestBlock / freeHeap < 0.4)
   // The signer trimmed this poll to the vital fields because its heap was too
@@ -243,7 +245,10 @@
         </tr>
       {/if}
       {#if typeof maxSignBytes === 'number'}
-        <tr><td class="label">Max signed message</td><td>{formatBytes(maxSignBytes)}</td></tr>
+        <tr><td class="label">Max signed message</td><td>
+          {formatBytes(maxSignBytes)}{#if typeof maxSignBytesObject === 'number' && maxSignBytesObject > maxSignBytes}
+            · {formatBytes(maxSignBytesObject)} for apps that ask for the compact reply{/if}
+        </td></tr>
       {/if}
     </tbody></table>
     {#if fragmented}
