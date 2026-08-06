@@ -15,6 +15,7 @@
   } from '../lib/provision.js'
   import { isKeyBackupCandidate, keyToWords, wordsToKey, decryptNcryptsec } from '../lib/restore.js'
   import { rememberDevice } from '../lib/known-devices.js'
+  import { identityKey } from '../lib/identity-key.js'
   import { nip19 } from 'nostr-tools'
   import PasswordReveal from './PasswordReveal.svelte'
 
@@ -420,7 +421,7 @@
         <label class="field">
           <span class="field-label">Derive from</span>
           <select class="field-input" bind:value={parentSlot} disabled={status === 'deriving'}>
-            {#each signerParents as parent (parent.npub)}
+            {#each signerParents as parent (identityKey(parent))}
               <option value={parent.slot}>{parent.label ?? `slot ${parent.slot}`}</option>
             {/each}
           </select>

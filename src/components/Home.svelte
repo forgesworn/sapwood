@@ -25,6 +25,7 @@
   import KindPermissions from './KindPermissions.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
   import type { ConnectSlot } from '../lib/types.js'
+  import { identityKey } from '../lib/identity-key.js'
 
   type AdvancedTab = 'apps' | 'identity' | 'device' | 'logs'
   interface Props {
@@ -474,7 +475,7 @@
           value={device.selectedSlot}
           onchange={(e) => { device.selectedSlot = parseInt((e.target as HTMLSelectElement).value); refreshSlots(device.selectedSlot) }}
         >
-          {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+          {#each device.masters.filter((m) => !m.persona) as m (identityKey(m))}
             <option value={m.slot}>{m.label ?? `slot ${m.slot}`}{typeof m.apps === 'number' ? ` · ${m.apps} app${m.apps === 1 ? '' : 's'}` : ''}</option>
           {/each}
         </select>

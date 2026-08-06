@@ -3,6 +3,7 @@
   // one, the signer's public profile, and this browser's operator key.
   // Replaces the old Masters, Provision and half the Settings tab.
   import { device, refreshMasters, syncIdentityMeta } from '../lib/device.svelte.js'
+  import { identityKey } from '../lib/identity-key.js'
   import Provision from './Provision.svelte'
   import OperatorKey from './OperatorKey.svelte'
   import ProfileRelays from './ProfileRelays.svelte'
@@ -83,9 +84,9 @@
     {:else if device.masters.length === 0}
       <p class="empty">No identities yet. Add one below, or use the guided setup on Home.</p>
     {:else}
-      <!-- Keyed by npub: derived personas carry their OWNING master's slot
-           number, so slot is not unique across the list. -->
-      {#each device.masters as master (master.npub)}
+      <!-- Keyed by identityKey: neither slot nor npub is unique on its own
+           (personas carry their owner's slot; one secret can fill two slots). -->
+      {#each device.masters as master (identityKey(master))}
         <div class="card id-card">
           <div class="id-head">
             <span class="id-slot">{master.persona ? `FROM SLOT ${master.slot}` : `SLOT ${master.slot}`}</span>

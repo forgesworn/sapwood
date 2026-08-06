@@ -6,6 +6,7 @@
   import { device } from '../lib/device.svelte.js'
   import { listKnownDevices } from '../lib/known-devices.js'
   import { buildNostrJson, isValidNip05Name, nip05Identifier } from '../lib/nip05.js'
+  import { identityKey } from '../lib/identity-key.js'
   import { copyText } from '../lib/clipboard.js'
   import { nip19 } from 'nostr-tools'
 
@@ -81,7 +82,7 @@
           <label class="field">
             <span class="field-label">Identity</span>
             <select class="field-input" bind:value={masterIdx}>
-              {#each device.masters as master, i (master.slot)}
+              {#each device.masters as master, i (identityKey(master))}
                 <option value={i}>{master.label || `Slot ${master.slot}`}</option>
               {/each}
             </select>

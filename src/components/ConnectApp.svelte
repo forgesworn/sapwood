@@ -14,6 +14,7 @@
     parseNostrConnectURI, isValidNostrConnect, permissionsToClientPolicy,
     describeNostrConnectPermissions, sharedRelay,
   } from '../lib/nostrconnect.js'
+  import { identityKey } from '../lib/identity-key.js'
   import {
     PERMISSION_PRESETS, resolvePolicy, type PresetId,
   } from '../lib/client-presets.js'
@@ -214,7 +215,7 @@
         <label class="field flow-note">
           <span class="field-label">It will sign as</span>
           <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
-            {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+            {#each device.masters.filter((m) => !m.persona) as m (identityKey(m))}
               <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
             {/each}
           </select>
@@ -340,7 +341,7 @@
         <label class="field nc-identity">
           <span class="field-label">It will sign as</span>
           <select class="field-input" bind:value={device.selectedSlot} disabled={ncPairing}>
-            {#each device.masters.filter((m) => !m.persona) as m (m.npub)}
+            {#each device.masters.filter((m) => !m.persona) as m (identityKey(m))}
               <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
             {/each}
           </select>

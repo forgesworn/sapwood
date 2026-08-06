@@ -13,6 +13,7 @@
   import ApprovalQueue from './ApprovalQueue.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
   import type { ConnectSlot } from '../lib/types.js'
+  import { identityKey } from '../lib/identity-key.js'
   import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
   import { copyText } from '../lib/clipboard.js'
   import { bunkerHasRelay } from '../lib/bunker.js'
@@ -265,7 +266,7 @@
     <section class="identity-bar">
       <span class="identity-bar-label">Apps below connect and sign as</span>
       <select class="field-input identity-pick" aria-label="Identity apps sign as" value={device.selectedSlot} onchange={handleIdentityChange}>
-        {#each identities as master (master.slot)}
+        {#each identities as master (identityKey(master))}
           <option value={master.slot}>{master.label ?? master.slot}{typeof master.apps === 'number' ? ` · ${master.apps} app${master.apps === 1 ? '' : 's'}` : ''}</option>
         {/each}
       </select>

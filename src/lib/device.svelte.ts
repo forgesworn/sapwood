@@ -13,6 +13,7 @@ import {
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
 import { policiesEqual } from './client-policy.js'
+import { dedupeIdentities } from './identity-key.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
@@ -318,7 +319,7 @@ function handleFrame(frame: { type: number; payload: Uint8Array }) {
   switch (frame.type) {
     case FrameType.PROVISION_LIST_RESPONSE:
       try {
-        device.masters = JSON.parse(decoder.decode(frame.payload)) as MasterInfo[]
+        device.masters = dedupeIdentities(JSON.parse(decoder.decode(frame.payload)) as MasterInfo[])
         // A selection carried over from another signer must not silently target
         // a different identity's slot table here.
         if (!device.masters.some((m) => m.slot === device.selectedSlot)) {
@@ -887,8 +888,11 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         // replacing identical state makes the page shuffle under the user
         // (identity cards re-render while they are typing a new name).
         const firstInventory = !device.masters.some((m) => m.addressed !== undefined)
-        if (JSON.stringify(device.masters) !== JSON.stringify(mapped)) {
-          device.masters = mapped
+        // A row the signer reports twice (or two rows whose npub_hex failed to
+        // decode to the same empty string) must never reach a keyed each.
+        const unique = dedupeIdentities(mapped)
+        if (JSON.stringify(device.masters) !== JSON.stringify(unique)) {
+          device.masters = unique
         }
         // Pre-select the identity this session was connected to; after that
         // the operator's choice sticks.
