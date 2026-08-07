@@ -8,6 +8,7 @@ import {
   FrameType,
   buildConnSlotList,
   buildConnSlotRevoke,
+  buildSessionAuth,
   buildDeriveIdentity,
   buildFirmwareInfo,
   buildProvisionList,
@@ -523,21 +524,66 @@ export function cmdOperatorRestore(phrase: string): CommandResult {
   return operatorResult(operatorFromMnemonic(clean))
 }
 
+/**
+ * Authenticate this connection as a bridge session.
+ *
+ * Connection-slot management mints or moves a signing credential, so the signer
+ * gates it behind SESSION_AUTH. That gate is right, but until now the CLI had no
+ * way through it: revoke reported the signer's refusal and left you with nowhere
+ * to go. The secret is the same 32-byte bridge secret set under Device >
+ * Security, and it is a credential, so it is taken from the environment or
+ * stdin rather than argv where it would land in shell history and `ps`.
+ */
+export async function authenticateSession(
+  t: CommandTransport,
+  hexSecret: string,
+  o: CommandOptions,
+): Promise<void> {
+  const clean = hexSecret.trim()
+  if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+    throw new CommandError('The bridge secret must be 64 hex characters (32 bytes).')
+  }
+  const resp = await t.sendAndReceive(
+    buildSessionAuth(clean),
+    [FrameType.SESSION_ACK, FrameType.NACK],
+    o.timeoutMs,
+  )
+  const status = resp.type === FrameType.SESSION_ACK ? resp.payload[0] : 0x01
+  if (status === 0x00) return
+  if (status === 0x02) {
+    throw new CommandError(
+      'This signer has no bridge secret set, so it cannot authenticate a session. '
+      + 'Set one under Device > Security in Sapwood first.',
+    )
+  }
+  throw new CommandError('The signer rejected that bridge secret.')
+}
+
 export async function cmdAppsRevoke(
   t: CommandTransport,
   slotIndex: number,
   identitySlot: number | undefined,
   o: CommandOptions,
+  bridgeSecret?: string,
 ): Promise<CommandResult> {
   const masters = await fetchMasters(t, o)
   const identity = resolveIdentitySlot(masters, identitySlot)
+  if (bridgeSecret) await authenticateSession(t, bridgeSecret, o)
   const resp = await t.sendAndReceive(
     buildConnSlotRevoke(identity.slot, slotIndex),
     [FrameType.CONNSLOT_REVOKE_RESP, FrameType.NACK],
     o.timeoutMs,
   )
   if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) {
-    throw new CommandError(nackReason(resp) || `The signer refused to revoke app slot ${slotIndex}.`)
+    const reason = nackReason(resp)
+    // The signer says WHY it refused; add the bit only the CLI knows, which is
+    // how to satisfy it from here.
+    if (!bridgeSecret && reason.includes('authenticated bridge session')) {
+      throw new CommandError(
+        `${reason}. Set SAPWOOD_BRIDGE_SECRET, or pass --bridge-secret - to read it from stdin.`,
+      )
+    }
+    throw new CommandError(reason || `The signer refused to revoke app slot ${slotIndex}.`)
   }
   return {
     data: { revoked: slotIndex, identity: identity.label },

@@ -268,6 +268,53 @@ describe('cmdAppsRevoke', () => {
     })
     await expect(cmdAppsRevoke(t, 7, undefined, O)).rejects.toThrow('no such slot')
   })
+
+  const SECRET = 'ab'.repeat(32)
+
+  it('authenticates the session before revoking when given the secret', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[0]!]),
+      [FrameType.SESSION_AUTH]: { type: FrameType.SESSION_ACK, payload: new Uint8Array([0x00]) },
+      [FrameType.CONNSLOT_REVOKE]: { type: FrameType.CONNSLOT_REVOKE_RESP, payload: new Uint8Array(0) },
+    })
+    await cmdAppsRevoke(t, 2, undefined, O, SECRET)
+    // Order matters: the signer gates revoke on the session, so auth must land
+    // first or the revoke is refused.
+    const order = t.seen.map((f) => f.type)
+    expect(order.indexOf(FrameType.SESSION_AUTH)).toBeLessThan(order.indexOf(FrameType.CONNSLOT_REVOKE))
+  })
+
+  it('points at the way through when the signer wants a session', async () => {
+    // The firmware says WHY it refused; the CLI adds the part only it knows,
+    // which is how to satisfy it. Without this the message is a dead end.
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[0]!]),
+      [FrameType.CONNSLOT_REVOKE]: nack('connection-slot management requires an authenticated bridge session'),
+    })
+    await expect(cmdAppsRevoke(t, 2, undefined, O)).rejects.toThrow(/SAPWOOD_BRIDGE_SECRET/)
+  })
+
+  it('rejects a malformed secret without touching the device', async () => {
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[0]!]),
+    })
+    await expect(cmdAppsRevoke(t, 2, undefined, O, 'nope')).rejects.toThrow(/64 hex characters/)
+    expect(t.seen.some((f) => f.type === FrameType.SESSION_AUTH)).toBe(false)
+  })
+
+  it('explains a signer with no bridge secret set, distinctly from a wrong one', async () => {
+    const noSecret = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[0]!]),
+      [FrameType.SESSION_AUTH]: { type: FrameType.SESSION_ACK, payload: new Uint8Array([0x02]) },
+    })
+    await expect(cmdAppsRevoke(noSecret, 2, undefined, O, SECRET)).rejects.toThrow(/no bridge secret set/)
+
+    const wrong = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[0]!]),
+      [FrameType.SESSION_AUTH]: { type: FrameType.SESSION_ACK, payload: new Uint8Array([0x01]) },
+    })
+    await expect(cmdAppsRevoke(wrong, 2, undefined, O, SECRET)).rejects.toThrow(/rejected that bridge secret/)
+  })
 })
 
 describe('identities remove', () => {

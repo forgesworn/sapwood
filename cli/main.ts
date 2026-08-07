@@ -417,7 +417,15 @@ async function main(): Promise<void> {
         break
       case 'apps':
         if (revokeSlot !== undefined) {
-          printResult(await cmdAppsRevoke(transport, revokeSlot, identity, o), json)
+          // A credential, so never from argv where it lands in shell history
+          // and `ps`. The environment or a pipe, same as the key commands.
+          const secretFlag = typeof flags['bridge-secret'] === 'string'
+            ? flags['bridge-secret']
+            : undefined
+          const bridgeSecret = secretFlag === '-'
+            ? (await readAllStdin()).trim()
+            : (secretFlag || process.env.SAPWOOD_BRIDGE_SECRET || undefined)
+          printResult(await cmdAppsRevoke(transport, revokeSlot, identity, o, bridgeSecret), json)
         } else {
           printResult(await cmdApps(transport, identity, o), json)
         }

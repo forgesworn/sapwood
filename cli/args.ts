@@ -4,7 +4,7 @@
 
 export class UsageError extends Error {}
 
-const VALUE_FLAGS = new Set(['port', 'parent', 'identity', 'signature', 'timeout', 'baud', 'out'])
+const VALUE_FLAGS = new Set(['port', 'parent', 'identity', 'signature', 'timeout', 'baud', 'out', 'bridge-secret'])
 const BOOL_FLAGS = new Set(['json', 'all', 'help', 'version', 'yes'])
 
 export interface ParsedArgs {
@@ -78,6 +78,8 @@ OPTIONS
   --signature <path>  ed25519 release signature for firmware update
                       (<file.bin>.sig is picked up automatically)
   --out <path>        backup export: file to write (default heartwood-backup-*.json)
+  --bridge-secret -   apps revoke: read the bridge secret from stdin
+                      (or set SAPWOOD_BRIDGE_SECRET)
   --timeout <ms>      Round-trip timeout (default 10000)
   --baud <rate>       Serial baud rate (default 115200)
   --all               ports: include non-signer serial ports
