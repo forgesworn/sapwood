@@ -111,10 +111,9 @@ BLE connectivity planned for portable mode (child key only, short range). Additi
 | DERIVE_IDENTITY | 0x60 | host -> device | parent_slot (1) + name utf8; device derives the nsec-tree child on-device |
 | DERIVE_IDENTITY_RESPONSE | 0x61 | device -> host | JSON `{slot, label, npub, parent_slot, purpose, existing}` |
 | FACTORY_RESET | 0x24 | host -> device | (empty, requires button) |
-| POLICY_LIST_REQUEST | 0x27 | host -> device | master_slot (1 byte) |
-| POLICY_LIST_RESPONSE | 0x28 | device -> host | JSON `Vec<ClientPolicy>` |
-| POLICY_REVOKE | 0x29 | host -> device | master_slot (1) + pubkey_hex (64) |
-| POLICY_UPDATE | 0x2A | host -> device | master_slot (1) + JSON ClientPolicy |
+| SESSION_AUTH | 0x21 | host -> device | 32-byte bridge secret; reply SESSION_ACK 0x22 (0x00 ok / 0x01 wrong / 0x02 none set) |
+| CONNSLOT_LIST | 0x42 | host -> device | master_slot (1); secrets redacted, no session needed |
+| CONNSLOT_REVOKE | 0x46 | host -> device | master_slot (1) + slot_index (1); **needs SESSION_AUTH first** |
 | OTA_BEGIN | 0x30 | host -> device | size_u32_be + sha256 (requires button) |
 | OTA_CHUNK | 0x31 | host -> device | offset_u32_be + data |
 | OTA_FINISH | 0x32 | host -> device | (empty) |
@@ -123,6 +122,28 @@ BLE connectivity planned for portable mode (child key only, short range). Additi
 | BACKUP_EXPORT_RESPONSE | 0x51 | device -> host | JSON `BackupPayload` (masters + connection slots + bridge secret) |
 | BACKUP_IMPORT_REQUEST | 0x52 | host -> device | JSON `BackupPayload` (masters pre-filtered to those the device holds; requires button) |
 | BACKUP_IMPORT_RESPONSE | 0x53 | device -> host | 1 byte: 0x01 ok / 0x00 fail |
+
+**Not implemented, despite being declared.** `POLICY_LIST_REQUEST` (0x27),
+`POLICY_LIST_RESPONSE` (0x28), `POLICY_REVOKE` (0x29) and `POLICY_UPDATE` (0x2A)
+exist in `heartwood-common/src/types.rs` and in `frame.ts`, and the firmware has
+no handler for any of them. Sapwood only touches them in byte-roundtrip tests.
+App permissions go over the `CONNSLOT_*` frames instead. They were listed here as
+live and cost a debugging session: `POLICY_REVOKE` looks like the way to revoke
+an app without a bridge session, and it does nothing at all.
+
+### Signing size, and the compact dialect
+
+`max_sign_bytes` in FIRMWARE_INFO is not a hardware limit, it is an encoding one.
+NIP-46 carries the event as a JSON *string* inside `params`, so its quotes are
+escaped twice and unescaping grows a buffer by doubling; and `sign_event` echoes
+the whole signed event back. Each costs one contiguous allocation of about twice
+the content, and each aborts a no-PSRAM signer on its own.
+
+A client that sends `params[0]` as a JSON **object** and asks for
+`sign_event_compact` (reply: `{id, sig, pubkey, created_at}`) avoids both, and
+earns `max_sign_bytes_object` instead: 18 KB against 12 KB on a V4. Both halves
+are required, and the signer enforces that. Measurements are in
+`heartwood-esp32/docs/BENCH-2026-08-06-message-sizes.md`.
 
 ## Grant status
 
