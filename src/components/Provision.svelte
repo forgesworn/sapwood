@@ -222,6 +222,9 @@
     }
   }
 
+  /** Phrase length for on-device generation: 12 words (128-bit) or 24 (256-bit). */
+  let genWords = $state<12 | 24>(12)
+
   /** Ask the signer to generate a fresh master itself (entropy game first). */
   async function handleGenerateOnDevice() {
     status = 'sending'
@@ -229,7 +232,7 @@
     npubPreview = ''
     try {
       label = label.trim() || 'default'
-      const npub = await generateIdentity(label)
+      const npub = await generateIdentity(label, genWords)
       npubPreview = npub
       status = 'done'
       message = `Identity '${label}' generated on the signer. The 12-word recovery phrase is on its screen — write it down on paper and confirm there.`
@@ -545,9 +548,42 @@
       {/if}
 
       {#if mode === 'generate-device'}
+        <div class="source-toggle" role="radiogroup" aria-label="Recovery phrase length">
+          <button
+            class="source-opt"
+            class:on={genWords === 12}
+            onclick={() => (genWords = 12)}
+            disabled={status === 'sending'}
+          >
+            <span class="source-title">12 words — 128-bit</span>
+            <span class="source-desc">Standard strength, quicker to write down.</span>
+          </button>
+          <button
+            class="source-opt"
+            class:on={genWords === 24}
+            onclick={() => (genWords = 24)}
+            disabled={status === 'sending'}
+          >
+            <span class="source-title">24 words — 256-bit</span>
+            <span class="source-desc">Maximum strength, twice as much to copy by hand.</span>
+          </button>
+        </div>
+
         {#if status === 'sending'}
-          <p class="hint-sm">Watch the signer's screen: tap its button to play the entropy game
-            (or hold to skip), then write down the 12 words it shows.</p>
+          <!-- The OLED is small, so the full instructions live here while the
+               device shows just the essentials. -->
+          <div class="game-guide">
+            <p class="game-guide-title">On the signer's screen now:</p>
+            <ol class="game-steps">
+              <li><strong>Entropy game.</strong> Blocks roll towards you — <strong>tap the
+                button to jump</strong> them. Your tap timing is mixed into the key's
+                randomness; play ~a minute. <strong>Hold the button</strong> at any point to
+                skip and use the chip's generator alone.</li>
+              <li><strong>Working…</strong> — the key is created inside the signer.</li>
+              <li><strong>Write down the {genWords} words</strong>, one per screen: tap for the
+                next, hold on the final screen to confirm. This is the only time they appear.</li>
+            </ol>
+          </div>
         {/if}
         <button
           class="btn btn-primary derive"
@@ -599,6 +635,16 @@
 <style>
   .form { display: flex; flex-direction: column; gap: 0.75rem; }
   .derive { align-self: flex-start; margin-top: 0.25rem; }
+
+  /* Full game instructions while the device runs (its OLED is too small) */
+  .game-guide {
+    background: #0a0f14; border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7rem 0.8rem;
+  }
+  .game-guide-title { margin: 0 0 0.4rem; font-weight: 600; color: var(--green); font-size: 0.85rem; }
+  .game-steps { margin: 0; padding-left: 1.2rem; }
+  .game-steps li { font-size: 0.82rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 0.45rem; }
+  .game-steps strong { color: var(--text); }
 
   .confirm { margin: 1rem 0; }
   .confirm-npub { margin: 0.5rem 0; }

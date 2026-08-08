@@ -136,6 +136,9 @@
     } catch { /* non-fatal */ }
   }
 
+  // Phrase length for on-device generation: 12 words (128-bit) or 24 (256-bit).
+  let genWords = $state<12 | 24>(12)
+
   async function generateOnDevice() {
     if (!nameOk(name)) return
     status = 'generating'
@@ -143,7 +146,7 @@
     try {
       // The device makes the seed and shows the phrase on its screen; only the
       // public npub comes back.
-      npub = await generateIdentity(provisionLabel(name))
+      npub = await generateIdentity(provisionLabel(name), genWords)
       rememberProvisioned()
       status = 'idle'
       step = 'writedown'
@@ -347,11 +350,35 @@
         autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
         data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" />
     </label>
+    {#if mode === 'create'}
+      <fieldset class="word-count">
+        <legend class="field-label">Recovery phrase length</legend>
+        <label class="word-opt" class:on={genWords === 12}>
+          <input type="radio" name="gen-words" checked={genWords === 12} onchange={() => (genWords = 12)} disabled={status === 'generating'} />
+          <span>12 words — 128-bit, quicker to write down</span>
+        </label>
+        <label class="word-opt" class:on={genWords === 24}>
+          <input type="radio" name="gen-words" checked={genWords === 24} onchange={() => (genWords = 24)} disabled={status === 'generating'} />
+          <span>24 words — 256-bit, maximum strength</span>
+        </label>
+      </fieldset>
+    {/if}
     {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
     {#if status === 'generating'}
-      <p class="fi-working">⏳ Watch the device's screen: tap its button to play the entropy game
-        (or hold to skip), then it creates its keys and shows the 12 words there.</p>
+      <!-- The OLED is small, so the full instructions live here while the
+           device shows just the essentials. -->
+      <div class="fi-game-guide">
+        <p class="fi-working">⏳ On the device's screen now:</p>
+        <ol class="fi-game-steps">
+          <li><strong>Entropy game</strong> — blocks roll in; <strong>tap the button to jump</strong>
+            them. Your tap timing is mixed into the key's randomness. <strong>Hold</strong> to skip
+            and use the chip's generator alone.</li>
+          <li><strong>Working…</strong> — the key is created inside the signer.</li>
+          <li><strong>Write down the {genWords} words</strong>, one per screen — tap for the next,
+            hold on the last screen to confirm. They only appear this once.</li>
+        </ol>
+      </div>
     {/if}
     <div class="fi-actions">
       <button class="btn btn-secondary" onclick={() => (step = mode === 'create' ? 'intro' : 'restore-source')} disabled={status === 'generating'}>Back</button>
@@ -531,7 +558,7 @@
   {:else if step === 'writedown'}
     <h2 class="fi-title">Write down the words on your device</h2>
     <p class="fi-lede">
-      Your signer is showing its <strong>12-word recovery phrase, one big word at a time</strong>.
+      Your signer is showing its <strong>{genWords}-word recovery phrase, one big word at a time</strong>.
       <strong>Tap the button on the signer to step through them</strong>, writing each one down in
       order. Keep them safe: they're the only way to recover this signer, and
       <strong>anyone who has them controls it</strong>. They appear only on the device, never here.
@@ -546,7 +573,7 @@
     {/if}
     <label class="confirm-save">
       <input type="checkbox" bind:checked={saved} />
-      <span>I've stepped through all 12 words, written them down, and held the button to save.</span>
+      <span>I've stepped through all {genWords} words, written them down, and held the button to save.</span>
     </label>
     <div class="fi-actions">
       <button class="btn btn-primary" disabled={!saved} onclick={finish}>Continue</button>
@@ -632,6 +659,21 @@
   .fi-guide a { color: var(--green); }
   .fi-lede strong { color: var(--text); }
   .fi-working { font-size: 0.85rem; color: var(--green-dim); line-height: 1.55; margin: 0.6rem 0 0; }
+
+  .word-count { border: none; margin: 0.4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+  .word-opt { display: flex; align-items: center; gap: 0.55rem; font-size: 0.85rem; color: var(--text-dim); cursor: pointer; }
+  .word-opt input { accent-color: var(--green); }
+  .word-opt.on span { color: var(--text); }
+
+  /* Full game instructions while the device runs (its OLED is too small) */
+  .fi-game-guide {
+    margin-top: 0.7rem; padding: 0.7rem 0.9rem;
+    background: #08130d; border: 1px solid var(--green-dim); border-radius: 6px;
+  }
+  .fi-game-guide .fi-working { margin: 0 0 0.4rem; }
+  .fi-game-steps { margin: 0; padding-left: 1.2rem; }
+  .fi-game-steps li { font-size: 0.82rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 0.4rem; }
+  .fi-game-steps strong { color: var(--green); }
 
   .fi-advanced {
     display: block; margin: 1rem 0 0; padding: 0; width: 100%;

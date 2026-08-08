@@ -5,6 +5,7 @@ import { buildFrame, parseFrame, FrameError, FrameType, OVERHEAD, MAX_PAYLOAD } 
 import { crc32 } from './crc32.js'
 import {
   buildDeriveIdentity,
+  buildGenerateIdentity,
   buildPolicyListRequest,
   buildPolicyRevoke,
   buildPolicyUpdate,
@@ -154,6 +155,20 @@ describe('policy management frames', () => {
     expect(Array.from(frame.payload)).toEqual([3])
     expect(() => buildProvisionRemove(-1)).toThrow(RangeError)
     expect(() => buildProvisionRemove(256)).toThrow(RangeError)
+  })
+
+  it('roundtrips GENERATE_IDENTITY with label and word count', () => {
+    // 12 words is the default.
+    let frame = parseFrame(buildGenerateIdentity('vault'))
+    expect(frame.type).toBe(FrameType.GENERATE_IDENTITY)
+    expect(frame.payload[0]).toBe(5)
+    expect(new TextDecoder().decode(frame.payload.slice(1, 6))).toBe('vault')
+    expect(frame.payload[6]).toBe(12)
+
+    // 24 words must land in the trailing byte the firmware reads.
+    frame = parseFrame(buildGenerateIdentity('deep vault', 24))
+    expect(frame.payload[10 + 1]).toBe(24)
+    expect(frame.payload.length).toBe(1 + 10 + 1)
   })
 
   it('roundtrips FACTORY_RESET', () => {

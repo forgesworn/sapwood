@@ -2019,10 +2019,10 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
  * and stores it. No phrase or secret crosses the cable — the ACK carries only
  * the public npub (returned here) so we can address it over the relay later.
  */
-export async function generateIdentity(label = 'default'): Promise<string> {
+export async function generateIdentity(label = 'default', words: 12 | 24 = 12): Promise<string> {
   if (device.mode !== 'serial') throw new Error('Generating an identity needs a USB connection')
   const resp = await serialTransport.sendAndReceive(
-    buildGenerateIdentity(label),
+    buildGenerateIdentity(label, words),
     [FrameType.ACK, FrameType.NACK],
     // The device first offers its entropy game (owner's button timing is
     // stacked with the hardware RNG): up to 30 s on the intro screen plus a

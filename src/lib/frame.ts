@@ -196,15 +196,19 @@ export function buildProvisionRemove(slot: number): Uint8Array {
 }
 
 /**
- * Build a GENERATE_IDENTITY frame (0x57). The device generates its own seed,
- * shows the recovery phrase on its OWN screen, and stores it — no secret is
- * sent either way. Payload: [label_len][label].
+ * Build a GENERATE_IDENTITY frame (0x57). The device plays its entropy game,
+ * generates its own seed from stacked entropy, shows the recovery phrase on
+ * its OWN screen, and stores it — no secret is sent either way.
+ * Payload: [label_len][label][words]. `words` (12 or 24) selects the phrase
+ * length; firmware predating the words byte ignores it and makes 12 words —
+ * the owner sees the real phrase length on the device screen.
  */
-export function buildGenerateIdentity(label: string): Uint8Array {
+export function buildGenerateIdentity(label: string, words: 12 | 24 = 12): Uint8Array {
   const labelBytes = new TextEncoder().encode(label.slice(0, 32))
-  const payload = new Uint8Array(1 + labelBytes.length)
+  const payload = new Uint8Array(1 + labelBytes.length + 1)
   payload[0] = labelBytes.length
   payload.set(labelBytes, 1)
+  payload[1 + labelBytes.length] = words
   return buildFrame(FrameType.GENERATE_IDENTITY, payload)
 }
 
