@@ -129,6 +129,9 @@
     cursor: pointer; transition: all 0.12s;
   }
   .suggestion:hover:not(:disabled) { border-color: var(--green-dim); color: var(--green); }
+  @media (pointer: coarse) {
+    .suggestion { padding: 0.5rem 0.75rem; }
+  }
   .suggestion:disabled { opacity: 0.4; cursor: not-allowed; }
   .add-row { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
   .add-row input { flex: 1; padding: 0.4rem 0.6rem; font-size: 0.82rem; }

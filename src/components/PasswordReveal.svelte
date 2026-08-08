@@ -50,4 +50,7 @@
   .eye:hover:not(:disabled) { color: var(--text, #ccc); }
   .eye:disabled { opacity: 0.4; cursor: not-allowed; }
   svg { width: 1.05rem; height: 1.05rem; display: block; }
+  @media (pointer: coarse) {
+    .eye { padding: 0.55rem; right: 0.2rem; }
+  }
 </style>

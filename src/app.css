@@ -24,6 +24,15 @@
 
 * {
   box-sizing: border-box;
+  /* The default grey tap flash reads as a glitch on the dark surface; every
+     interactive control has its own pressed/hover state instead. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  /* Stop iOS Safari inflating text when the phone rotates to landscape. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -190,3 +199,25 @@ button.tag:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Selectable monospace values (pubkeys, phrases). */
 .mono { font-size: 0.78rem; color: var(--green-dim); word-break: break-all; user-select: all; }
 .mono--masked { color: #555; letter-spacing: 0.1em; user-select: none; }
+
+/* ---------------------------------------------------------------------------
+   Touch screens. The compact desktop sizes stay as they are under a mouse;
+   under a finger every small control gets a fuller hit area, and text fields
+   are clamped to 16px so iOS Safari does not zoom the page on focus.
+--------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  .btn-sm { padding: 0.55rem 0.95rem; }
+  .btn-link { padding: 0.5rem 0.4rem; }
+  button.tag { padding: 0.5rem 0.75rem; }
+  .disclosure summary { padding: 0.5rem 0; }
+  input[type='checkbox'],
+  input[type='radio'] { width: 1.15rem; height: 1.15rem; flex-shrink: 0; }
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea { font-size: max(16px, 1em) !important; }
+}
+
+/* Narrow phones: the fixed 9rem label column starves the value column. */
+@media (max-width: 640px) {
+  .kv-table td.label { width: 6.5rem; white-space: normal; }
+}

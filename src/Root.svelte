@@ -40,6 +40,7 @@
 <style>
   .route-loading {
     min-height: 100vh;
+    min-height: 100dvh;
     display: grid;
     place-content: center;
     gap: 1rem;

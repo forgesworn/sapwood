@@ -265,6 +265,9 @@
     max-width: 1100px;
     margin: 0 auto;
     padding: 2.25rem 2.5rem;
+    /* With viewport-fit=cover the notch may intrude in landscape. */
+    padding-left: max(2.5rem, env(safe-area-inset-left));
+    padding-right: max(2.5rem, env(safe-area-inset-right));
   }
 
   .version {
@@ -356,7 +359,9 @@
   .header-link {
     background: none;
     border: none;
-    padding: 0;
+    /* Padding pulled back by margin: a finger-sized target, no layout shift. */
+    padding: 0.65rem 0.5rem;
+    margin: -0.65rem -0.5rem;
     font-family: inherit;
     font-size: 0.8rem;
     color: var(--green-dim);
@@ -446,7 +451,11 @@
   /* Mobile-first: tighten the shell. The advanced cockpit docks a fixed tab bar
      to the bottom, so reserve room for it only in that view. */
   @media (max-width: 640px) {
-    main { padding: 1.25rem 1rem; }
+    main {
+      padding: 1.25rem 1rem;
+      padding-left: max(1rem, env(safe-area-inset-left));
+      padding-right: max(1rem, env(safe-area-inset-right));
+    }
     main.has-bottom-nav { padding-bottom: 5.5rem; }
     h1 { font-size: 1.5rem; letter-spacing: 0.08em; }
     .divider { height: 1rem; }

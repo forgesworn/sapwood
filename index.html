@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       name="description"
       content="Set up and manage a Heartwood ESP32 signing device from the browser using USB, Wi-Fi, or a local bridge."
@@ -22,6 +22,9 @@
          stays literal; http.ts detects this and falls back to no-auth. -->
     <meta name="heartwood-api-token" content="__HEARTWOOD_API_TOKEN__" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!-- iOS ignores SVG icons for the home screen; it wants this PNG. -->
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="./manifest.webmanifest" />
   </head>
   <body>

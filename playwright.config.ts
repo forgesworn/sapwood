@@ -15,11 +15,12 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    // The QR receive/import path is specifically an iPhone workflow. Keep a
-    // real mobile WebKit lane for it without doubling every USB/flasher test.
+    // The QR receive/import path and the phone-sized layout net are
+    // specifically iPhone workflows. Keep a real mobile WebKit lane for them
+    // without doubling every USB/flasher test.
     {
       name: 'mobile-webkit',
-      testMatch: /import\.spec\.ts/,
+      testMatch: /import\.spec\.ts|mobile\.spec\.ts/,
       use: { ...devices['iPhone 13'] },
     },
   ],

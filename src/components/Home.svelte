@@ -687,6 +687,9 @@
     font-size: 0.9rem; padding: 0.1rem 0.3rem; border-radius: 3px;
   }
   .rename-pencil:hover { color: var(--green); }
+  @media (pointer: coarse) {
+    .rename-pencil { padding: 0.55rem; margin: -0.45rem -0.25rem; }
+  }
   .rename { display: flex; gap: 0.5rem; align-items: center; }
   .rename-input { font-size: 1.1rem; padding: 0.4rem 0.6rem; }
 
@@ -751,9 +754,14 @@
     font-family: inherit; font-size: 0.9rem; padding: 0;
   }
   .footer-link:hover { color: #fff; }
+  @media (pointer: coarse) {
+    .footer-link { padding: 0.6rem 0; }
+  }
 
   @media (max-width: 640px) {
     .app-row { flex-wrap: wrap; }
-    .app-actions { width: 100%; justify-content: flex-end; }
+    /* The actions must wrap too: three no-wrap buttons overflow a phone-width
+       card and poke out of its left edge when forced onto one line. */
+    .app-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
   }
 </style>

@@ -98,6 +98,8 @@
       left: 0; right: 0; bottom: 0;
       margin: 0;
       padding: 0 0.5rem;
+      padding-left: max(0.5rem, env(safe-area-inset-left));
+      padding-right: max(0.5rem, env(safe-area-inset-right));
       padding-bottom: env(safe-area-inset-bottom, 0);
       background: var(--surface);
       border-top: 2px solid var(--border);
