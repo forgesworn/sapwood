@@ -10,5 +10,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts', 'cli/**/*.test.ts'],
+    // Keeps unit tests off the network — see the note in the setup file.
+    setupFiles: ['./vitest.setup.ts'],
   },
 })
