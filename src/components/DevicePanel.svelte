@@ -184,19 +184,28 @@
   let vaultShowKey = $state(false)
   let vaultCopied = $state(false)
   let vaultImport = $state('')
+  // Escrow-first state: a generated key that is stored in this browser but
+  // not yet applied on the signer. The seal step is gated on the operator
+  // confirming they have backed the key up off-browser.
+  let vaultEscrowKey = $state<string | null>(null)
+  let vaultEscrowTick = $state(false)
 
-  async function handleVaultEnable() {
+  function handleVaultGenerate() {
     if (!vaultDeviceKey) { vaultStatus = 'Add an identity to the signer first.'; return }
+    const key = generateVaultKeyHex()
+    // Store immediately: even if the flow is abandoned or the device round-trip
+    // later fails, the key is never orphaned.
+    storeVaultKey(vaultDeviceKey, key)
+    vaultEscrowKey = key
+    vaultEscrowTick = false
+    vaultStatus = null
+  }
+
+  async function handleVaultSeal() {
+    if (!vaultDeviceKey || !vaultEscrowKey) return
+    const key = vaultEscrowKey
     vaultPending = true
     vaultStatus = null
-    const key = generateVaultKeyHex()
-    // Store the key BEFORE the device round-trip: the signer re-encrypts every
-    // seed before it ACKs (PBKDF2 per master), so a missed or timed-out ACK
-    // must never orphan the key — without it a sealed signer is unrecoverable.
-    // On failure the key is removed again only if the device definitely
-    // refused (NACK); on timeout/transport ambiguity it is kept.
-    storeVaultKey(vaultDeviceKey, key)
-    vaultStored = key
     try {
       await ensureBridgeAuth()
       device.awaitingButton = 'Confirm on your signer: it shows “Encrypt at rest?” — press its button within 30 seconds.'
@@ -205,19 +214,14 @@
       } finally {
         device.awaitingButton = null
       }
+      vaultStored = key
+      vaultEscrowKey = null
       vaultShowKey = true
-      vaultStatus = 'Encryption at rest is on. Store the vault key somewhere safe before you rely on it.'
+      vaultStatus = 'Encryption at rest is on. The key stays in this browser — keep your off-site copy safe.'
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed'
-      if (/rejected|cancelled|denied/i.test(msg)) {
-        // Definite refusal — the seeds were never re-wrapped; drop the key.
-        removeVaultKey(vaultDeviceKey)
-        vaultStored = null
-        vaultStatus = msg
-      } else {
-        vaultShowKey = true
-        vaultStatus = `${msg} — the signer may still have sealed itself. The vault key above is kept in this browser; copy it somewhere safe NOW, then reboot the signer to check its state.`
-      }
+      // The key is already stored (and visible below) whatever happened; a
+      // missed ACK after the signer re-encrypted its seeds cannot orphan it.
+      vaultStatus = `${e instanceof Error ? e.message : 'Failed'} — your vault key is shown above and kept in this browser. If the signer sealed itself anyway, it will ask for this key on next boot.`
     } finally {
       vaultPending = false
     }
@@ -481,6 +485,45 @@
           changing encryption.</p>
       {:else if !vaultDeviceKey}
         <p class="hint-sm">Add an identity to the signer first.</p>
+      {:else if vaultEscrowKey}
+        <div class="vault-escrow">
+          <p class="warn-text">Your vault key — store it somewhere safe off this browser
+            (password manager, printed) <strong>before</strong> the signer is sealed. Without it,
+            a sealed signer cannot be unlocked.</p>
+          <div class="uri-box"><code>{vaultEscrowKey}</code></div>
+          <div class="inline-form">
+            <button class="btn btn-secondary btn-sm" disabled={vaultPending}
+              onclick={async () => { vaultCopied = await copyText(vaultEscrowKey ?? '') }}>
+              {vaultCopied ? 'Copied ✓' : 'Copy'}
+            </button>
+            <button class="btn btn-secondary btn-sm" disabled={vaultPending}
+              onclick={() => {
+                const url = URL.createObjectURL(new Blob([`${vaultEscrowKey}\n`], { type: 'text/plain' }))
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `heartwood-vault-key-${vaultDeviceKey?.slice(0, 8) ?? 'signer'}.txt`
+                a.click()
+                URL.revokeObjectURL(url)
+              }}>
+              Download
+            </button>
+          </div>
+          <label class="hint-sm vault-escrow-tick">
+            <input type="checkbox" bind:checked={vaultEscrowTick} disabled={vaultPending} />
+            I have stored this key outside this browser
+          </label>
+          <div class="inline-form">
+            <button class="btn btn-primary btn-sm"
+              disabled={vaultPending || !vaultEscrowTick}
+              onclick={handleVaultSeal}>
+              {vaultPending ? 'Waiting for the button…' : 'Seal the signer now'}
+            </button>
+            <button class="btn btn-ghost btn-sm" disabled={vaultPending}
+              onclick={() => { if (vaultDeviceKey) removeVaultKey(vaultDeviceKey); vaultEscrowKey = null }}>
+              Discard key
+            </button>
+          </div>
+        </div>
       {:else if vaultStored}
         <p class="hint-sm">This browser holds a vault key for this signer.</p>
         <div class="vault-escrow">
@@ -514,12 +557,12 @@
       {:else}
         <ConfirmButton
           label="Encrypt at rest"
-          question="Encrypt this signer's stored keys? This browser keeps the vault key."
-          confirmLabel="Yes, encrypt at rest"
-          busyLabel="Waiting for the button…"
+          question="Generate a vault key and encrypt this signer's stored keys? You will back the key up before anything is sealed."
+          confirmLabel="Yes, generate the key"
+          busyLabel="Working…"
           busy={vaultPending}
           buttonClass="btn btn-secondary btn-sm"
-          onconfirm={handleVaultEnable}
+          onconfirm={handleVaultGenerate}
         />
         <details class="disclosure vault-import">
           <summary>Restore a vault key saved elsewhere</summary>
