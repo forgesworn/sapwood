@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity, relayProvisionIdentity } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity, relayProvisionIdentity, generateIdentity } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
@@ -40,10 +40,22 @@
     } catch { /* non-fatal */ }
   }
 
+  // 'generate-device' is a local UI-only mode on top of ProvisionMode: no
+  // secret is built in the browser at all — the signer generates the key
+  // itself (playing its entropy game first), so there is no provision frame.
+  type ModeChoice = ProvisionMode | 'generate-device'
+
   // Over the relay the recommended path is the on-signer derive (no secret in
   // the browser), so it opens on that mode with an empty name. All other modes
   // work remotely too: the secret travels NIP-44 encrypted end-to-end.
-  let mode = $state<ProvisionMode>(device.mode === 'relay' ? 'named-child' : 'tree-mnemonic')
+  let mode = $state<ModeChoice>(device.mode === 'relay' ? 'named-child' : 'tree-mnemonic')
+
+  // The device-generation option needs USB: the entropy game is played on the
+  // signer's own screen and button. If the cable drops while it is selected,
+  // fall back to a mode that works over the current transport.
+  $effect(() => {
+    if (mode === 'generate-device' && device.mode !== 'serial') mode = 'tree-mnemonic'
+  })
   let label = $state(device.mode === 'relay' ? '' : 'default')
   let secret = $state('')
   let passphrase = $state('')
@@ -109,7 +121,13 @@
 
   // Plain-English explanation of each style, including the one thing that trips
   // people up: whether the device keeps your existing npub or gets a new one.
-  const MODE_INFO: Record<ProvisionMode, { title: string; body: string; address: string; addressKind: 'same' | 'new' }> = {
+  const MODE_INFO: Record<ModeChoice, { title: string; body: string; address: string; addressKind: 'same' | 'new' }> = {
+    'generate-device': {
+      title: 'Fresh key — the device generates it',
+      body: 'The signer makes a brand-new key itself: nothing is typed into this browser and no secret ever crosses the cable. It first offers a quick button game — your tap timing is mixed into the key’s randomness (hold the button to skip). The 12-word recovery phrase then appears on the signer’s screen: write it down on paper.',
+      address: 'A new address, generated inside the signer.',
+      addressKind: 'new',
+    },
     'tree-mnemonic': {
       title: 'Recovery phrase (12 or 24 words)',
       body: 'Build the signer from a BIP-39 recovery phrase. The device makes a tree of keys from it, so one phrase can run several named accounts. Generate a fresh phrase on the Home setup flow, or paste an existing one here. An optional passphrase adds a secret 25th word.',
@@ -201,6 +219,24 @@
     } catch (e) {
       status = 'error'
       message = e instanceof Error ? e.message : 'Derivation failed'
+    }
+  }
+
+  /** Ask the signer to generate a fresh master itself (entropy game first). */
+  async function handleGenerateOnDevice() {
+    status = 'sending'
+    message = ''
+    npubPreview = ''
+    try {
+      label = label.trim() || 'default'
+      const npub = await generateIdentity(label)
+      npubPreview = npub
+      status = 'done'
+      message = `Identity '${label}' generated on the signer. The 12-word recovery phrase is on its screen — write it down on paper and confirm there.`
+      rememberProvisioned(npub, label)
+    } catch (e) {
+      status = 'error'
+      message = e instanceof Error ? e.message : 'Generation failed'
     }
   }
 
@@ -376,6 +412,9 @@
           disabled={status === 'deriving' || status === 'sending'}
           onchange={() => { if (mode === 'named-child' && label === 'default') label = '' }}
         >
+          {#if device.mode === 'serial'}
+            <option value="generate-device">Fresh key: the device generates it (plays the entropy game)</option>
+          {/if}
           <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
           <option value="named-child">Name: derive a named identity from your master</option>
           <option value="bunker">Existing nsec: sign as-is (keeps your npub)</option>
@@ -501,7 +540,19 @@
         {/if}
       {/if}
 
-      {#if onSigner}
+      {#if mode === 'generate-device'}
+        {#if status === 'sending'}
+          <p class="hint-sm">Watch the signer's screen: tap its button to play the entropy game
+            (or hold to skip), then write down the 12 words it shows.</p>
+        {/if}
+        <button
+          class="btn btn-primary derive"
+          disabled={!device.connected || device.mode !== 'serial' || status === 'sending'}
+          onclick={handleGenerateOnDevice}
+        >
+          {status === 'sending' ? 'Creating on device…' : 'Create it on the device →'}
+        </button>
+      {:else if onSigner}
         <button
           class="btn btn-primary derive"
           disabled={!device.connected || (device.mode !== 'serial' && device.mode !== 'relay')
@@ -529,7 +580,9 @@
   {/if}
 
   <p class="security-note">
-    {#if onSigner}
+    {#if mode === 'generate-device'}
+      The key is generated inside the signer — your game timing mixed with its hardware RNG — and never leaves it. This browser only ever learns the public npub.
+    {:else if onSigner}
       The identity is derived inside the signer from the master it already holds. No secret enters or leaves this browser.
     {:else if overRelay}
       The secret is derived in your browser and sent to the signer encrypted end-to-end (NIP-44). Relays and every network hop only ever carry ciphertext; nothing is stored or logged.
