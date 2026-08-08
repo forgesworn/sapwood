@@ -59,6 +59,10 @@ export interface MasterInfo {
   apps?: number
   /** Display override for the mode tag (e.g. 'WIFI-STANDALONE' over relay). */
   modeLabel?: string
+  /** True while this identity's seed is encrypted at rest and the signer is
+   *  waiting for its vault key (PROVISION_LIST rows, firmware with vault
+   *  support). Absent/false on plaintext or unlocked identities. */
+  locked?: boolean
   /** Bunker URI for this identity (Pi multi-instance mode). */
   bunkerUri?: string
   /** Heartwood instance name (Pi mode, e.g. 'personal', 'forgesworn'). */

@@ -19,6 +19,8 @@ import {
   buildWifiScan,
   buildBackupExportRequest,
   buildBackupImportRequest,
+  buildVaultSet,
+  buildVaultUnlock,
 } from './frame.js'
 
 describe('crc32', () => {
@@ -312,5 +314,35 @@ describe('backup frames', () => {
     const frame = parseFrame(buildBackupImportRequest(json))
     expect(frame.type).toBe(FrameType.BACKUP_IMPORT_REQUEST)
     expect(new TextDecoder().decode(frame.payload)).toBe(json)
+  })
+})
+
+describe('vault frames', () => {
+  it('VAULT frame type values match firmware 0x62/0x63', () => {
+    expect(FrameType.VAULT_SET).toBe(0x62)
+    expect(FrameType.VAULT_UNLOCK).toBe(0x63)
+  })
+
+  it('buildVaultSet carries the 32-byte key, or an empty payload to disable', () => {
+    const key = new Uint8Array(32).fill(0x11)
+    const set = parseFrame(buildVaultSet(key))
+    expect(set.type).toBe(FrameType.VAULT_SET)
+    expect(set.payload).toEqual(key)
+
+    const clear = parseFrame(buildVaultSet(null))
+    expect(clear.type).toBe(FrameType.VAULT_SET)
+    expect(clear.payload.length).toBe(0)
+  })
+
+  it('buildVaultUnlock carries the 32-byte key', () => {
+    const key = new Uint8Array(32).fill(0x22)
+    const frame = parseFrame(buildVaultUnlock(key))
+    expect(frame.type).toBe(FrameType.VAULT_UNLOCK)
+    expect(frame.payload).toEqual(key)
+  })
+
+  it('rejects keys that are not 32 bytes', () => {
+    expect(() => buildVaultSet(new Uint8Array(31))).toThrow(/32 bytes/)
+    expect(() => buildVaultUnlock(new Uint8Array(0))).toThrow(/32 bytes/)
   })
 })

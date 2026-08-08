@@ -5,11 +5,17 @@
   // tabs plus the device half of Settings.
   import {
     device, serialTransport, httpTransport, bridgeRestart, mgmtRevokeClient,
-    relaySetLogQuiet,
+    relaySetLogQuiet, ensureBridgeAuth,
   } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
   import { getFirmwareVersion } from '../lib/device.svelte.js'
   import { describeReset, formatUptime, formatBytes } from '../lib/reset-reason.js'
+  import { npubToHex } from '../lib/known-devices.js'
+  import { copyText } from '../lib/clipboard.js'
+  import {
+    generateVaultKeyHex, loadVaultKey, storeVaultKey, removeVaultKey,
+    normaliseVaultKeyHex, serialVaultSet,
+  } from '../lib/vault.js'
   import Connectivity from './Connectivity.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import Backup from './Backup.svelte'
@@ -159,6 +165,99 @@
     try { await bridgeRestart() }
     catch { /* expected during restart */ }
     finally { bridgeBusy = false }
+  }
+
+  // --- Encrypt at rest / vault key (USB only) ---
+  // The vault key encrypts the signer's stored seeds and lives only with the
+  // host (this browser), never on the device. The firmware gives no read-back
+  // of "encrypted but unlocked", so the card goes by what this browser holds:
+  // a stored key means we enabled it (or restored an escrowed key) here.
+  const vaultDeviceKey = $derived(overUsb
+    ? npubToHex(device.masters.find((m) => !m.persona)?.npub ?? '')
+    : null)
+  const vaultLocked = $derived(device.masters.some((m) => m.locked === true))
+  let vaultStored = $state<string | null>(null)
+  $effect(() => { vaultStored = vaultDeviceKey ? loadVaultKey(vaultDeviceKey) : null })
+
+  let vaultPending = $state(false)
+  let vaultStatus = $state<string | null>(null)
+  let vaultShowKey = $state(false)
+  let vaultCopied = $state(false)
+  let vaultImport = $state('')
+
+  async function handleVaultEnable() {
+    if (!vaultDeviceKey) { vaultStatus = 'Add an identity to the signer first.'; return }
+    vaultPending = true
+    vaultStatus = null
+    const key = generateVaultKeyHex()
+    try {
+      await ensureBridgeAuth()
+      device.awaitingButton = 'Confirm on your signer: it shows “Encrypt at rest?” — press its button within 30 seconds.'
+      try {
+        await serialVaultSet(serialTransport, key)
+      } finally {
+        device.awaitingButton = null
+      }
+      storeVaultKey(vaultDeviceKey, key)
+      vaultStored = key
+      vaultShowKey = true
+      vaultStatus = 'Encryption at rest is on. Store the vault key somewhere safe before you rely on it.'
+    } catch (e) {
+      vaultStatus = e instanceof Error ? e.message : 'Failed'
+    } finally {
+      vaultPending = false
+    }
+  }
+
+  async function handleVaultDisable() {
+    if (!vaultDeviceKey) return
+    vaultPending = true
+    vaultStatus = null
+    try {
+      await ensureBridgeAuth()
+      device.awaitingButton = 'Confirm on your signer: it shows “Disable encryption?” — press its button within 30 seconds.'
+      try {
+        await serialVaultSet(serialTransport, null)
+      } finally {
+        device.awaitingButton = null
+      }
+      removeVaultKey(vaultDeviceKey)
+      vaultStored = null
+      vaultShowKey = false
+      vaultStatus = 'Encryption at rest is off. The signer stores its keys in plaintext again.'
+    } catch (e) {
+      vaultStatus = e instanceof Error ? e.message : 'Failed'
+    } finally {
+      vaultPending = false
+    }
+  }
+
+  async function handleVaultCopy() {
+    if (!vaultStored) return
+    if (await copyText(vaultStored)) {
+      vaultCopied = true
+      setTimeout(() => { vaultCopied = false }, 1800)
+    }
+  }
+
+  function handleVaultDownload() {
+    if (!vaultStored) return
+    const url = URL.createObjectURL(new Blob([`${vaultStored}\n`], { type: 'text/plain' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `heartwood-vault-key-${vaultDeviceKey?.slice(0, 8) ?? 'signer'}.txt`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleVaultImport() {
+    if (!vaultDeviceKey) { vaultStatus = 'Add an identity to the signer first.'; return }
+    const key = normaliseVaultKeyHex(vaultImport)
+    if (!key) { vaultStatus = 'The vault key must be 64 hexadecimal characters (32 bytes).'; return }
+    storeVaultKey(vaultDeviceKey, key)
+    vaultStored = key
+    vaultImport = ''
+    vaultStatus = 'Vault key saved in this browser. It will be used the next time the signer asks for it.'
   }
 
   // --- Danger zone ---
@@ -311,8 +410,8 @@
   <section>
     <h2 class="section-title">Security</h2>
     {#if !overUsb}
-      <p class="hint">The boot PIN and bridge secret are changed over USB. Plug the signer into
-        this computer and connect by cable.</p>
+      <p class="hint">The boot PIN, bridge secret and encryption at rest are changed over USB.
+        Plug the signer into this computer and connect by cable.</p>
     {:else}
       <h3 class="sub-title">Boot PIN</h3>
       <p class="hint">Locks the device at boot. It must be unlocked before it signs anything.
@@ -358,6 +457,78 @@
         </button>
       </div>
       {#if secretStatus}<p class="hint-sm status">{secretStatus}</p>{/if}
+
+      <h3 class="sub-title">Encrypt at rest</h3>
+      <p class="hint">Encrypts the signer's stored keys with a vault key held by this browser,
+        never by the device — a stolen device yields only ciphertext. The device asks for its
+        button to confirm.</p>
+      {#if vaultLocked}
+        <p class="warn-text">This signer is locked. Unlock it from the banner on Home before
+          changing encryption.</p>
+      {:else if !vaultDeviceKey}
+        <p class="hint-sm">Add an identity to the signer first.</p>
+      {:else if vaultStored}
+        <p class="hint-sm">This browser holds a vault key for this signer.</p>
+        <div class="vault-escrow">
+          <p class="hint-sm">Store this somewhere safe off-site (e.g. password manager). It
+            unlocks your signer if this browser's storage is lost.</p>
+          {#if vaultShowKey}
+            <div class="uri-box"><code>{vaultStored}</code></div>
+          {/if}
+          <div class="inline-form">
+            <button class="btn btn-secondary btn-sm" disabled={vaultPending}
+              onclick={() => (vaultShowKey = !vaultShowKey)}>
+              {vaultShowKey ? 'Hide vault key' : 'Reveal vault key'}
+            </button>
+            <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={handleVaultCopy}>
+              {vaultCopied ? 'Copied ✓' : 'Copy'}
+            </button>
+            <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={handleVaultDownload}>
+              Download
+            </button>
+          </div>
+        </div>
+        <ConfirmButton
+          label="Disable encryption"
+          question="Return to plaintext key storage on the signer?"
+          confirmLabel="Yes, disable it"
+          busyLabel="Waiting for the button…"
+          busy={vaultPending}
+          buttonClass="btn btn-secondary btn-sm"
+          onconfirm={handleVaultDisable}
+        />
+      {:else}
+        <ConfirmButton
+          label="Encrypt at rest"
+          question="Encrypt this signer's stored keys? This browser keeps the vault key."
+          confirmLabel="Yes, encrypt at rest"
+          busyLabel="Waiting for the button…"
+          busy={vaultPending}
+          buttonClass="btn btn-secondary btn-sm"
+          onconfirm={handleVaultEnable}
+        />
+        <details class="disclosure vault-import">
+          <summary>Restore a vault key saved elsewhere</summary>
+          <p class="hint-sm">Paste a vault key you escrowed from another browser so this one can
+            unlock the signer too.</p>
+          <div class="inline-form">
+            <input
+              class="field-input"
+              bind:value={vaultImport}
+              placeholder="64 hex characters"
+              maxlength="64"
+              spellcheck="false"
+              autocomplete="off"
+              disabled={vaultPending}
+            />
+            <button class="btn btn-secondary btn-sm" disabled={vaultPending || !normaliseVaultKeyHex(vaultImport)}
+              onclick={handleVaultImport}>
+              Save in this browser
+            </button>
+          </div>
+        </details>
+      {/if}
+      {#if vaultStatus}<p class="hint-sm status">{vaultStatus}</p>{/if}
     {/if}
   </section>
 
@@ -478,6 +649,14 @@
   .status { margin-top: 0.6rem; color: var(--text-dim); }
 
   .bridge-hint { margin-top: 0.8rem; }
+
+  .vault-escrow {
+    display: flex; flex-direction: column; gap: 0.6rem;
+    margin: 0.6rem 0 0.9rem;
+  }
+  .vault-escrow .uri-box { margin: 0; }
+  .vault-import { margin-top: 0.8rem; }
+  .vault-import .field-input { font-size: 0.85rem; padding: 0.45rem 0.7rem; flex: 1; }
 
   .flash-link { color: var(--green-dim); }
   .flash-link:hover { color: var(--green); }

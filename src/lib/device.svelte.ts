@@ -29,8 +29,10 @@ import {
   clearPendingNetworkHandoff, networkRecoveryRelays, pendingNetworkHandoff,
   rememberDevice, replaceDeviceRelays, savePendingNetworkHandoff, npubShort,
 } from './known-devices.js'
+import { VaultAnnouncementWatcher, publishVaultDelivery, loadVaultKey } from './vault.js'
 import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
+import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
 
 // --- Reactive state ---
@@ -222,6 +224,11 @@ export const device = $state({
    *  booting, or a port that isn't a signer. Drives the retry / "manage over
    *  WiFi" guidance. */
   usbSilent: false,
+  /** Relay: a locked WiFi signer asking for its vault key (kind 24135).
+   *  `unlockPub` is the announcement's one-time author pubkey — the NIP-44
+   *  delivery target. Re-announced roughly every 60s while locked, so
+   *  `lastSeen` going stale means the signer unlocked (or went quiet). */
+  vaultUnlockRequest: null as { unlockPub: string; lastSeen: number } | null,
   /** Exact state read from the attached signer; never contains a password. */
   usbNetworkState: null as UsbNetworkState | null,
   usbNetworkSupport: 'unknown' as 'unknown' | 'supported' | 'unsupported',
@@ -408,6 +415,7 @@ function signerActivityFromDeviceLog(line: string): Omit<SignerActivityEntry, 'i
 export async function connectSerial(baudRate = 115200, port?: SerialPort) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   device.wifiJoinError = null
+  stopVaultWatcher()
   await serialTransport.connect(baudRate, port)
 }
 
@@ -545,6 +553,7 @@ async function autoSyncIdentityMeta() {
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 export async function connectHttp(address: string) {
+  stopVaultWatcher()
   await httpTransport.connect(address)
   // Fetch bridge info after connecting.
   try {
@@ -761,6 +770,71 @@ function applyRelayStatus(raw: Record<string, unknown>) {
   if (device.masters.length > 0) void autoSyncIdentityMeta()
 }
 
+// --- Vault (encrypted-at-rest): locked-boot announcements over the relay ---
+//
+// A locked WiFi signer cannot serve authenticated management replies — the
+// keys that would decrypt them are exactly what's locked — so it announces on
+// kind 24135 (one-time unlock keypair, p-tagged to the operator) and Sapwood
+// watches on a lightweight pool of its own, independent of the management
+// transport. The vault key is only ever delivered in answer to a FRESH
+// announcement (never to a standing, retrievable ciphertext target), and only
+// on a manual tap.
+
+let vaultWatcher: VaultAnnouncementWatcher | null = null
+
+function stopVaultWatcher(): void {
+  try { vaultWatcher?.close() } catch { /* ignore */ }
+  vaultWatcher = null
+  device.vaultUnlockRequest = null
+}
+
+function startVaultWatcher(relays: string[], operatorPubHex: string): void {
+  stopVaultWatcher()
+  try {
+    vaultWatcher = new VaultAnnouncementWatcher(relays, operatorPubHex, (unlockPub) => {
+      device.vaultUnlockRequest = { unlockPub, lastSeen: Date.now() }
+    })
+    vaultWatcher.start()
+  } catch { /* watching is best-effort; management still works without it */ }
+}
+
+/**
+ * Deliver the vault key to a locked WiFi signer that is asking for it (kind
+ * 24136), NIP-44-encrypted from the session operator key to the announced
+ * one-time unlock pubkey. Never automatic — the caller is a manual tap. Uses
+ * the stored key for this device unless one is pasted in. Clears the pending
+ * request and kicks a status refresh so the UI recovers as soon as the signer
+ * unlocks.
+ */
+export async function sendVaultKeyOverRelay(keyHex?: string): Promise<void> {
+  const request = device.vaultUnlockRequest
+  if (device.mode !== 'relay' || !request) {
+    throw new Error('The signer is not asking for its vault key right now.')
+  }
+  const key = keyHex ?? (device.relayDevicePub ? loadVaultKey(device.relayDevicePub) : null)
+  if (!key) {
+    throw new Error('This browser does not hold the vault key for this signer. Paste your escrowed copy.')
+  }
+  const operator = getOperatorCandidates().find((o) => o.pubHex === device.operatorPub)
+    ?? getOperatorCandidates()[0]
+  if (!operator) throw new Error('No operator key is available in this browser.')
+  if (vaultWatcher) {
+    await vaultWatcher.publishDelivery(operator.skHex, request.unlockPub, key)
+  } else {
+    // The watcher failed to start (relay trouble): fall back to a one-shot pool.
+    const pool = new SimplePool()
+    try {
+      await publishVaultDelivery(pool, device.relays, operator.skHex, request.unlockPub, key)
+    } finally {
+      try { pool.destroy() } catch { /* ignore */ }
+    }
+  }
+  device.vaultUnlockRequest = null
+  // The signer unwraps and resumes within seconds; refresh so status/clients
+  // recover without waiting for the next poll tick.
+  void relayRefresh()
+}
+
 /**
  * Connect to a wifi-standalone device over its relay, as the operator.
  * `devicePubHex` is the device MASTER pubkey (the kind-24134 mgmt address);
@@ -811,6 +885,10 @@ export async function connectRelay(
   device.relayStatus = null
   lastRelayAuditSeq = 0
   rememberDevice(devicePubHex, relays, label)
+  // Watch for a locked signer asking for its vault key. This has to run even
+  // when management replies never come (a locked signer can't answer them), so
+  // it lives on its own pool rather than the management transport.
+  startVaultWatcher(recoveryRelays, t.operatorPub)
 
   // First load, then poll for live status/clients every 4s while connected. A
   // protected phone handoff already proved the signer with get_status above;
@@ -1328,6 +1406,7 @@ export async function refreshRelayAudit(): Promise<void> {
 
 export async function disconnect() {
   device.connectionGeneration += 1
+  stopVaultWatcher()
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   device.slotUris = {} // session-only links; don't carry them to the next signer
   device.wifiJoinError = null

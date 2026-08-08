@@ -14,7 +14,7 @@ const FINGERPRINT = 'f'.repeat(64)
 // The factory is hoisted, so it must not reference top-level consts — masters
 // are set in beforeEach instead.
 vi.mock('../lib/device.svelte.js', () => ({
-  device: { connected: true, mode: 'relay', error: null, masters: [], slots: [] },
+  device: { connected: true, mode: 'relay', error: null, masters: [], slots: [], vaultUnlockRequest: null },
   refreshSlots: vi.fn(),
   refreshMasters: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn().mockResolvedValue(undefined),
@@ -27,6 +27,9 @@ vi.mock('../lib/device.svelte.js', () => ({
   // Pulled in transitively by FirstIdentity (rendered only in the no-master case).
   serialTransport: { sendAndReceive: vi.fn() },
   connectRelay: vi.fn().mockResolvedValue(undefined),
+  // Pulled in by VaultUnlock (rendered only while the signer is locked).
+  ensureBridgeAuth: vi.fn().mockResolvedValue(undefined),
+  sendVaultKeyOverRelay: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../lib/clipboard.js', () => ({
