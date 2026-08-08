@@ -1,5 +1,6 @@
 <script lang="ts">
   import ConnectionPicker from './components/ConnectionPicker.svelte'
+  import ApiTokenPrompt from './components/ApiTokenPrompt.svelte'
   import StatusBar from './components/StatusBar.svelte'
   import Home from './components/Home.svelte'
   import Cockpit from './components/Cockpit.svelte'
@@ -110,6 +111,10 @@
         password is right, and the security is <strong>WPA2</strong> (not WPA3-only). A phone hotspot on 2.4 GHz
         is the quickest test. Set it under Device › Network.</p>
     </div>
+  {/if}
+
+  {#if device.apiTokenRequired}
+    <ApiTokenPrompt />
   {/if}
 
   {#if pendingPin.link}

@@ -228,6 +228,148 @@ describe('HttpTransport', () => {
     })
   })
 
+  describe('API token', () => {
+    it('sends no Authorization header when no token is available', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://pi:3100/api/info',
+        expect.objectContaining({ headers: {} }),
+      )
+    })
+
+    it('uses the localStorage token when no meta tag is present', async () => {
+      localStorage.setItem('heartwood-api-token', 'stored-token')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>
+      expect(headers.Authorization).toMatch(/^Bearer /)
+      expect(headers.Authorization).toContain('stored-token')
+    })
+
+    it('prefers the meta-tag token over localStorage', async () => {
+      localStorage.setItem('heartwood-api-token', 'stored-token')
+      const meta = document.createElement('meta')
+      meta.name = 'heartwood-api-token'
+      meta.content = 'meta-token'
+      document.head.appendChild(meta)
+      try {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+
+        const transport = new HttpTransport()
+        await transport.connect('pi:3100')
+
+        const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>
+        expect(headers.Authorization).toContain('meta-token')
+        expect(headers.Authorization).not.toContain('stored-token')
+      } finally {
+        meta.remove()
+      }
+    })
+
+    it('treats the literal placeholder meta content as no token', async () => {
+      const meta = document.createElement('meta')
+      meta.name = 'heartwood-api-token'
+      meta.content = '__HEARTWOOD_API_TOKEN__'
+      document.head.appendChild(meta)
+      try {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+
+        const transport = new HttpTransport()
+        await transport.connect('pi:3100')
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          'http://pi:3100/api/info',
+          expect.objectContaining({ headers: {} }),
+        )
+      } finally {
+        meta.remove()
+      }
+    })
+
+    it('setToken persists to localStorage and authenticates later requests', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      transport.setToken('  new-token  ')
+      expect(localStorage.getItem('heartwood-api-token')).toBe('new-token')
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+      await transport.factoryReset()
+
+      const headers = mockFetch.mock.calls[1][1].headers as Record<string, string>
+      expect(headers.Authorization).toContain('new-token')
+    })
+
+    it('clearToken drops the stored token', async () => {
+      localStorage.setItem('heartwood-api-token', 'stored-token')
+      const transport = new HttpTransport()
+
+      transport.clearToken()
+      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+      await transport.connect('pi:3100')
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://pi:3100/api/info',
+        expect.objectContaining({ headers: {} }),
+      )
+    })
+
+    it('emits auth-required with rejected=true and clears a stale stored token on 401', async () => {
+      localStorage.setItem('heartwood-api-token', 'stale-token')
+      mockFetch
+        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 })) // /api/info
+        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 })) // /api/bridge/info
+
+      const transport = new HttpTransport()
+      const events: { kind: string; rejected?: boolean }[] = []
+      transport.on(e => events.push(e))
+
+      await expect(transport.connect('pi:3100')).rejects.toThrow('HTTP 401')
+      expect(events).toContainEqual({ kind: 'auth-required', rejected: true })
+      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+    })
+
+    it('reports rejected=false when a 401 arrives with no token at all', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 })) // /api/info
+        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 })) // /api/bridge/info
+
+      const transport = new HttpTransport()
+      const events: { kind: string; rejected?: boolean }[] = []
+      transport.on(e => events.push(e))
+
+      await expect(transport.connect('pi:3100')).rejects.toThrow('HTTP 401')
+      expect(events).toContainEqual({ kind: 'auth-required', rejected: false })
+      // Emitted once despite both probes failing.
+      expect(events.filter(e => e.kind === 'auth-required')).toHaveLength(1)
+    })
+
+    it('re-prompts with rejected=true after a newly entered token also fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      transport.setToken('wrong-token')
+      mockFetch.mockResolvedValueOnce(new Response('unauthorised', { status: 401 }))
+
+      const events: { kind: string; rejected?: boolean }[] = []
+      transport.on(e => events.push(e))
+      await transport.factoryReset()
+
+      expect(events).toContainEqual({ kind: 'auth-required', rejected: true })
+      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+    })
+  })
+
   describe('savedAddress', () => {
     it('returns null when nothing saved', () => {
       expect(HttpTransport.savedAddress()).toBeNull()
