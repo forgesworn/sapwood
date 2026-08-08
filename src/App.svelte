@@ -28,6 +28,24 @@
   // Which console section to land on — Home's nudges deep-link (e.g. firmware → device).
   let advancedTab = $state<'apps' | 'identity' | 'device' | 'logs'>('apps')
 
+  // Elapsed-seconds ticker on the physical-action banner. Long device
+  // operations (multi-master re-encryption, full wipe) can hold the ACK for
+  // tens of seconds; a live counter is the difference between "working" and
+  // "wedged".
+  let awaitingSince = $state<number | null>(null)
+  let awaitingElapsed = $state(0)
+  $effect(() => {
+    if (device.awaitingButton && awaitingSince === null) awaitingSince = Date.now()
+    if (!device.awaitingButton) awaitingSince = null
+  })
+  $effect(() => {
+    if (awaitingSince === null) return
+    const tick = setInterval(() => {
+      awaitingElapsed = Math.floor((Date.now() - (awaitingSince ?? Date.now())) / 1000)
+    }, 1000)
+    return () => clearInterval(tick)
+  })
+
   // Receiving side of a PIN-protected handoff link: collect the PIN, decrypt.
   let pinInput = $state('')
   let pinError = $state('')
@@ -100,7 +118,7 @@
   {#if device.awaitingButton}
     <div class="pairing-banner" role="status" aria-live="polite">
       <span class="pairing-dot"></span>
-      <p>{device.awaitingButton}</p>
+      <p>{device.awaitingButton} <span class="pairing-elapsed">{awaitingElapsed}s</span></p>
     </div>
   {/if}
 
@@ -359,13 +377,17 @@
   .import-dismiss:hover { color: var(--text); }
 
   /* Physical-action prompt (e.g. the one-time USB pairing hold). Amber, with a
-     pulsing dot, so it reads as "the signer is waiting on you right now". */
+     pulsing dot, so it reads as "the signer is waiting on you right now".
+     Sticky: a prompt that scrolls out of view is a prompt that gets missed. */
   .pairing-banner {
+    position: sticky; top: 0.75rem; z-index: 60;
     display: flex; align-items: center; gap: 0.7rem;
-    background: #16100244; border: 1px solid var(--amber, #d9a441); border-radius: 6px;
+    background: #221a08; border: 1px solid var(--amber, #d9a441); border-radius: 6px;
+    box-shadow: 0 4px 16px #00000088;
     padding: 0.8rem 1rem; margin-bottom: 1rem;
   }
   .pairing-banner p { margin: 0; font-size: 0.9rem; color: var(--text); line-height: 1.5; }
+  .pairing-elapsed { color: var(--amber, #d9a441); font-variant-numeric: tabular-nums; font-weight: 600; }
   .pairing-dot {
     flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%;
     background: var(--amber, #d9a441); animation: pairing-pulse 1.1s ease-in-out infinite;

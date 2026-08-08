@@ -319,6 +319,7 @@
   async function handleReset() {
     resetPending = true
     resetResult = null
+    device.awaitingButton = 'Hold the signer’s button to confirm the wipe — it then erases and verifies every region, which can take up to a minute.'
     try {
       const frame = overBridge
         ? await httpTransport.factoryReset()
@@ -333,6 +334,7 @@
     } catch (e) {
       resetResult = e instanceof Error ? e.message : 'Factory reset failed'
     } finally {
+      device.awaitingButton = null
       resetPending = false
     }
   }

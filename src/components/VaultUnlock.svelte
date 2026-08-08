@@ -70,7 +70,12 @@
     status = null
     try {
       await ensureBridgeAuth()
-      await serialVaultUnlock(serialTransport, keyHex)
+      device.awaitingButton = 'Unlocking — the signer unseals each identity with a slow key derivation on purpose; a few seconds per identity is normal.'
+      try {
+        await serialVaultUnlock(serialTransport, keyHex)
+      } finally {
+        device.awaitingButton = null
+      }
       if (remember) {
         storeVaultKey(deviceKey, keyHex)
         storedKey = keyHex
@@ -89,6 +94,7 @@
   async function unlockRelay(keyHex: string | undefined, remember: boolean) {
     busy = true
     status = null
+    device.awaitingButton = 'Sending the vault key — the signer unseals each identity with a slow key derivation on purpose; give it a few seconds per identity.'
     try {
       await sendVaultKeyOverRelay(keyHex)
       if (remember && keyHex && deviceKey) {
@@ -100,6 +106,7 @@
     } catch (e) {
       status = e instanceof Error ? e.message : 'Could not deliver the vault key.'
     } finally {
+      device.awaitingButton = null
       busy = false
     }
   }
