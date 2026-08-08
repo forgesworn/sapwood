@@ -336,7 +336,9 @@
         You'll type your <strong>12 words on the device's screen</strong> using its button, never here.
       {:else}
         Give it a friendly name (optional), then we'll ask the device to make its identity.
-        The recovery phrase appears <strong>on the device's screen</strong>, not here.
+        The device first offers a <strong>quick button game</strong> — your timing adds extra
+        randomness to the key (tap to play, hold to skip). The recovery phrase then appears
+        <strong>on the device's screen</strong>, not here.
       {/if}
     </p>
     <label class="field">
@@ -348,8 +350,8 @@
     {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
     {#if status === 'generating'}
-      <p class="fi-working">⏳ Your device is creating its keys. This takes a few seconds. Watch its
-        screen; the 12 words appear there when it's ready.</p>
+      <p class="fi-working">⏳ Watch the device's screen: tap its button to play the entropy game
+        (or hold to skip), then it creates its keys and shows the 12 words there.</p>
     {/if}
     <div class="fi-actions">
       <button class="btn btn-secondary" onclick={() => (step = mode === 'create' ? 'intro' : 'restore-source')} disabled={status === 'generating'}>Back</button>

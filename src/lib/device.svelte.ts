@@ -208,6 +208,12 @@ export const device = $state({
   connectionGeneration: 0,
   /** USB-direct: true once the bridge session is authenticated (client mgmt allowed). */
   bridgeAuthed: false,
+  /** HTTP: the bridge answered 401 — it requires an API token we do not have
+   *  (or it rejected ours). Drives the token-entry prompt. */
+  apiTokenRequired: false,
+  /** HTTP: the last token the operator entered was rejected, so the prompt
+   *  re-opens with a "wrong token" error rather than the first-run copy. */
+  apiTokenRejected: false,
   /** USB-direct: probing whether the freshly-connected device answers frames. */
   usbProbing: false,
   /** USB-direct: device is connected at the port level but answers no frames.
@@ -283,6 +289,8 @@ httpTransport.on((event: HttpEvent) => {
       device.portInfo = event.port
       device.error = null
       device.signerActivity = []
+      device.apiTokenRequired = false
+      device.apiTokenRejected = false
       refreshMasters()
       break
     case 'disconnected':
@@ -311,6 +319,10 @@ httpTransport.on((event: HttpEvent) => {
       break
     case 'error':
       device.error = event.message
+      break
+    case 'auth-required':
+      device.apiTokenRequired = true
+      device.apiTokenRejected = event.rejected
       break
   }
 })
@@ -552,6 +564,25 @@ export async function connectHttp(address: string) {
       device.approvals = await httpTransport.fetchApprovals()
     } catch { /* non-fatal */ }
   }, 3000)
+}
+
+/** Save an operator-entered API token and reconnect with it. A wrong token
+ *  surfaces as another 401, which re-opens the prompt with an error. */
+export async function submitApiToken(token: string): Promise<void> {
+  httpTransport.setToken(token)
+  device.apiTokenRequired = false
+  device.apiTokenRejected = false
+  const address = HttpTransport.savedAddress()
+  if (!address) return
+  try {
+    await connectHttp(address)
+  } catch { /* connect already surfaced the failure; a 401 re-opens the prompt */ }
+}
+
+/** Close the token prompt without saving (the bridge stays unreachable). */
+export function dismissApiTokenPrompt(): void {
+  device.apiTokenRequired = false
+  device.apiTokenRejected = false
 }
 
 // --- Relay transport (wifi-standalone devices, kind 24134) ---
@@ -1993,7 +2024,10 @@ export async function generateIdentity(label = 'default'): Promise<string> {
   const resp = await serialTransport.sendAndReceive(
     buildGenerateIdentity(label),
     [FrameType.ACK, FrameType.NACK],
-    30_000,
+    // The device first offers its entropy game (owner's button timing is
+    // stacked with the hardware RNG): up to 30 s on the intro screen plus a
+    // 90 s game cap, then PBKDF2 + derivation. 200 s covers the slowest path.
+    200_000,
   )
   if (resp.type !== FrameType.ACK) {
     throw new Error('The device could not generate an identity (storage write failed). Try again.')
