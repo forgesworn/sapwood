@@ -788,7 +788,7 @@ function stopVaultWatcher(): void {
   device.vaultUnlockRequest = null
 }
 
-function startVaultWatcher(relays: string[], operatorPubHex: string): void {
+function startVaultWatcher(relays: string[], operatorPubHex: string | string[]): void {
   stopVaultWatcher()
   try {
     vaultWatcher = new VaultAnnouncementWatcher(relays, operatorPubHex, (unlockPub) => {
@@ -854,13 +854,27 @@ export async function connectRelay(
   // journal so either commit or rollback remains reachable.
   const recoveryRelays = networkRecoveryRelays(devicePubHex, relays)
   onProgress?.('opening-relays')
-  const { transport: t, status } = await selectRelayTransport(
-    devicePubHex,
-    recoveryRelays,
-    requiredOperatorPubHex,
-    signal,
-    onProgress,
-  )
+  let selected: RelaySelection
+  try {
+    selected = await selectRelayTransport(
+      devicePubHex,
+      recoveryRelays,
+      requiredOperatorPubHex,
+      signal,
+      onProgress,
+    )
+  } catch (error) {
+    // A locked signer can never answer get_status — its keys are sealed — so a
+    // connect timeout is exactly what a vault-locked device looks like. Start
+    // the announcement watcher even though the handshake failed, so the
+    // "Signer is locked" banner appears instead of a bare connect error.
+    const pubs = getOperatorCandidates()
+      .filter((o) => !requiredOperatorPubHex || o.pubHex === requiredOperatorPubHex.toLowerCase())
+      .map((o) => o.pubHex)
+    if (pubs.length) startVaultWatcher(recoveryRelays, pubs)
+    throw error
+  }
+  const { transport: t, status } = selected
   if (signal?.aborted) {
     t.close()
     throwIfSignalAborted(signal)

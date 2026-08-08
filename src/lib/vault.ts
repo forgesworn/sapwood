@@ -118,7 +118,7 @@ function nackReason(payload: Uint8Array, fallback: string): string {
 
 // The signer gives the operator 30 seconds to confirm on the OLED; the frame
 // round trip must outlast a person reading and reaching for the button.
-const VAULT_SET_TIMEOUT_MS = 40_000
+const VAULT_SET_TIMEOUT_MS = 90_000
 const VAULT_UNLOCK_TIMEOUT_MS = 35_000
 
 /**
@@ -238,21 +238,28 @@ export class VaultAnnouncementWatcher {
 
   constructor(
     private readonly relays: string[],
-    private readonly operatorPubHex: string,
+    operatorPubHex: string | string[],
     private readonly onAnnouncement: (unlockPubHex: string) => void,
     pool: Pool = new SimplePool(),
   ) {
     if (!relays.length) throw new Error('at least one relay is required')
-    if (!/^[0-9a-f]{64}$/.test(operatorPubHex)) throw new Error('operator pubkey must be 64 hex chars')
+    const pubs = Array.isArray(operatorPubHex) ? operatorPubHex : [operatorPubHex]
+    if (!pubs.length) throw new Error('at least one operator pubkey is required')
+    for (const pub of pubs) {
+      if (!/^[0-9a-f]{64}$/.test(pub)) throw new Error('operator pubkey must be 64 hex chars')
+    }
+    this.operatorPubsHex = pubs
     this.pool = pool
   }
+
+  private readonly operatorPubsHex: string[]
 
   /** Open the announcement subscription. Idempotent. */
   start(): void {
     if (this.sub) return
     this.sub = this.pool.subscribe(
       this.relays,
-      { kinds: [VAULT_ANNOUNCE_KIND], '#p': [this.operatorPubHex] },
+      { kinds: [VAULT_ANNOUNCE_KIND], '#p': this.operatorPubsHex },
       {
         onevent: (ev) => {
           const unlockPub = parseVaultAnnouncement(ev)

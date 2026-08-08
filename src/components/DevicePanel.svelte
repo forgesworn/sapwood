@@ -190,6 +190,13 @@
     vaultPending = true
     vaultStatus = null
     const key = generateVaultKeyHex()
+    // Store the key BEFORE the device round-trip: the signer re-encrypts every
+    // seed before it ACKs (PBKDF2 per master), so a missed or timed-out ACK
+    // must never orphan the key — without it a sealed signer is unrecoverable.
+    // On failure the key is removed again only if the device definitely
+    // refused (NACK); on timeout/transport ambiguity it is kept.
+    storeVaultKey(vaultDeviceKey, key)
+    vaultStored = key
     try {
       await ensureBridgeAuth()
       device.awaitingButton = 'Confirm on your signer: it shows “Encrypt at rest?” — press its button within 30 seconds.'
@@ -198,12 +205,19 @@
       } finally {
         device.awaitingButton = null
       }
-      storeVaultKey(vaultDeviceKey, key)
-      vaultStored = key
       vaultShowKey = true
       vaultStatus = 'Encryption at rest is on. Store the vault key somewhere safe before you rely on it.'
     } catch (e) {
-      vaultStatus = e instanceof Error ? e.message : 'Failed'
+      const msg = e instanceof Error ? e.message : 'Failed'
+      if (/rejected|cancelled|denied/i.test(msg)) {
+        // Definite refusal — the seeds were never re-wrapped; drop the key.
+        removeVaultKey(vaultDeviceKey)
+        vaultStored = null
+        vaultStatus = msg
+      } else {
+        vaultShowKey = true
+        vaultStatus = `${msg} — the signer may still have sealed itself. The vault key above is kept in this browser; copy it somewhere safe NOW, then reboot the signer to check its state.`
+      }
     } finally {
       vaultPending = false
     }
