@@ -2,7 +2,8 @@
   // Identity — everything about keys: the identities held on the signer, adding
   // one, the signer's public profile, and this browser's operator key.
   // Replaces the old Masters, Provision and half the Settings tab.
-  import { device, refreshMasters, syncIdentityMeta } from '../lib/device.svelte.js'
+  import { device, refreshMasters, syncIdentityMeta, removeIdentity } from '../lib/device.svelte.js'
+  import { httpTransport } from '../lib/http.js'
   import { identityKey } from '../lib/identity-key.js'
   import Provision from './Provision.svelte'
   import OperatorKey from './OperatorKey.svelte'
@@ -13,6 +14,30 @@
     0: 'BUNKER',
     1: 'TREE-MNEMONIC',
     2: 'TREE-NSEC',
+  }
+
+  // --- Identity removal (destructive; button-gated on the signer) ---
+  let confirmingSlot = $state<number | null>(null)
+  let removeBusy = $state(false)
+  let removeError = $state<string | null>(null)
+
+  async function handleRemove(slot: number) {
+    removeBusy = true
+    removeError = null
+    try {
+      if (device.mode === 'serial') {
+        await removeIdentity(slot)
+      } else {
+        await httpTransport.deleteMaster(slot)
+        // The signer reboots after a removal, so a refresh can briefly fail.
+        try { await refreshMasters() } catch { /* rebooting */ }
+      }
+      confirmingSlot = null
+    } catch (e) {
+      removeError = e instanceof Error ? e.message : 'Could not remove the identity.'
+    } finally {
+      removeBusy = false
+    }
   }
 
   // --- Identity card (name + avatar) push to the signer ---
@@ -94,6 +119,31 @@
           </div>
           {#if master.label}<div class="id-label">{master.label}</div>{/if}
           <div class="id-npub">{master.npub}</div>
+          <!-- Removal: masters only (personas disappear with their tree). USB or
+               heartwoodd — and in Hard mode the signer itself shows this npub and
+               waits for a physical hold, so a cable request alone can never
+               delete a key. -->
+          {#if !master.persona && (device.mode === 'serial' || device.mode === 'http')}
+            {#if confirmingSlot === master.slot}
+              <div class="remove-confirm">
+                <p class="hint-sm">
+                  Without a recovery phrase or backup, <strong>{master.label || master.npub.slice(0, 12) + '…'}</strong>
+                  is gone for good. Check the npub on the signer's screen, then hold its button to confirm.
+                </p>
+                {#if removeError}<p class="error-text">{removeError}</p>{/if}
+                <div class="remove-actions">
+                  <button class="btn btn-danger btn-sm" disabled={removeBusy} onclick={() => handleRemove(master.slot)}>
+                    {removeBusy ? 'Waiting for the signer…' : 'Remove it'}
+                  </button>
+                  <button class="btn btn-secondary btn-sm" disabled={removeBusy} onclick={() => { confirmingSlot = null; removeError = null }}>
+                    Keep it
+                  </button>
+                </div>
+              </div>
+            {:else}
+              <button class="btn-link remove-link" onclick={() => { confirmingSlot = master.slot; removeError = null }}>Remove…</button>
+            {/if}
+          {/if}
         </div>
       {/each}
     {/if}
@@ -172,6 +222,15 @@
   .restore-callout a { color: var(--green); }
 
   .status { margin-top: 0.6rem; color: var(--text-dim); }
+
+  .remove-link { margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-dim); }
+  .remove-link:hover { color: var(--red); }
+  .remove-confirm {
+    margin-top: 0.6rem; padding: 0.7rem 0.8rem;
+    border: 1px solid #4a2a2a; border-radius: 6px; background: #140a0a;
+  }
+  .remove-confirm .hint-sm { margin: 0 0 0.6rem; }
+  .remove-actions { display: flex; gap: 0.5rem; }
 
   .rule { border-top: 1px solid var(--border); }
 </style>

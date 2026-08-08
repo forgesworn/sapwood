@@ -9,7 +9,7 @@ import {
   buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
   buildFirmwareInfo, buildWifiScan,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
-  buildDeriveIdentity,
+  buildDeriveIdentity, buildProvisionRemove,
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
 import { policiesEqual } from './client-policy.js'
@@ -2037,6 +2037,26 @@ export async function generateIdentity(label = 'default'): Promise<string> {
   // a follow-up read may fail — the npub from the ACK is what we rely on.
   try { await refreshMasters() } catch { /* USB may have dropped on the WiFi reboot */ }
   return npub
+}
+
+/**
+ * Ask a USB-connected device to REMOVE an identity. Destructive: without a
+ * backup the key is gone for good. The device shows the slot and npub on its
+ * OLED and waits for a physical hold before touching anything — a cable-only
+ * request can never delete a key. The device reboots right after the ACK to
+ * reload its slot-indexed state, so a follow-up read may briefly fail.
+ */
+export async function removeIdentity(slot: number): Promise<void> {
+  if (device.mode !== 'serial') throw new Error('Removing an identity needs a USB connection')
+  const resp = await serialTransport.sendAndReceive(
+    buildProvisionRemove(slot),
+    [FrameType.ACK, FrameType.NACK],
+    90_000, // the owner needs time to read the OLED and hold the button
+  )
+  if (resp.type !== FrameType.ACK) {
+    throw new Error('Removal was cancelled on the device (or that slot is empty).')
+  }
+  try { await refreshMasters() } catch { /* device rebooting after removal */ }
 }
 
 /**

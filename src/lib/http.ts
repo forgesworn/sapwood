@@ -22,6 +22,19 @@ function readBridgeToken(): string | null {
   return value
 }
 
+/** localStorage key for an operator-entered API token. */
+const TOKEN_STORAGE_KEY = 'heartwood-api-token'
+
+/** Read a token the operator entered previously (persists across reloads). */
+function readStoredToken(): string | null {
+  try {
+    const value = localStorage.getItem(TOKEN_STORAGE_KEY)
+    return value && value.trim() ? value : null
+  } catch {
+    return null
+  }
+}
+
 export interface PendingClientInfo {
   pubkey: string
   firstSeen: string
@@ -36,6 +49,9 @@ export type HttpEvent =
   | { kind: 'pending-clients'; clients: PendingClientInfo[] }
   | { kind: 'log'; line: string }
   | { kind: 'error'; message: string }
+  /** The bridge answered 401: it needs a token we do not have, or rejected the
+   *  one we sent (`rejected` distinguishes "wrong token" from "no token yet"). */
+  | { kind: 'auth-required'; rejected: boolean }
 
 export type HttpListener = (event: HttpEvent) => void
 
@@ -46,8 +62,11 @@ export class HttpTransport {
   private listeners: HttpListener[] = []
   private pollInterval: ReturnType<typeof setInterval> | null = null
   private logSocket: WebSocket | null = null
-  /** Bearer token from the bridge-injected meta tag. Null when served from GH Pages. */
-  private bridgeToken: string | null = readBridgeToken()
+  /** API token, from the bridge-injected meta tag if present (older bridges),
+   *  else from localStorage (operator-entered). Null when neither exists. */
+  private bridgeToken: string | null = readBridgeToken() ?? readStoredToken()
+  /** Set once a 401 has been surfaced, so polling does not spam auth-required. */
+  private authPrompted = false
 
   /** Build the Authorization header, or an empty object if no token. */
   private authHeaders(): Record<string, string> {
@@ -71,6 +90,37 @@ export class HttpTransport {
     }
   }
 
+  /** Supply an API token at runtime. Persisted to localStorage so a returning
+   *  operator is not re-prompted. Applies to all subsequent requests. */
+  setToken(token: string): void {
+    const trimmed = token.trim()
+    if (!trimmed) return
+    this.bridgeToken = trimmed
+    this.authPrompted = false
+    try { localStorage.setItem(TOKEN_STORAGE_KEY, trimmed) } catch { /* */ }
+  }
+
+  /** Drop the operator-entered token. A bridge-injected meta token, if the
+   *  bridge still injects one, is unaffected. */
+  clearToken(): void {
+    try { localStorage.removeItem(TOKEN_STORAGE_KEY) } catch { /* */ }
+    this.bridgeToken = readBridgeToken()
+    this.authPrompted = false
+  }
+
+  /** A 401 means the bridge requires a token we do not have, or the one we
+   *  sent is wrong/stale. Drop any stored token and surface auth-required
+   *  (once, until a new token is supplied) instead of a generic error. */
+  private handleUnauthorized(): void {
+    const rejected = this.bridgeToken !== null
+    try { localStorage.removeItem(TOKEN_STORAGE_KEY) } catch { /* */ }
+    this.bridgeToken = null
+    if (!this.authPrompted) {
+      this.authPrompted = true
+      this.emit({ kind: 'auth-required', rejected })
+    }
+  }
+
   /** Connect to the bridge at the given address. */
   async connect(address: string): Promise<void> {
     // Normalise: strip trailing slash, ensure http://
@@ -81,6 +131,10 @@ export class HttpTransport {
     url = url.replace(/\/+$/, '')
     this.baseUrl = url
 
+    // Save the address on attempt (not just on success) so the token-entry
+    // retry after a 401 knows where to reconnect.
+    try { localStorage.setItem('sapwood-bridge-address', address) } catch { /* */ }
+
     // Test connectivity. heartwoodd exposes /api/info; ESP32 bridge exposes
     // /api/bridge/info. Try heartwoodd first, fall back to bridge endpoint.
     // Detection logic:
@@ -90,9 +144,7 @@ export class HttpTransport {
     try {
       let probeOk = false
       try {
-        const res = await fetch(`${this.baseUrl}/api/info`, {
-          headers: { ...this.authHeaders() },
-        })
+        const res = await this.apiFetch(`${this.baseUrl}/api/info`)
         if (res.ok) {
           probeOk = true
           try {
@@ -106,9 +158,7 @@ export class HttpTransport {
       } catch { /* heartwoodd not present, try bridge endpoint */ }
 
       if (!probeOk) {
-        const res = await fetch(`${this.baseUrl}/api/bridge/info`, {
-          headers: { ...this.authHeaders() },
-        })
+        const res = await this.apiFetch(`${this.baseUrl}/api/bridge/info`)
         // 404 is OK (fresh Heartwood in setup mode). Anything else is a real error.
         if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
 
@@ -130,13 +180,13 @@ export class HttpTransport {
       }
 
       this._connected = true
+      // Connected: any earlier auth prompt is resolved, so a later 401 (e.g.
+      // the token was rotated) re-prompts rather than failing silently.
+      this.authPrompted = false
       this.emit({ kind: 'connected', port: `HTTP ${url}` })
 
       // Connect WebSocket for log streaming.
       this.connectLogSocket()
-
-      // Save address for next time.
-      try { localStorage.setItem('sapwood-bridge-address', address) } catch { /* */ }
     } catch (e) {
       this._connected = false
       this.emit({ kind: 'error', message: e instanceof Error ? e.message : 'Connection failed' })
@@ -242,9 +292,7 @@ export class HttpTransport {
   private async fetchPiInstances() {
     const results = await Promise.allSettled(
       HttpTransport.PI_INSTANCES.map(async (inst, slot) => {
-        const res = await fetch(`${this.baseUrl}/api/instance/${inst.name}/status`, {
-          headers: { ...this.authHeaders() },
-        })
+        const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst.name}/status`)
         if (!res.ok) return null
         const data = await res.json()
         return {
@@ -307,9 +355,7 @@ export class HttpTransport {
 
       // Pi mode: fetch from per-instance clients endpoint.
       const inst = this.instanceForSlot(slot)
-      const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients`, {
-        headers: { ...this.authHeaders() },
-      })
+      const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients`)
       if (!res.ok || res.status === 423) return
       const data = await res.json()
       // Translate { approved: { pubkey: {...} }, pending: { ... } } to ConnectSlot[].
@@ -341,6 +387,23 @@ export class HttpTransport {
     }
   }
 
+  /**
+   * Remove an identity from the signer (heartwoodd only). In Hard mode the
+   * device shows the slot + npub on its OLED and waits for a physical hold
+   * before deleting, then reboots — so this can take a human's worth of time
+   * and the device drops off the USB bus right after succeeding.
+   */
+  async deleteMaster(slot: number): Promise<void> {
+    if (!this.heartwooddMode) {
+      throw new Error('Removing an identity over HTTP needs heartwoodd')
+    }
+    const res = await this.fetch(`/api/masters/${slot}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+      throw new Error((err as Record<string, string>).error ?? `Remove failed: ${res.status}`)
+    }
+  }
+
   async createSlot(masterSlot: number, label: string): Promise<Record<string, unknown>> {
     if (this.heartwooddMode) {
       const res = await this.fetch(`/api/slots/${masterSlot}`, {
@@ -358,9 +421,9 @@ export class HttpTransport {
       // Pi mode: create a pre-authorised connect slot with a secret.
       // The bunker auto-approves clients that connect with the matching secret.
       const inst = this.instanceForSlot(masterSlot)
-      const res = await fetch(`${this.baseUrl}/api/instance/${inst}/slots/create`, {
+      const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/slots/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: label.trim() }),
       })
       if (!res.ok) {
@@ -388,17 +451,15 @@ export class HttpTransport {
       // In Pi mode, slotIndex is the index into the approved clients list.
       // We need the pubkey to revoke. Fetch clients first, then revoke by pubkey.
       const inst = this.instanceForSlot(masterSlot)
-      const listRes = await fetch(`${this.baseUrl}/api/instance/${inst}/clients`, {
-        headers: { ...this.authHeaders() },
-      })
+      const listRes = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients`)
       if (!listRes.ok) return { type: FrameType.NACK as FrameTypeValue, payload: new Uint8Array(0) }
       const data = await listRes.json()
       const pubkeys = Object.keys(data.approved ?? {})
       const pubkey = pubkeys[slotIndex]
       if (!pubkey) return { type: FrameType.NACK as FrameTypeValue, payload: new Uint8Array(0) }
-      const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients/revoke`, {
+      const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients/revoke`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pubkey }),
       })
       const type = res.ok ? FrameType.ACK : FrameType.NACK
@@ -417,9 +478,8 @@ export class HttpTransport {
     }
     if (this.piMode) {
       const inst = this.instanceForSlot(masterSlot)
-      const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients/clear`, {
+      const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients/clear`, {
         method: 'POST',
-        headers: { ...this.authHeaders() },
       })
       const type = res.ok ? FrameType.ACK : FrameType.NACK
       return { type: type as FrameTypeValue, payload: new Uint8Array(0) }
@@ -431,9 +491,9 @@ export class HttpTransport {
   /** Approve a pending client by pubkey (Pi mode). */
   async approveClient(masterSlot: number, pubkey: string, label?: string): Promise<boolean> {
     const inst = this.instanceForSlot(masterSlot)
-    const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients/approve`, {
+    const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients/approve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pubkey, label }),
     })
     return res.ok
@@ -452,9 +512,7 @@ export class HttpTransport {
     if (this.piMode) {
       // Pi mode: look up pubkey from client list, then re-approve with updated fields.
       const inst = this.instanceForSlot(masterSlot)
-      const listRes = await fetch(`${this.baseUrl}/api/instance/${inst}/clients`, {
-        headers: { ...this.authHeaders() },
-      })
+      const listRes = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients`)
       if (!listRes.ok) return { type: FrameType.NACK as FrameTypeValue, payload: new Uint8Array(0) }
       const data = await listRes.json()
       const pubkeys = Object.keys(data.approved ?? {})
@@ -468,9 +526,9 @@ export class HttpTransport {
       if (newKinds != null) {
         approveBody.allowed_kinds = newKinds
       }
-      const res = await fetch(`${this.baseUrl}/api/instance/${inst}/clients/approve`, {
+      const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/clients/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(approveBody),
       })
       const type = res.ok ? FrameType.ACK : FrameType.NACK
@@ -489,9 +547,7 @@ export class HttpTransport {
   async getConnectSlots(masterSlot: number): Promise<{ label: string; secret: string; bunker_uri: string; clients: string[] }[]> {
     if (!this.piMode) return []
     const inst = this.instanceForSlot(masterSlot)
-    const res = await fetch(`${this.baseUrl}/api/instance/${inst}/slots`, {
-      headers: { ...this.authHeaders() },
-    })
+    const res = await this.apiFetch(`${this.baseUrl}/api/instance/${inst}/slots`)
     if (!res.ok) return []
     return res.json()
   }
@@ -514,14 +570,13 @@ export class HttpTransport {
   }
 
   async otaUpload(firmware: ArrayBuffer, signatureHex?: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/device/ota`, {
+    const res = await this.apiFetch(`${this.baseUrl}/api/device/ota`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/octet-stream',
         // The release signature rides a header; the daemon forwards it to the
         // device in OTA_BEGIN (signature-enforcing firmware refuses without it).
         ...(signatureHex ? { 'X-Firmware-Signature': signatureHex } : {}),
-        ...this.authHeaders(),
       },
       body: firmware,
     })
@@ -566,14 +621,25 @@ export class HttpTransport {
     if (!this._connected && !path.includes('bridge/info')) {
       throw new Error('Not connected')
     }
+    return this.apiFetch(`${this.baseUrl}${path}`, init)
+  }
+
+  /** Raw fetch with auth headers merged and 401 surfaced as auth-required.
+   *  The token itself is never logged or included in errors. */
+  private async apiFetch(url: string, init?: RequestInit): Promise<Response> {
     const mergedHeaders = {
       ...this.authHeaders(),
       ...(init?.headers as Record<string, string> | undefined),
     }
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: mergedHeaders,
-    })
+    const res = await fetch(url, { ...init, headers: mergedHeaders })
+    if (res.status === 401) {
+      this.handleUnauthorized()
+      return res
+    }
+    return this.handleBusy(res)
+  }
+
+  private handleBusy(res: Response): Response {
     if (res.status === 423) {
       // Device busy (serial lock held by relay handler). Silently skip —
       // the next poll cycle will retry. Not an error worth surfacing.
