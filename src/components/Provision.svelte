@@ -259,6 +259,10 @@
 
   async function handleSend() {
     if (!pendingSecret) return
+    // generate-device never reaches the send step (no browser-built secret),
+    // so mode is a true ProvisionMode here — assert once for the type system.
+    if (mode === 'generate-device') return
+    const provisionMode: ProvisionMode = mode
 
     status = 'sending'
     message = 'Sending to device...'
@@ -267,14 +271,14 @@
       if (device.mode === 'relay') {
         // The secret travels NIP-44 encrypted end-to-end to the signer; the
         // signer restarts shortly after storing to serve the new identity.
-        const res = await relayProvisionIdentity(pendingSecret, label, mode)
+        const res = await relayProvisionIdentity(pendingSecret, label, provisionMode)
         status = 'done'
         message = res.existing
           ? `“${res.label}” was already on this signer (slot ${res.slot}).`
           : `Identity '${res.label}' added to the signer. It restarts briefly to start serving it; reconnect from the front page in a few seconds.`
         rememberProvisioned(res.npub, res.label)
       } else {
-        const frame = buildProvisionFrame(pendingSecret, label, mode)
+        const frame = buildProvisionFrame(pendingSecret, label, provisionMode)
         const resp = await serialTransport.sendAndReceive(
           frame,
           [FrameType.ACK, FrameType.NACK],
