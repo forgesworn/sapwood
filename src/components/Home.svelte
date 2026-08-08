@@ -22,6 +22,7 @@
   import ConnectApp from './ConnectApp.svelte'
   import FirstIdentity from './FirstIdentity.svelte'
   import PhoneHandoff from './PhoneHandoff.svelte'
+  import VaultUnlock from './VaultUnlock.svelte'
   import KindPermissions from './KindPermissions.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
   import type { ConnectSlot } from '../lib/types.js'
@@ -241,6 +242,7 @@
 </script>
 
 <div class="home">
+  <VaultUnlock />
   {#if device.error}
     <div class="home-error" role="status">
       <span class="home-error-msg">⚠ {device.error}</span>

@@ -43,6 +43,8 @@ export const FrameType = {
   FACTORY_RESET:         0x24,
   SET_PIN:               0x25,
   PIN_UNLOCK:            0x26,
+  VAULT_SET:             0x62,
+  VAULT_UNLOCK:          0x63,
   POLICY_LIST_REQUEST:   0x27,
   POLICY_LIST_RESPONSE:  0x28,
   POLICY_REVOKE:         0x29,
@@ -247,6 +249,31 @@ export function buildWifiScan(): Uint8Array {
 export function buildSetPin(pin: string): Uint8Array {
   const encoder = new TextEncoder()
   return buildFrame(FrameType.SET_PIN, encoder.encode(pin))
+}
+
+/**
+ * Build a VAULT_SET frame (0x62). Payload: the 32-byte vault key to encrypt the
+ * master seeds at rest, or an empty payload to return to plaintext storage.
+ * Requires an authenticated bridge session and a physical confirmation on the
+ * device OLED within 30 seconds. ACK on success; NACK carries a reason.
+ */
+export function buildVaultSet(vaultKey: Uint8Array | null): Uint8Array {
+  if (vaultKey !== null && vaultKey.length !== 32) {
+    throw new RangeError('vault key must be 32 bytes')
+  }
+  return buildFrame(FrameType.VAULT_SET, vaultKey ?? new Uint8Array(0))
+}
+
+/**
+ * Build a VAULT_UNLOCK frame (0x63). Payload: the 32-byte vault key. Requires
+ * an authenticated bridge session. ACK unlocks; NACK carries a reason
+ * ("wrong vault key" / "already unlocked" / "bridge auth required").
+ */
+export function buildVaultUnlock(vaultKey: Uint8Array): Uint8Array {
+  if (vaultKey.length !== 32) {
+    throw new RangeError('vault key must be 32 bytes')
+  }
+  return buildFrame(FrameType.VAULT_UNLOCK, vaultKey)
 }
 
 export interface NetConfig {
