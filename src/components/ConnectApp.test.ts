@@ -128,7 +128,11 @@ describe('ConnectApp — happy path', () => {
     const uri = `nostrconnect://${'a'.repeat(64)}?relay=wss%3A%2F%2Frelay.trotters.cc&secret=sek&name=Chat&perms=nip44_decrypt%2Csign_event%3A13%2Csign_event%3A1059`
     await fireEvent.input(container.querySelector('textarea')!, { target: { value: uri } })
 
-    expect(await screen.findByText(/sign event kinds 13, 1059; NIP-44 decrypt/)).toBeTruthy()
+    expect(await screen.findByText(/sign the event kinds below; NIP-44 decrypt/)).toBeTruthy()
+    // Requested kinds render as labelled chips from the kind registry, not
+    // bare numbers: 1059 is a common kind, 13 falls back to the label map.
+    expect(screen.getByText('Gift Wrap')).toBeTruthy()
+    expect(screen.getByText('Seal (13)')).toBeTruthy()
     await fireEvent.click(screen.getByText('Pair this app'))
     expect(mockNostrconnect).toHaveBeenCalledWith({
       clientPubkey: 'a'.repeat(64),
@@ -143,6 +147,21 @@ describe('ConnectApp — happy path', () => {
       // where the APP listens, not on whichever session received the request.
       relay: 'wss://relay.trotters.cc',
     })
+  })
+
+  it('labels the V4V gated kinds with their risk on the approval card', async () => {
+    const { container } = render(ConnectApp)
+    await fireEvent.click(screen.getByText('Connect an app'))
+    await fireEvent.click(screen.getByText(/Have a connect link/))
+    const uri = `nostrconnect://${'b'.repeat(64)}?relay=wss%3A%2F%2Frelay.trotters.cc&secret=sek&name=v4v&perms=sign_event%3A27117%2Csign_event%3A30808`
+    await fireEvent.input(container.querySelector('textarea')!, { target: { value: uri } })
+
+    const deposit = await screen.findByText('Gated Deposit Auth')
+    expect(deposit.closest('.nc-kind-chip')?.getAttribute('data-risk')).toBe('high')
+    expect(deposit.closest('.nc-kind-chip')?.getAttribute('title')).toContain('kind 27117')
+    const content = screen.getByText('Gated Content')
+    expect(content.closest('.nc-kind-chip')?.getAttribute('data-risk')).toBe('medium')
+    expect((screen.getByText('Pair this app') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('blocks a nostrconnect link with an unknown permission', async () => {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseNostrConnectURI, isValidNostrConnect, permissionsToClientPolicy,
-  describeNostrConnectPermissions, sharesRelay,
+  describeNostrConnectPermissions, describeNostrConnectMethods,
+  requestedKindRows, sharesRelay,
 } from './nostrconnect.js'
 
 const PK = 'a'.repeat(64)
@@ -94,6 +95,38 @@ describe('permissionsToClientPolicy', () => {
       const result = permissionsToClientPolicy([permission])
       expect(result.issues.length, permission).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('requestedKindRows', () => {
+  it('labels requested kinds from the registry with their risk', () => {
+    const rows = requestedKindRows(permissionsToClientPolicy(['sign_event:27117', 'sign_event:30808', 'sign_event:1']))
+    expect(rows).toEqual([
+      { kind: 1, label: 'Note', risk: 'medium' },
+      { kind: 27117, label: 'Gated Deposit Auth', risk: 'high' },
+      { kind: 30808, label: 'Gated Content', risk: 'medium' },
+    ])
+  })
+
+  it('shows an unknown kind rather than hiding it, with unknown risk', () => {
+    const rows = requestedKindRows(permissionsToClientPolicy(['sign_event:999999']))
+    expect(rows).toEqual([{ kind: 999999, label: 'Unknown kind 999999', risk: 'unknown' }])
+  })
+
+  it('returns nothing for sign-all or no-signing requests', () => {
+    expect(requestedKindRows(permissionsToClientPolicy(['sign_event']))).toEqual([])
+    expect(requestedKindRows(permissionsToClientPolicy(['nip44_decrypt']))).toEqual([])
+  })
+})
+
+describe('describeNostrConnectMethods', () => {
+  it('lists only the non-signing actions', () => {
+    const result = permissionsToClientPolicy(['sign_event:1', 'nip44_decrypt', 'nip04_encrypt'])
+    expect(describeNostrConnectMethods(result)).toBe('NIP-44 decrypt; NIP-04 encrypt')
+  })
+
+  it('is empty when only signing was requested', () => {
+    expect(describeNostrConnectMethods(permissionsToClientPolicy(['sign_event:1']))).toBe('')
   })
 })
 

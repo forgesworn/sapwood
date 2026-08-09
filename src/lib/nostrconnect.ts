@@ -11,6 +11,7 @@
 // the UI checks that before handing the request to the device.
 
 import { exactClientPolicy } from './client-policy.js'
+import { kindInfo, kindLabel, type KindInfo } from './kinds.js'
 import type { ExactClientPolicy } from './types.js'
 
 export interface NostrConnectRequest {
@@ -194,18 +195,51 @@ export function permissionsToClientPolicy(perms: string[]): NostrConnectPermissi
   }
 }
 
+/** The non-signing actions a request asks for, as prose ("NIP-44 decrypt"). */
+export function describeNostrConnectMethods(result: NostrConnectPermissionResult): string {
+  const actions: string[] = []
+  if (result.policy.allowed_methods.includes('nip44_encrypt')) actions.push('NIP-44 encrypt')
+  if (result.policy.allowed_methods.includes('nip44_decrypt')) actions.push('NIP-44 decrypt')
+  if (result.policy.allowed_methods.includes('nip04_encrypt')) actions.push('NIP-04 encrypt')
+  if (result.policy.allowed_methods.includes('nip04_decrypt')) actions.push('NIP-04 decrypt')
+  return actions.join('; ')
+}
+
 /** Plain confirmation copy for the security boundary shown before pairing. */
 export function describeNostrConnectPermissions(result: NostrConnectPermissionResult): string {
   const actions: string[] = []
   if (result.signing === 'all') actions.push('sign any event')
   if (result.signing === 'kinds') actions.push(`sign event kinds ${result.policy.allowed_kinds.join(', ')}`)
-  if (result.policy.allowed_methods.includes('nip44_encrypt')) actions.push('NIP-44 encrypt')
-  if (result.policy.allowed_methods.includes('nip44_decrypt')) actions.push('NIP-44 decrypt')
-  if (result.policy.allowed_methods.includes('nip04_encrypt')) actions.push('NIP-04 encrypt')
-  if (result.policy.allowed_methods.includes('nip04_decrypt')) actions.push('NIP-04 decrypt')
+  const methods = describeNostrConnectMethods(result)
+  if (methods) actions.push(methods)
   return actions.length
     ? actions.join('; ')
     : 'connect and read your public key only; no automatic signing or decryption'
+}
+
+export interface RequestedKindRow {
+  kind: number
+  label: string
+  /** From the kinds registry; 'unknown' when the registry has no risk entry. */
+  risk: KindInfo['risk'] | 'unknown'
+}
+
+/**
+ * The requested signing kinds as labelled, risk-annotated rows for the
+ * approval card, so `sign_event:27117` reads as "Gated Deposit Auth · high
+ * risk" rather than a bare number the operator has to look up. Kinds outside
+ * the registry keep their number with an unknown risk - shown, not hidden.
+ */
+export function requestedKindRows(result: NostrConnectPermissionResult): RequestedKindRow[] {
+  if (result.signing !== 'kinds') return []
+  return result.policy.allowed_kinds.map((kind) => {
+    const info = kindInfo(kind)
+    return {
+      kind,
+      label: info?.label ?? kindLabel(kind),
+      risk: info?.risk ?? 'unknown',
+    }
+  })
 }
 
 /** Whether any of the app's relays is one the signer serves — the pairing only
