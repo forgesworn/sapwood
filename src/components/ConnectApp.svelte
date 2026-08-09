@@ -8,11 +8,12 @@
   import {
     device, mgmtCreateClient, mgmtNostrconnect,
   } from '../lib/device.svelte.js'
-  import { COMMON_KINDS, kindLabel } from '../lib/kinds.js'
+  import { COMMON_KINDS, kindLabel, riskColour } from '../lib/kinds.js'
   import { nameError, canCreate, type ConnectStep } from '../lib/connect-flow.js'
   import {
     parseNostrConnectURI, isValidNostrConnect, permissionsToClientPolicy,
-    describeNostrConnectPermissions, sharedRelay,
+    describeNostrConnectPermissions, describeNostrConnectMethods,
+    requestedKindRows, sharedRelay,
   } from '../lib/nostrconnect.js'
   import { identityKey } from '../lib/identity-key.js'
   import {
@@ -61,6 +62,8 @@
   let ncPaired = $state<{ appName: string } | null>(null)
   const ncReq = $derived(isValidNostrConnect(ncUri) ? parseNostrConnectURI(ncUri.trim()) : null)
   const ncPermissions = $derived(ncReq ? permissionsToClientPolicy(ncReq.perms) : null)
+  const ncKindRows = $derived(ncPermissions ? requestedKindRows(ncPermissions) : [])
+  const ncDot = (risk: string) => (risk === 'unknown' ? '#666' : riskColour(risk as 'low' | 'medium' | 'high'))
   const ncSharedRelay = $derived(ncReq ? sharedRelay(ncReq.relays, device.relays) : null)
   const ncRelayShared = $derived(ncSharedRelay !== null)
   // No overlap is no longer fatal: the signer can dial the app's relay and keep
@@ -370,7 +373,19 @@
             <p class="warn-text">This link names no usable relay, so the pairing cannot reach the app.</p>
           {/if}
           {#if ncPermissions}
-            <p class="hint-sm"><strong>Automatic access:</strong> {describeNostrConnectPermissions(ncPermissions)}.</p>
+            {#if ncKindRows.length > 0}
+              <p class="hint-sm"><strong>Automatic access:</strong> sign the event kinds below{#if describeNostrConnectMethods(ncPermissions)}; {describeNostrConnectMethods(ncPermissions)}{/if}.</p>
+              <div class="nc-kind-rows">
+                {#each ncKindRows as row (row.kind)}
+                  <span class="nc-kind-chip" data-risk={row.risk} title={`kind ${row.kind} · ${row.risk === 'unknown' ? 'not in the kind registry' : `${row.risk} risk`}`}>
+                    <span class="nc-risk-dot" style={`background:${ncDot(row.risk)}`}></span>{row.label}
+                    <span class="nc-kind-num">{row.kind}</span>
+                  </span>
+                {/each}
+              </div>
+            {:else}
+              <p class="hint-sm"><strong>Automatic access:</strong> {describeNostrConnectPermissions(ncPermissions)}.</p>
+            {/if}
             {#each ncPermissions.issues as issue}
               <p class="warn-text">{issue}</p>
             {/each}
@@ -490,6 +505,18 @@
   }
   .kind-chip:hover { border-color: #444; }
   .kind-chip.on { border-color: var(--green); color: var(--green); background: #08130d; }
+
+  /* Requested-permission kinds on the nostrconnect approval card: read-only
+     chips, each carrying the registry label and a risk dot the operator can
+     weigh before pairing. */
+  .nc-kind-rows { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.4rem 0 0.2rem; }
+  .nc-kind-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.25rem 0.55rem; font-size: 0.76rem; color: var(--text);
+  }
+  .nc-risk-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+  .nc-kind-num { color: var(--text-dim); font-size: 0.7rem; }
 
   .selected-custom-kinds {
     display: flex;
