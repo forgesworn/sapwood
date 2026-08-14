@@ -41,11 +41,15 @@ export function fullClientPolicy(allowSigning = true): ExactClientPolicy {
 }
 
 /** Methods Sapwood's own manager pairing needs for persona management over
- * the USB NIP-46 path. Deliberately NOT added to SUPPORTED: they must never
- * appear in the app-facing permissions UI, and `exactClientPolicy` must keep
- * filtering them out of ordinary app slots. */
+ * the USB NIP-46 path. The heartwood_* extensions are deliberately NOT added
+ * to SUPPORTED: they must never appear in the app-facing permissions UI, and
+ * `exactClientPolicy` must keep filtering them out of ordinary app slots.
+ * `nip44_decrypt` is the ratified exception (family-bunker §11.3.0): the
+ * recovery wizard asks the signer to decrypt the relay enrolment manifest so
+ * the natural-person key never leaves the device. */
 export const MANAGER_METHODS = [
   'get_public_key',
+  'nip44_decrypt',
   'heartwood_derive_persona',
   'heartwood_remove_persona',
   'heartwood_rename_persona',

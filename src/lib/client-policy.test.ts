@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { exactClientPolicy, exactPolicyFromSlot, fullClientPolicy, policiesEqual } from './client-policy.js'
+import { exactClientPolicy, exactPolicyFromSlot, fullClientPolicy, managerClientPolicy, policiesEqual } from './client-policy.js'
 
 describe('exact client policy', () => {
   it('never emits an empty method list and clears orphan event kinds', () => {
@@ -33,6 +33,17 @@ describe('exact client policy', () => {
       allowed_kinds: [],
       auto_approve: false,
     })
+  })
+
+  it('manager ceiling carries decrypt for the recovery wizard but never signing', () => {
+    const manager = managerClientPolicy()
+    expect(manager.allowed_methods).toContain('nip44_decrypt')
+    expect(manager.allowed_methods).toContain('heartwood_derive_persona')
+    expect(manager.allowed_methods).not.toContain('sign_event')
+    expect(manager.allowed_methods).not.toContain('nip44_encrypt')
+    // The heartwood_* extensions stay out of ordinary app slots even if asked for.
+    expect(exactClientPolicy(['heartwood_derive_persona', 'heartwood_remove_persona']).allowed_methods)
+      .toEqual(['get_public_key'])
   })
 
   it('compares echoed policies setwise', () => {

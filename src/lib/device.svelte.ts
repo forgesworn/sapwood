@@ -12,13 +12,14 @@ import {
   buildDeriveIdentity, buildProvisionRemove,
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
-import { policiesEqual, managerClientPolicy } from './client-policy.js'
+import { policiesEqual, managerClientPolicy, MANAGER_METHODS } from './client-policy.js'
 import {
   clientPubkeyHex as nip46UsbClientPubkeyHex,
   connectWithSecret as nip46UsbConnect,
   derivePersona as nip46UsbDerivePersona,
   removePersona as nip46UsbRemovePersona,
   renamePersona as nip46UsbRenamePersona,
+  decryptAsIdentity as nip46UsbDecrypt,
   type DerivedPersona,
 } from './nip46-usb.js'
 import { dedupeIdentities } from './identity-key.js'
@@ -3125,6 +3126,37 @@ export async function serialRenamePersona(personaNpub: string, name: string): Pr
   if (decoded.type !== 'npub') throw new Error('Unexpected persona encoding')
   await nip46UsbRenamePersona(masterHex, decoded.data, name)
   await refreshMasters()
+}
+
+/** Widen a pre-recovery manager pairing to the current ceiling in place.
+ *  Pairings created before the recovery wizard lack nip44_decrypt; the update
+ *  is one button-confirmed CONNSLOT_UPDATE rather than a re-pair. A missing
+ *  slot is left to the NACK self-repair path in the request itself. */
+async function ensureManagerCeiling(masterHex: string): Promise<void> {
+  const stored = localStorage.getItem(pairingKey(masterHex))
+  if (!stored) return
+  let slotIndex: number | undefined
+  try { slotIndex = (JSON.parse(stored) as { slotIndex?: number }).slotIndex } catch { return }
+  if (typeof slotIndex !== 'number') return
+  await refreshSlots()
+  const slot = device.slots.find((s) => s.slot_index === slotIndex)
+  if (!slot) return
+  if (MANAGER_METHODS.every((method) => slot.allowed_methods.includes(method))) return
+  await serialUpdateClient(slotIndex, managerClientPolicy())
+}
+
+/** Decrypt a NIP-44 ciphertext on the signer as `targetHex`, an identity it
+ *  serves, with `peerHex` as the conversation partner. The recovery wizard
+ *  uses this on the enrolment manifest (target = peer = the natural-person
+ *  key); the plaintext crosses the cable, the key never does. */
+export async function serialDeviceDecrypt(
+  targetHex: string,
+  peerHex: string,
+  ciphertext: string,
+): Promise<string> {
+  const masterHex = await ensureSapwoodPairing()
+  await ensureManagerCeiling(masterHex)
+  return nip46UsbDecrypt(targetHex, peerHex, ciphertext)
 }
 
 // --- Mode-dispatching client management (serial OR relay) ---

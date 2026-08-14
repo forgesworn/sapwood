@@ -194,6 +194,19 @@ export async function renamePersona(
   await nip46UsbRequest(masterPubkeyHex, 'heartwood_rename_persona', [personaPubkeyHex, name])
 }
 
+/** Ask the signer to NIP-44-decrypt a ciphertext as one of its identities.
+ *  The recovery wizard uses this on the enrolment manifest, which MySignet
+ *  self-encrypts to the guardian's natural-person key: target and peer are
+ *  both the NP pubkey, and the plaintext roster comes back over the cable
+ *  while the key itself never leaves the device. */
+export async function decryptAsIdentity(
+  targetPubkeyHex: string,
+  peerPubkeyHex: string,
+  ciphertext: string,
+): Promise<string> {
+  return nip46UsbRequest(targetPubkeyHex, 'nip44_decrypt', [peerPubkeyHex, ciphertext])
+}
+
 /** NIP-46 connect: binds this client key to the slot the secret belongs to.
  *  Needed once per pairing; afterwards the binding is by client pubkey. */
 export async function connectWithSecret(

@@ -9,6 +9,7 @@
   import { httpTransport } from '../lib/http.js'
   import { identityKey } from '../lib/identity-key.js'
   import Provision from './Provision.svelte'
+  import RecoveryWizard from './RecoveryWizard.svelte'
   import OperatorKey from './OperatorKey.svelte'
   import ProfileRelays from './ProfileRelays.svelte'
   import Nip05Card from './Nip05Card.svelte'
@@ -313,6 +314,18 @@
       <Provision />
     </details>
   </section>
+
+  <!-- Family recovery (Path B): words-only rebuild of a My Signet family onto
+       this signer, from the encrypted roster on the sync relay. USB only: the
+       ceremony rides the Sapwood manager pairing. -->
+  {#if device.mode === 'serial'}
+    <section>
+      <details class="disclosure">
+        <summary>Recover a family from its words</summary>
+        <RecoveryWizard />
+      </details>
+    </section>
+  {/if}
 
   <div class="rule"></div>
 
