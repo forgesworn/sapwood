@@ -149,7 +149,7 @@ Erases all keys and client policies on the device. Sends FACTORY_RESET (0x24). T
 
 A compromised Sapwood SPA cannot extract private keys or perform destructive actions without physical access to the button. The attacker must be in the same room.
 
-**WiFi is never enabled** on the ESP32. The TCP/IP stack is too large an attack surface for a key-holding device. The bridge connects via the host machine's network, not the device.
+**WiFi is off by default** on the ESP32: in the high-assurance USB-bridged mode all radios stay disabled and the host machine does the networking. The opt-in WiFi-standalone mode enables the radio so the signer talks to Nostr relays directly (no Pi); keys still never leave the chip, NIP-44 is decrypted on-device, and out-of-policy signing still needs the physical button. The device stores an ordered list of fallback WiFi networks and rotates through them; Sapwood edits the list over USB or the authenticated relay channel without ever resending stored passwords.
 
 **Planned: Web Bluetooth (portable mode only).** BLE connectivity is planned for child-key-only portable mode. Before BLE ships, additional firmware hardening is required: rate limiting on management frame types, button-press BLE pairing, and CSP headers on static hosting.
 

@@ -2,7 +2,7 @@
 
 > Shape your signer -- browser-based management UI for the Heartwood ESP32 signing device.
 
-Sapwood connects to a Heartwood ESP32 hardware signer via Web Serial API (Chrome/Edge) and provides a management interface for TOFU client policies, OTA firmware updates, factory reset, and device monitoring. No server required -- it's a static SPA deployed to GitHub Pages.
+Sapwood connects to a Heartwood ESP32 hardware signer via Web Serial API (Chrome/Edge), or remotely over authenticated Nostr relay management, and provides a management interface for client policies, network settings (including an ordered fallback WiFi network list), signed firmware updates (OTA where the board has slots, app-only quick USB reflash where it does not), backup/restore, factory reset, and device monitoring. No server required -- it's a static SPA.
 
 ## Key facts
 
