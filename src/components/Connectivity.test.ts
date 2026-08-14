@@ -102,6 +102,32 @@ describe('Connectivity remote network changes', () => {
     expect(JSON.stringify({ ...localStorage })).not.toContain('Home WiFi password')
   })
 
+  it('sends the fallback-network list with keep actions when the signer supports it', async () => {
+    vi.mocked(getNetworkConfig).mockResolvedValue({
+      ...ACTIVE,
+      active: {
+        ...ACTIVE.active,
+        networks: [
+          { ssid: 'hotspot', password_set: true },
+          { ssid: 'starlink', password_set: false },
+        ],
+      },
+    })
+    render(Connectivity)
+
+    await screen.findByText('hotspot')
+    await screen.findByText('starlink')
+    await fireEvent.click(screen.getByRole('button', { name: 'Test & save network' }))
+
+    await waitFor(() => expect(configureNetworkRemotely).toHaveBeenCalledWith(expect.objectContaining({
+      // Reorder/keep semantics: stored entries go back as keep, no secrets.
+      networks: [
+        { ssid: 'hotspot', password: { action: 'keep' } },
+        { ssid: 'starlink', password: { action: 'keep' } },
+      ],
+    })))
+  })
+
   it('resets on signer switch and ignores a late response from the old target', async () => {
     let finishOld!: (state: typeof ACTIVE) => void
     const oldRead = new Promise<typeof ACTIVE>((resolve) => { finishOld = resolve })

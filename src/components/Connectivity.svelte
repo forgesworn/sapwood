@@ -51,15 +51,17 @@
   let fallbacks = $state<Array<{ ssid: string; password: string | null }>>([])
   let newNetSsid = $state('')
   let newNetPassword = $state('')
+  // The signer's stored (redacted) fallback list, from whichever transport is
+  // live. `undefined` = firmware predates the list (it would reject the patch
+  // field); an array (possibly empty) = the editor is usable.
+  let storedNetworks = $state<Array<{ ssid: string; password_set: boolean }> | undefined>(undefined)
 
   const overUsb = $derived(device.connected && device.mode === 'serial')
   const overRelay = $derived(device.connected && device.mode === 'relay')
   const usbState = $derived(device.usbNetworkState)
   const usbConfigured = $derived(overUsb && usbState?.configured === true)
   const canConfigure = $derived(overUsb || overRelay)
-  // Firmware that reports a `networks` array (even empty) understands the
-  // fallback list; older firmware rejects the patch field outright.
-  const supportsNetworkList = $derived(usbConfigured && usbState?.networks !== undefined)
+  const supportsNetworkList = $derived((usbConfigured || overRelay) && storedNetworks !== undefined)
   const MAX_FALLBACKS = 7
 
   function addFallback() {
@@ -139,6 +141,7 @@
     fallbacks = []
     newNetSsid = ''
     newNetPassword = ''
+    storedNetworks = undefined
   }
 
   async function loadRemoteConfig(targetKey: string, epoch: number) {
@@ -155,6 +158,8 @@
       password = '' // a password is never returned or persisted in the browser
       passwordSet = state.active.password_set
       clearPassword = false
+      storedNetworks = state.active.networks
+      fallbacks = (state.active.networks ?? []).map((n) => ({ ssid: n.ssid, password: null }))
       pendingTrial = state.trial
       if (state.trial) {
         message = state.trial.phase === 'staged'
@@ -191,6 +196,7 @@
     password = ''
     passwordSet = state.password_set === true
     clearPassword = false
+    storedNetworks = state.networks
     fallbacks = (state.networks ?? []).map((n) => ({ ssid: n.ssid, password: null }))
     loading = false
   })
@@ -285,7 +291,7 @@
     // to a network the signer already stores, where `keep` resolves by SSID
     // (promoting a fallback never resends its secret).
     const storedFallback = supportsNetworkList
-      && (usbState?.networks ?? []).some((n) => n.ssid === cleanSsid)
+      && (storedNetworks ?? []).some((n) => n.ssid === cleanSsid)
     if ((overRelay || usbConfigured) && activeSsid && cleanSsid !== activeSsid
       && !password && !clearPassword && !storedFallback) {
       status = 'error'
@@ -305,6 +311,18 @@
           ssid: cleanSsid,
           relays: cleanRelays,
           password: passwordChange,
+          ...(supportsNetworkList
+            ? {
+                networks: fallbacks.filter((n) => n.ssid !== cleanSsid).map((n) => ({
+                  ssid: n.ssid,
+                  password: n.password === null
+                    ? { action: 'keep' as const }
+                    : n.password
+                      ? { action: 'set' as const, value: n.password }
+                      : { action: 'clear' as const },
+                })),
+              }
+            : {}),
         })
         if (epoch !== loadEpoch || connectionKey() !== requestKey) return
         ok = true
@@ -520,7 +538,7 @@
           {/if}
         </div>
       {:else if overRelay}
-        <p class="hint-sm">Editing the fallback-network list needs the USB cable.</p>
+        <p class="hint-sm">This signer's firmware predates the fallback-network list. Update it over USB to use one.</p>
       {/if}
       <div class="field">
         <span class="field-label">Relays</span>

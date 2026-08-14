@@ -80,6 +80,9 @@ export interface RedactedNetworkConfig {
   ssid: string
   relays: string[]
   password_set: boolean
+  /** Ordered fallback networks (redacted). Present (possibly empty) exactly
+   * when the firmware supports the network list; absent on older firmware. */
+  networks?: Array<{ ssid: string; password_set: boolean }>
 }
 
 export interface NetworkConfigTrial extends RedactedNetworkConfig {
@@ -141,6 +144,10 @@ export interface RemoteNetworkPatch {
   ssid?: string
   relays?: string[]
   password?: RemotePasswordChange
+  /** Replacement fallback-network list (order = priority). Per-entry `keep`
+   * reuses the password the signer already stores for that SSID. Only valid
+   * against firmware that reports a `networks` array in its active state. */
+  networks?: Array<{ ssid: string; password: RemotePasswordChange }>
 }
 
 interface RelayAuditEntry {
@@ -1485,6 +1492,19 @@ function redactedNetworkConfig(value: unknown): RedactedNetworkConfig {
   if (!raw) throw new Error('The signer returned an invalid network configuration.')
   const mode = raw.mode === 'usb' ? 'usb' : raw.mode === 'wifi' ? 'wifi' : null
   if (!mode) throw new Error('The signer returned an invalid network mode.')
+  let networks: RedactedNetworkConfig['networks']
+  if (raw.networks !== undefined) {
+    if (!Array.isArray(raw.networks) || raw.networks.length > 8) {
+      throw new Error('The signer returned an invalid fallback-network list.')
+    }
+    networks = raw.networks.map((entry) => {
+      const item = record(entry)
+      if (!item || typeof item.ssid !== 'string' || item.ssid.length > 32) {
+        throw new Error('The signer returned an invalid fallback-network entry.')
+      }
+      return { ssid: item.ssid, password_set: item.password_set === true }
+    })
+  }
   return {
     mode,
     ssid: typeof raw.ssid === 'string' ? raw.ssid : '',
@@ -1492,6 +1512,7 @@ function redactedNetworkConfig(value: unknown): RedactedNetworkConfig {
       ? raw.relays.filter((relay): relay is string => typeof relay === 'string' && !!relay.trim())
       : [],
     password_set: raw.password_set === true,
+    ...(networks !== undefined ? { networks } : {}),
   }
 }
 
@@ -1654,7 +1675,18 @@ function utf8Length(value: string): number {
   return new TextEncoder().encode(value).length
 }
 
+/** Pre-network-list firmware stores at most 512 B; firmware that reports a
+ * `networks` array raised the ceiling to 1024 B alongside it. */
 const REMOTE_NET_CONFIG_MAX_BYTES = 512
+const REMOTE_NET_CONFIG_MAX_BYTES_WITH_LIST = 1024
+
+/** Whether this config stores a password for `ssid` (primary or fallback).
+ * `null` means the SSID is unknown to the config, so a `keep` cannot resolve. */
+function knownPasswordSet(active: RedactedNetworkConfig, ssid: string): boolean | null {
+  if (active.ssid === ssid) return active.password_set
+  const entry = active.networks?.find((network) => network.ssid === ssid)
+  return entry ? entry.password_set : null
+}
 
 /** Mirror firmware's serialized NVS candidate ceiling. `get_network_config`
  * redacts a kept password, so model its largest valid JSON representation:
@@ -1664,23 +1696,66 @@ function validateRemoteCandidateSerializedSize(
   active: RedactedNetworkConfig,
   patch: RemoteNetworkPatch,
 ): void {
+  const worstCaseKept = (passwordSet: boolean | null) => (passwordSet ? '"'.repeat(63) : '')
   const password = patch.password ?? { action: 'keep' as const }
   const candidatePassword = password.action === 'set'
     ? password.value
     : password.action === 'clear'
       ? ''
-      : active.password_set ? '"'.repeat(63) : ''
+      : worstCaseKept(knownPasswordSet(active, patch.ssid ?? active.ssid) ?? active.password_set)
+  const networks = patch.networks !== undefined
+    ? patch.networks.map((entry) => ({
+        ssid: entry.ssid,
+        password: entry.password.action === 'set'
+          ? entry.password.value
+          : entry.password.action === 'clear'
+            ? ''
+            : worstCaseKept(knownPasswordSet(active, entry.ssid)),
+      }))
+    : (active.networks ?? []).map((entry) => ({
+        ssid: entry.ssid,
+        password: worstCaseKept(entry.password_set),
+      }))
   const candidate = {
     ssid: patch.ssid ?? active.ssid,
     password: candidatePassword,
     relays: patch.relays ?? active.relays,
     mode: 'wifi',
     op_mgmt: '0'.repeat(64),
+    // Firmware skips an empty list on serialisation.
+    ...(networks.length ? { networks } : {}),
   }
+  const limit = active.networks !== undefined
+    ? REMOTE_NET_CONFIG_MAX_BYTES_WITH_LIST
+    : REMOTE_NET_CONFIG_MAX_BYTES
   const serializedBytes = utf8Length(JSON.stringify(candidate))
-  if (serializedBytes > REMOTE_NET_CONFIG_MAX_BYTES) {
-    throw new Error(`The staged network configuration may serialize to ${serializedBytes} bytes, exceeding the signer's 512-byte limit.`)
+  if (serializedBytes > limit) {
+    throw new Error(`The staged network configuration may serialize to ${serializedBytes} bytes, exceeding the signer's ${limit}-byte limit.`)
   }
+}
+
+function assertSafeSsid(ssid: string): void {
+  const length = utf8Length(ssid)
+  if (length < 1 || length > 32) throw new Error('A WiFi SSID must be 1–32 bytes.')
+  if ([...ssid].some((char) => char.codePointAt(0)! < 0x20 || char.codePointAt(0) === 0x7f)) {
+    throw new Error('A WiFi SSID cannot contain control characters.')
+  }
+}
+
+function safePasswordChange(password: RemotePasswordChange | undefined): RemotePasswordChange {
+  const change = password ?? { action: 'keep' as const }
+  if (change.action === 'set') {
+    const length = utf8Length(change.value)
+    const rawPsk = length === 64 && /^[0-9a-f]{64}$/i.test(change.value)
+    if (!(length >= 8 && length <= 63) && !rawPsk) {
+      throw new Error('A WiFi password must be 8–63 bytes, or a 64-character hexadecimal PSK.')
+    }
+    if ([...change.value].some((char) => char.codePointAt(0)! < 0x20 || char.codePointAt(0) === 0x7f)) {
+      throw new Error('A WiFi password cannot contain control characters.')
+    }
+    return { action: 'set', value: change.value }
+  }
+  return change.action === 'clear' ? { action: 'clear' } : { action: 'keep' }
 }
 
 function safeRemoteNetworkPatch(patch: RemoteNetworkPatch): RemoteNetworkPatch {
@@ -1690,11 +1765,7 @@ function safeRemoteNetworkPatch(patch: RemoteNetworkPatch): RemoteNetworkPatch {
     safe.mode = 'wifi'
   }
   if (patch.ssid !== undefined) {
-    const length = utf8Length(patch.ssid)
-    if (length < 1 || length > 32) throw new Error('A WiFi SSID must be 1–32 bytes.')
-    if ([...patch.ssid].some((char) => char.codePointAt(0)! < 0x20 || char.codePointAt(0) === 0x7f)) {
-      throw new Error('A WiFi SSID cannot contain control characters.')
-    }
+    assertSafeSsid(patch.ssid)
     safe.ssid = patch.ssid
   }
   if (patch.relays !== undefined) {
@@ -1702,21 +1773,18 @@ function safeRemoteNetworkPatch(patch: RemoteNetworkPatch): RemoteNetworkPatch {
     if (relays.length === 0) throw new Error('WiFi mode needs at least one relay.')
     safe.relays = relays
   }
-  const password = patch.password ?? { action: 'keep' as const }
-  if (password.action === 'set') {
-    const length = utf8Length(password.value)
-    const rawPsk = length === 64 && /^[0-9a-f]{64}$/i.test(password.value)
-    if (!(length >= 8 && length <= 63) && !rawPsk) {
-      throw new Error('A WiFi password must be 8–63 bytes, or a 64-character hexadecimal PSK.')
+  safe.password = safePasswordChange(patch.password)
+  if (patch.networks !== undefined) {
+    if (patch.networks.length > 7) {
+      throw new Error('The signer stores up to 7 fallback networks beside the primary.')
     }
-    if ([...password.value].some((char) => char.codePointAt(0)! < 0x20 || char.codePointAt(0) === 0x7f)) {
-      throw new Error('A WiFi password cannot contain control characters.')
-    }
-    safe.password = { action: 'set', value: password.value }
-  } else if (password.action === 'clear') {
-    safe.password = { action: 'clear' }
-  } else {
-    safe.password = { action: 'keep' }
+    const seen = new Set<string>()
+    safe.networks = patch.networks.map((entry) => {
+      assertSafeSsid(entry.ssid)
+      if (seen.has(entry.ssid)) throw new Error(`Duplicate network "${entry.ssid}" in the fallback list.`)
+      seen.add(entry.ssid)
+      return { ssid: entry.ssid, password: safePasswordChange(entry.password) }
+    })
   }
   return safe
 }
@@ -1734,23 +1802,45 @@ function expectedRemoteNetworkConfig(
   active: RedactedNetworkConfig,
   patch: RemoteNetworkPatch,
 ): RedactedNetworkConfig {
+  const ssid = patch.ssid ?? active.ssid
   const password = patch.password ?? { action: 'keep' as const }
+  // `keep` resolves by SSID on the firmware: unchanged primary keeps its own
+  // password; a promote pulls the stored fallback's.
+  const keptSet = knownPasswordSet(active, ssid) ?? active.password_set
+  const networks = patch.networks !== undefined
+    ? patch.networks.map((entry) => ({
+        ssid: entry.ssid,
+        password_set: entry.password.action === 'set' ? true
+          : entry.password.action === 'clear' ? false
+            : knownPasswordSet(active, entry.ssid) === true,
+      }))
+    : active.networks?.map((entry) => ({ ...entry }))
   return {
     mode: 'wifi',
-    ssid: patch.ssid ?? active.ssid,
+    ssid,
     relays: patch.relays ?? active.relays,
     password_set: password.action === 'set' ? true
       : password.action === 'clear' ? false
-        : active.password_set,
+        : keptSet,
+    ...(networks !== undefined ? { networks } : {}),
   }
 }
 
 function sameRedactedNetworkConfig(a: RedactedNetworkConfig, b: RedactedNetworkConfig): boolean {
+  const an = a.networks
+  const bn = b.networks
+  const networksMatch = an === undefined && bn === undefined
+    ? true
+    : Array.isArray(an) && Array.isArray(bn)
+      && an.length === bn.length
+      && an.every((entry, index) => entry.ssid === bn[index].ssid
+        && entry.password_set === bn[index].password_set)
   return a.mode === b.mode
     && a.ssid === b.ssid
     && a.password_set === b.password_set
     && a.relays.length === b.relays.length
     && a.relays.every((relay, index) => relay === b.relays[index])
+    && networksMatch
 }
 
 function isCommittedNetworkState(
@@ -1834,10 +1924,24 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
     if (before.trial) {
       throw new Error(`The signer already has a ${before.trial.phase} network transaction (${before.trial.transaction_id}). Wait for it to finish or abort it before starting another.`)
     }
+    // Switching the primary SSID needs an explicit password decision, except
+    // to a network the signer already stores: there `keep` resolves by SSID
+    // (a promote never resends its secret).
     if (safePatch.ssid !== undefined
       && safePatch.ssid !== before.active.ssid
-      && (safePatch.password?.action ?? 'keep') === 'keep') {
-      throw new Error('Changing the WiFi name remotely needs a new password, or an explicit choice to clear it for an open network. Blank can only keep the password when the SSID is unchanged.')
+      && (safePatch.password?.action ?? 'keep') === 'keep'
+      && knownPasswordSet(before.active, safePatch.ssid) === null) {
+      throw new Error('Changing the WiFi name remotely needs a new password, or an explicit choice to clear it for an open network. Blank can only keep the password when the SSID is unchanged or already stored on the signer.')
+    }
+    if (safePatch.networks !== undefined) {
+      if (before.active.networks === undefined) {
+        throw new Error('This signer firmware predates the fallback-network list. Update it over USB first.')
+      }
+      for (const entry of safePatch.networks) {
+        if (entry.password.action === 'keep' && knownPasswordSet(before.active, entry.ssid) === null) {
+          throw new Error(`The signer has no stored password for "${entry.ssid}" — set or clear one for it.`)
+        }
+      }
     }
     acceptedRevision = before.revision + 1
     if (!Number.isSafeInteger(acceptedRevision)) throw new Error('The signer network revision is too large to update safely.')
