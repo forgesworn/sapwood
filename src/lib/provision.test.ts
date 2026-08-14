@@ -11,6 +11,7 @@ import {
   decodeNsec,
   buildProvisionFrame,
   nameDeriveError,
+  nameReservedWarning,
   generateMnemonic,
   zeroize,
 } from './provision.js'
@@ -222,6 +223,23 @@ describe('nameDeriveError', () => {
     expect(nameDeriveError('  ')).not.toBeNull()
     expect(nameDeriveError('a|b')).not.toBeNull()
     expect(nameDeriveError('a'.repeat(256))).not.toBeNull()
+  })
+})
+
+describe('nameReservedWarning', () => {
+  it('warns on names the persona namespace reserves', () => {
+    expect(nameReservedWarning('natural-person')).toMatch(/reserved persona name/)
+    expect(nameReservedWarning(' persona ')).toMatch(/reserved persona name/)
+    expect(nameReservedWarning('professional')).not.toBeNull()
+    expect(nameReservedWarning('dependant-3-np')).not.toBeNull()
+    expect(nameReservedWarning('dependant-12-persona')).not.toBeNull()
+  })
+
+  it('stays quiet for ordinary names', () => {
+    expect(nameReservedWarning('work')).toBeNull()
+    expect(nameReservedWarning('pallasite')).toBeNull()
+    expect(nameReservedWarning('dependant')).toBeNull()
+    expect(nameReservedWarning('dependant-x-np')).toBeNull()
   })
 })
 

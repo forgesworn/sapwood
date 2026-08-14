@@ -10,6 +10,7 @@
     decodeNsec,
     buildProvisionFrame,
     nameDeriveError,
+    nameReservedWarning,
     zeroize,
     type ProvisionMode,
   } from '../lib/provision.js'
@@ -147,8 +148,8 @@
       addressKind: 'new',
     },
     'named-child': {
-      title: 'Named identity from your master',
-      body: 'Derive a member of your identity tree by name (for example work, social, or a project name). The name picks a branch of the tree: the same master and name always recreate the same identity, here or with the nsec-tree tools. Names are case-sensitive.',
+      title: 'Named identity from your master (fills a master slot)',
+      body: 'Derive a member of your identity tree by name (for example work, social, or a project name). The name picks a branch of the tree: the same master and name always recreate the same identity, here or with the nsec-tree tools. Names are case-sensitive. This fills one of the signer\'s master slots; for a lightweight persona that shares this identity\'s tree, use "Add a persona" on the Identity panel instead.',
       address: 'A new address, derived from your master and the name.',
       addressKind: 'new',
     },
@@ -486,6 +487,9 @@
         />
         {#if mode === 'named-child'}
           <span class="hint-sm name-hint">The name selects the derived key. Write it down with your master's backup: both are needed to recreate this identity.</span>
+          {#if nameReservedWarning(label)}
+            <span class="hint-sm reserved-warning">{nameReservedWarning(label)}</span>
+          {/if}
         {/if}
       </label>
 
@@ -673,6 +677,7 @@
   .info strong { color: var(--text); }
 
   .name-hint { display: block; margin-top: 0.35rem; }
+  .reserved-warning { display: block; margin-top: 0.35rem; color: var(--amber); }
 
   /* Where a named identity derives: on the signer (default) or in the browser */
   .source-toggle { display: flex; flex-direction: column; gap: 0.5rem; }

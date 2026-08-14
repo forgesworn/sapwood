@@ -108,8 +108,10 @@ BLE connectivity planned for portable mode (child key only, short range). Additi
 | PROVISION_REMOVE | 0x04 | host -> device | slot_u8 (ACK, then device reboots; remaining slots renumber) |
 | PROVISION_LIST | 0x05 | host -> device | (empty) |
 | PROVISION_LIST_RESPONSE | 0x07 | device -> host | JSON `Vec<MasterInfo>` (masters, then derived personas with `persona: true`) |
-| DERIVE_IDENTITY | 0x60 | host -> device | parent_slot (1) + name utf8; device derives the nsec-tree child on-device |
+| DERIVE_IDENTITY | 0x60 | host -> device | parent_slot (1) + name utf8; device derives the nsec-tree child on-device (fills a MASTER slot — registry personas go over NIP-46 instead, below) |
 | DERIVE_IDENTITY_RESPONSE | 0x61 | device -> host | JSON `{slot, label, npub, parent_slot, purpose, existing}` |
+| ENCRYPTED_REQUEST | 0x10 | host -> device | `[target_pubkey_32][client_pubkey_32][created_at_u64_be_8][nip44_ciphertext_b64]` — a full NIP-46 request, same path the bridge pumps. `src/lib/nip46-usb.ts` drives it: Sapwood pairs once as a manager client ("Sapwood manager" slot, button-confirmed policy) and creates/renames/removes registry personas via `heartwood_derive_persona` / `heartwood_rename_persona` / `heartwood_remove_persona` |
+| SIGN_ENVELOPE_RESPONSE | 0x35 | device -> host | signed kind:24133 envelope; `content` decrypts under the client⇄identity conversation key |
 | FACTORY_RESET | 0x24 | host -> device | (empty, requires button) |
 | SESSION_AUTH | 0x21 | host -> device | 32-byte bridge secret; reply SESSION_ACK 0x22 (0x00 ok / 0x01 wrong / 0x02 none set) |
 | CONNSLOT_LIST | 0x42 | host -> device | master_slot (1); secrets redacted, no session needed |

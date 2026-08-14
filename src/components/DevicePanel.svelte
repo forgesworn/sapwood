@@ -9,6 +9,7 @@
   } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
   import { getFirmwareVersion } from '../lib/device.svelte.js'
+  import { storageGauge } from '../lib/storage-gauge.js'
   import { describeReset, formatUptime, formatBytes } from '../lib/reset-reason.js'
   import { npubToHex } from '../lib/known-devices.js'
   import { copyText } from '../lib/clipboard.js'
@@ -41,6 +42,7 @@
     uptime_s?: number; last_reset?: string; crashed_during?: string
     max_sign_bytes?: number; max_sign_bytes_object?: number
     free_heap?: number; largest_block?: number
+    nvs_used_entries?: number; nvs_free_entries?: number; nvs_total_entries?: number
   } | null>(null)
   $effect(() => {
     if (device.connected && device.mode === 'serial') {
@@ -93,6 +95,12 @@
   // over it is refused, and without this the failure is a bare timeout.
   const maxSignBytes = $derived(usbHealth?.max_sign_bytes)
   const maxSignBytesObject = $derived(usbHealth?.max_sign_bytes_object)
+
+  // Identity & app storage: one NVS pool shared by identities, personas, app
+  // pairings and settings. Null on firmware that predates the stats.
+  const storage = $derived(device.mode === 'relay'
+    ? storageGauge(device.relayStatus?.nvs?.used_entries, device.relayStatus?.nvs?.total_entries)
+    : storageGauge(usbHealth?.nvs_used_entries, usbHealth?.nvs_total_entries))
   const fragmented = $derived(typeof freeHeap === 'number' && typeof largestBlock === 'number'
     && freeHeap > 0 && largestBlock / freeHeap < 0.4)
   // The signer trimmed this poll to the vital fields because its heap was too
@@ -398,7 +406,27 @@
             · {formatBytes(maxSignBytesObject)} for apps that ask for the compact reply{/if}
         </td></tr>
       {/if}
+      {#if storage}
+        <tr>
+          <td class="label">Identity &amp; app storage</td>
+          <td class:crash-reset={storage.state !== 'ok'}>
+            <span class="gauge-track"><span
+              class="gauge-fill gauge-{storage.state}"
+              style={`width:${storage.pct}%`}
+            ></span></span>
+            {storage.label}
+          </td>
+        </tr>
+      {/if}
     </tbody></table>
+    {#if storage?.state === 'warn'}
+      <p class="hint-sm crash-hint">The signer's storage is filling up. Identities, personas, app pairings
+        and settings share it. Removing an unused persona or app pairing frees space.</p>
+    {/if}
+    {#if storage?.state === 'full'}
+      <p class="hint-sm crash-hint">The signer's storage is nearly full. It will refuse new personas before
+        app pairings stop working, so remove an unused persona or app pairing now.</p>
+    {/if}
     {#if fragmented}
       <p class="hint-sm crash-hint">The signer's memory is fragmented (its largest free block is small
         relative to total free). This can happen after a burst of decryptions; it clears on the next
@@ -721,6 +749,16 @@
 <style>
   .crash-reset { color: var(--amber); font-weight: 600; }
   .crash-hint { margin-top: 0.4rem; color: var(--amber); }
+
+  .gauge-track {
+    display: inline-block; vertical-align: middle; margin-right: 0.5rem;
+    width: 7rem; height: 0.45rem; border-radius: 3px;
+    background: #1a1a1a; border: 1px solid var(--border); overflow: hidden;
+  }
+  .gauge-fill { display: block; height: 100%; }
+  .gauge-ok { background: var(--green); }
+  .gauge-warn { background: var(--amber); }
+  .gauge-full { background: var(--red); }
 
   .log-quiet { margin-top: 0.9rem; }
   .lq-label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.4rem; }

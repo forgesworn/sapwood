@@ -12,7 +12,15 @@ import {
   buildDeriveIdentity, buildProvisionRemove,
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
-import { policiesEqual } from './client-policy.js'
+import { policiesEqual, managerClientPolicy } from './client-policy.js'
+import {
+  clientPubkeyHex as nip46UsbClientPubkeyHex,
+  connectWithSecret as nip46UsbConnect,
+  derivePersona as nip46UsbDerivePersona,
+  removePersona as nip46UsbRemovePersona,
+  renamePersona as nip46UsbRenamePersona,
+  type DerivedPersona,
+} from './nip46-usb.js'
 import { dedupeIdentities } from './identity-key.js'
 import { dedupeBy } from './dedupe.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
@@ -71,6 +79,11 @@ export interface RelayStatus {
    *  transport the full status. Telemetry degraded gracefully rather than the
    *  signer crashing; the full status returns once the heap recovers. */
   truncated?: boolean
+  /** NVS entry-table stats (identity & app storage; null when the stats API
+   *  failed on-device, absent on older firmware). */
+  nvs?: { used_entries: number; free_entries: number; total_entries: number } | null
+  /** Persona registry ceiling for this board (absent on older firmware). */
+  max_personas?: number
 }
 
 /** Network state returned by relay management. Password material is never
@@ -736,6 +749,15 @@ async function selectRelayTransport(
   }
 }
 
+function isNvsStats(
+  value: unknown,
+): value is { used_entries: number; free_entries: number; total_entries: number } {
+  return typeof value === 'object' && value !== null
+    && typeof (value as Record<string, unknown>).used_entries === 'number'
+    && typeof (value as Record<string, unknown>).free_entries === 'number'
+    && typeof (value as Record<string, unknown>).total_entries === 'number'
+}
+
 function applyRelayStatus(raw: Record<string, unknown>) {
   appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
   const status: RelayStatus = {
@@ -755,6 +777,8 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
     ...(typeof raw.board === 'string' ? { board: raw.board } : {}),
     ...(raw.truncated === true ? { truncated: true } : {}),
+    ...(isNvsStats(raw.nvs) ? { nvs: raw.nvs } : {}),
+    ...(typeof raw.max_personas === 'number' ? { max_personas: raw.max_personas } : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
@@ -2333,6 +2357,17 @@ export interface FirmwareInfo {
    * request that is comfortably inside max_sign_bytes.
    */
   largest_block?: number
+  /**
+   * NVS entry-table stats (absent on older firmware). Identities, app
+   * pairings, policy and network config all share this pool; the storage
+   * gauge is used/total. The firmware refuses persona writes before the pool
+   * is truly full, reserving headroom for policy writes.
+   */
+  nvs_used_entries?: number
+  nvs_free_entries?: number
+  nvs_total_entries?: number
+  /** Persona registry ceiling for this board (absent on older firmware). */
+  max_personas?: number
 }
 
 /**
@@ -2360,6 +2395,10 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
       ...(typeof info.max_sign_bytes === 'number' ? { max_sign_bytes: info.max_sign_bytes } : {}),
       ...(typeof info.free_heap === 'number' ? { free_heap: info.free_heap } : {}),
       ...(typeof info.largest_block === 'number' ? { largest_block: info.largest_block } : {}),
+      ...(typeof info.nvs_used_entries === 'number' ? { nvs_used_entries: info.nvs_used_entries } : {}),
+      ...(typeof info.nvs_free_entries === 'number' ? { nvs_free_entries: info.nvs_free_entries } : {}),
+      ...(typeof info.nvs_total_entries === 'number' ? { nvs_total_entries: info.nvs_total_entries } : {}),
+      ...(typeof info.max_personas === 'number' ? { max_personas: info.max_personas } : {}),
     }
   } catch {
     return null // older firmware, or no response — treat as unknown
@@ -2999,6 +3038,89 @@ export async function serialGetUri(slotIndex: number): Promise<string> {
   const resp = await serialTransport.sendAndReceive(buildConnSlotUri(device.selectedSlot, slotIndex, lastRelays()), [FrameType.CONNSLOT_URI_RESP, FrameType.NACK], SERIAL_RTT_MS)
   if (resp.type !== FrameType.CONNSLOT_URI_RESP) throw new Error('URI fetch failed')
   return new TextDecoder().decode(resp.payload)
+}
+
+// --- Sapwood's own NIP-46 pairing (persona management over the cable) ---
+//
+// Registry personas are created/removed/renamed through the signer's NIP-46
+// extensions, carried over the same ENCRYPTED_REQUEST path the bridge pumps.
+// Sapwood pairs once per master as a normal client slot: create (bridge
+// auth), install the manager ceiling (button-confirmed on the device), then
+// NIP-46 connect with the slot secret. The pairing record lives in
+// localStorage next to the client key; a signer that has forgotten the slot
+// (factory reset, revoke) surfaces as a NACK and the pairing self-repairs.
+
+const NIP46_PAIRING_STORAGE = 'heartwood_nip46_usb_pairing'
+
+function pairingKey(masterHex: string): string {
+  return `${NIP46_PAIRING_STORAGE}:${masterHex}`
+}
+
+/** Hex pubkey of the selected master (persona rows share the owner's slot,
+ *  so persona management always addresses the owning master). */
+function selectedMasterHex(): string {
+  const master = device.masters.find((m) => m.slot === device.selectedSlot && !m.persona)
+  if (!master) throw new Error('No identity selected')
+  const decoded = nip19.decode(master.npub)
+  if (decoded.type !== 'npub') throw new Error('Unexpected identity encoding')
+  return decoded.data
+}
+
+/** Ensure the Sapwood manager pairing exists for the selected master; returns
+ *  the master's hex pubkey. One button press on the device the first time. */
+export async function ensureSapwoodPairing(): Promise<string> {
+  const masterHex = selectedMasterHex()
+  const stored = localStorage.getItem(pairingKey(masterHex))
+  if (stored) {
+    try {
+      const record = JSON.parse(stored) as { client?: string }
+      if (record.client === nip46UsbClientPubkeyHex()) return masterHex
+    } catch { /* fall through to a fresh pairing */ }
+  }
+  const created = await serialCreateClient('Sapwood manager')
+  try {
+    await serialUpdateClient(created.slot_index, managerClientPolicy())
+    await nip46UsbConnect(masterHex, created.secret)
+  } catch (error) {
+    // Leave no half pairing behind: a slot without its ceiling (or without a
+    // bound client) is dead weight the operator would have to clean up.
+    try { await serialRevokeClient(created.slot_index) } catch { /* best effort */ }
+    throw error
+  }
+  localStorage.setItem(
+    pairingKey(masterHex),
+    JSON.stringify({ slotIndex: created.slot_index, client: nip46UsbClientPubkeyHex() }),
+  )
+  return masterHex
+}
+
+/** Create a registry persona on the signer (derive-by-name, reserved
+ *  `nostr:persona:` namespace, C2). Refreshes the identity list so the new
+ *  persona row appears with its own bunker addressability. */
+export async function serialDerivePersona(name: string, index = 0): Promise<DerivedPersona> {
+  const masterHex = await ensureSapwoodPairing()
+  const persona = await nip46UsbDerivePersona(masterHex, name, index)
+  await refreshMasters()
+  return persona
+}
+
+/** Remove a registry persona. Registry-only: the derivation tree is
+ *  untouched, so re-deriving the same name reproduces the identity. */
+export async function serialRemovePersona(personaNpub: string): Promise<void> {
+  const masterHex = await ensureSapwoodPairing()
+  const decoded = nip19.decode(personaNpub)
+  if (decoded.type !== 'npub') throw new Error('Unexpected persona encoding')
+  await nip46UsbRemovePersona(masterHex, decoded.data)
+  await refreshMasters()
+}
+
+/** Rename a registry persona's display label (empty clears it). */
+export async function serialRenamePersona(personaNpub: string, name: string): Promise<void> {
+  const masterHex = await ensureSapwoodPairing()
+  const decoded = nip19.decode(personaNpub)
+  if (decoded.type !== 'npub') throw new Error('Unexpected persona encoding')
+  await nip46UsbRenamePersona(masterHex, decoded.data, name)
+  await refreshMasters()
 }
 
 // --- Mode-dispatching client management (serial OR relay) ---

@@ -92,6 +92,27 @@ export function nameDeriveError(name: string): string | null {
 }
 
 /**
+ * Names the persona tools reserve under the `nostr:persona:` namespace
+ * (PROTOCOL v1.1 §3.1): the standard personas, and the dependant pattern.
+ */
+const RESERVED_PERSONA_NAMES = /^(natural-person|persona|professional|dependant-\d+-(np|persona))$/
+
+/**
+ * Warn when a named-identity derivation collides with a reserved persona
+ * name. The named-identity flow derives at the BARE name and fills a master
+ * slot, so typing `natural-person` here produces a DIFFERENT key from the
+ * persona `natural-person` that My Signet and the persona tools derive under
+ * the `nostr:persona:` namespace. Not an error — the derivation is valid —
+ * but almost never what the operator wants.
+ */
+export function nameReservedWarning(name: string): string | null {
+  if (!RESERVED_PERSONA_NAMES.test(name.trim())) return null
+  return `“${name.trim()}” is a reserved persona name. This flow derives a plain named identity, `
+    + 'which is a different key from the persona of the same name and permanently fills a master slot. '
+    + 'For the family personas, use “Add a persona” on the Identity panel instead.'
+}
+
+/**
  * Derive an nsec-tree child key: HMAC-SHA256(key = root, msg = "nsec-tree\0" ||
  * name || 0x00 || index_be32). Skips indices that produce invalid secp256k1
  * scalars (probability ~2^-128), exactly as nsec-tree deriveChildKey() and

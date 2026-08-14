@@ -36,6 +36,7 @@ export const FrameType = {
   ENCRYPTED_REQUEST:     0x10,
   ENCRYPTED_RESPONSE:    0x11,
   NACK:                  0x15,
+  SIGN_ENVELOPE_RESPONSE: 0x35,
   POLICY_PUSH:           0x20,
   SESSION_AUTH:          0x21,
   SESSION_ACK:           0x22,

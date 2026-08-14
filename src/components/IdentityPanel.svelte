@@ -2,7 +2,10 @@
   // Identity — everything about keys: the identities held on the signer, adding
   // one, the signer's public profile, and this browser's operator key.
   // Replaces the old Masters, Provision and half the Settings tab.
-  import { device, refreshMasters, syncIdentityMeta, removeIdentity } from '../lib/device.svelte.js'
+  import {
+    device, refreshMasters, syncIdentityMeta, removeIdentity,
+    serialDerivePersona, serialRemovePersona, serialRenamePersona,
+  } from '../lib/device.svelte.js'
   import { httpTransport } from '../lib/http.js'
   import { identityKey } from '../lib/identity-key.js'
   import Provision from './Provision.svelte'
@@ -37,6 +40,71 @@
       removeError = e instanceof Error ? e.message : 'Could not remove the identity.'
     } finally {
       removeBusy = false
+    }
+  }
+
+  // --- Personas (registry entries; the signer derives, stores metadata only) ---
+  // Create/rename/remove ride the NIP-46-over-USB path. The first use pairs
+  // Sapwood as a manager client, which the signer confirms with its button.
+  let personaName = $state('')
+  let personaBusy = $state(false)
+  let personaStatus = $state<string | null>(null)
+  let personaError = $state<string | null>(null)
+  let confirmingPersona = $state<string | null>(null)
+  let renamingPersona = $state<string | null>(null)
+  let renameValue = $state('')
+
+  function personaNameError(name: string): string | null {
+    const s = name.trim()
+    if (!s) return 'Give the persona a name, for example gaming or work.'
+    if (new TextEncoder().encode(s).length > 64) return 'Keep the name under 64 characters.'
+    if (s.includes('|') || s.includes('\0')) return 'The name cannot contain the | character.'
+    return null
+  }
+
+  async function handleCreatePersona() {
+    const name = personaName.trim()
+    const invalid = personaNameError(name)
+    if (invalid) { personaError = invalid; return }
+    personaBusy = true
+    personaError = null
+    personaStatus = 'Asking the signer to derive the persona. The first time, confirm the Sapwood pairing on its screen.'
+    try {
+      const persona = await serialDerivePersona(name)
+      personaStatus = `Created ${persona.personaName}. It is addressable at ${persona.npub.slice(0, 16)}… and survives reboot.`
+      personaName = ''
+    } catch (e) {
+      personaStatus = null
+      personaError = e instanceof Error ? e.message : 'Could not create the persona.'
+    } finally {
+      personaBusy = false
+    }
+  }
+
+  async function handleRemovePersona(npub: string) {
+    personaBusy = true
+    personaError = null
+    try {
+      await serialRemovePersona(npub)
+      confirmingPersona = null
+    } catch (e) {
+      personaError = e instanceof Error ? e.message : 'Could not remove the persona.'
+    } finally {
+      personaBusy = false
+    }
+  }
+
+  async function handleRenamePersona(npub: string) {
+    personaBusy = true
+    personaError = null
+    try {
+      await serialRenamePersona(npub, renameValue.trim())
+      renamingPersona = null
+      renameValue = ''
+    } catch (e) {
+      personaError = e instanceof Error ? e.message : 'Could not rename the persona.'
+    } finally {
+      personaBusy = false
     }
   }
 
@@ -123,6 +191,44 @@
                heartwoodd — and in Hard mode the signer itself shows this npub and
                waits for a physical hold, so a cable request alone can never
                delete a key. -->
+          {#if master.persona && device.mode === 'serial'}
+            {#if confirmingPersona === master.npub}
+              <div class="remove-confirm">
+                <p class="hint-sm">
+                  Removing <strong>{master.label || master.npub.slice(0, 12) + '…'}</strong> only clears it
+                  from the signer's registry: apps paired to it stop working, but deriving the same name
+                  again reproduces the identity exactly.
+                </p>
+                {#if personaError}<p class="error-text">{personaError}</p>{/if}
+                <div class="remove-actions">
+                  <button class="btn btn-danger btn-sm" disabled={personaBusy} onclick={() => handleRemovePersona(master.npub)}>
+                    {personaBusy ? 'Removing…' : 'Remove it'}
+                  </button>
+                  <button class="btn btn-secondary btn-sm" disabled={personaBusy} onclick={() => { confirmingPersona = null; personaError = null }}>
+                    Keep it
+                  </button>
+                </div>
+              </div>
+            {:else if renamingPersona === master.npub}
+              <div class="remove-confirm">
+                <input class="input" placeholder="New label (empty clears it)" bind:value={renameValue} disabled={personaBusy} />
+                {#if personaError}<p class="error-text">{personaError}</p>{/if}
+                <div class="remove-actions">
+                  <button class="btn btn-secondary btn-sm" disabled={personaBusy} onclick={() => handleRenamePersona(master.npub)}>
+                    {personaBusy ? 'Saving…' : 'Save label'}
+                  </button>
+                  <button class="btn btn-secondary btn-sm" disabled={personaBusy} onclick={() => { renamingPersona = null; personaError = null }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            {:else}
+              <div class="persona-actions">
+                <button class="btn-link remove-link" onclick={() => { renamingPersona = master.npub; renameValue = master.label ?? ''; confirmingPersona = null; personaError = null }}>Rename…</button>
+                <button class="btn-link remove-link" onclick={() => { confirmingPersona = master.npub; renamingPersona = null; personaError = null }}>Remove…</button>
+              </div>
+            {/if}
+          {/if}
           {#if !master.persona && (device.mode === 'serial' || device.mode === 'http')}
             {#if confirmingSlot === master.slot}
               <div class="remove-confirm">
@@ -148,6 +254,36 @@
       {/each}
     {/if}
   </section>
+
+  <!-- Personas: registry identities derived from the selected master. Distinct
+       from "Add an identity" below, which fills a whole master slot: a persona
+       shares its owner's tree, is addressable by its own bunker URI, and is
+       removable without touching the tree. -->
+  {#if device.mode === 'serial' && device.masters.some((m) => !m.persona)}
+    <section>
+      <details class="disclosure">
+        <summary>Add a persona to this identity</summary>
+        <p class="hint">
+          A persona is a separate public identity derived from the selected identity's tree, for
+          example gaming or work. The signer derives and stores it; the same name always reproduces
+          the same keys, and apps pair to it like any other identity. The first persona action pairs
+          Sapwood with the signer, confirmed once on its button.
+        </p>
+        <div class="persona-create">
+          <input class="input" placeholder="Persona name, e.g. gaming" bind:value={personaName}
+            disabled={personaBusy}
+            onkeydown={(e) => { if (e.key === 'Enter' && !personaBusy) void handleCreatePersona() }} />
+          <button class="btn btn-secondary" disabled={personaBusy || !personaName.trim()} onclick={handleCreatePersona}>
+            {personaBusy ? 'Waiting for the signer…' : 'Create persona'}
+          </button>
+        </div>
+        {#if personaStatus}<p class="hint-sm status">{personaStatus}</p>{/if}
+        {#if personaError && confirmingPersona === null && renamingPersona === null}
+          <p class="error-text">{personaError}</p>
+        {/if}
+      </details>
+    </section>
+  {/if}
 
   <!-- Identity card sync -->
   {#if (device.mode === 'serial' || device.mode === 'relay') && device.masters.length > 0}
@@ -225,6 +361,9 @@
 
   .remove-link { margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-dim); }
   .remove-link:hover { color: var(--red); }
+  .persona-actions { display: flex; gap: 1rem; }
+  .persona-create { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+  .persona-create .input { flex: 1; }
   .remove-confirm {
     margin-top: 0.6rem; padding: 0.7rem 0.8rem;
     border: 1px solid #4a2a2a; border-radius: 6px; background: #140a0a;

@@ -40,6 +40,29 @@ export function fullClientPolicy(allowSigning = true): ExactClientPolicy {
   return exactClientPolicy(allowSigning ? SIGNING_METHODS : CONNECT_METHODS)
 }
 
+/** Methods Sapwood's own manager pairing needs for persona management over
+ * the USB NIP-46 path. Deliberately NOT added to SUPPORTED: they must never
+ * appear in the app-facing permissions UI, and `exactClientPolicy` must keep
+ * filtering them out of ordinary app slots. */
+export const MANAGER_METHODS = [
+  'get_public_key',
+  'heartwood_derive_persona',
+  'heartwood_remove_persona',
+  'heartwood_rename_persona',
+] as const
+
+/** Policy ceiling for the Sapwood manager slot. Auto-approve is deliberate:
+ * creating the slot needs an authenticated bridge session, and installing
+ * this ceiling is button-confirmed on the device, so the pairing ceremony
+ * itself is the physical consent. No signing, no encrypt/decrypt. */
+export function managerClientPolicy(): ExactClientPolicy {
+  return {
+    allowed_methods: [...MANAGER_METHODS],
+    allowed_kinds: [],
+    auto_approve: true,
+  }
+}
+
 /** Preserve an existing slot while converting a replacement link to the exact
  * v2 policy model. Never infer signing from kinds alone. */
 export function exactPolicyFromSlot(slot: ConnectSlot): ExactClientPolicy {
