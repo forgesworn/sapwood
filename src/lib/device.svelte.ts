@@ -3070,6 +3070,10 @@ function selectedMasterHex(): string {
  *  the master's hex pubkey. One button press on the device the first time. */
 export async function ensureSapwoodPairing(): Promise<string> {
   const masterHex = selectedMasterHex()
+  // The encrypted request path (0x10) needs the per-boot bridge session even
+  // when the pairing itself already exists — without this, the first persona
+  // action after reopening Sapwood (or rebooting the signer) is refused.
+  await ensureBridgeAuth()
   const stored = localStorage.getItem(pairingKey(masterHex))
   if (stored) {
     try {
