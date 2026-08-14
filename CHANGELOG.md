@@ -3,6 +3,43 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## 0.15.0 — 2026-08-14
+
+Works through a field tester's full feedback batch, paired with Heartwood
+firmware v0.16.0. (Versions 0.12–0.14 shipped without changelog entries;
+this entry resumes the record.)
+
+### Added
+
+- **Quick USB update for boards without an OTA slot** (T-Display, C6): writes
+  only the firmware region behind the signed-manifest gate, so identity, keys
+  and Wi-Fi settings stay on the device — no wizard, no re-entering networks,
+  no recovery words. Dual-slot OTA on the 4 MB boards was measured out: the
+  largest possible slot is 1,966,080 bytes and the app image already fills
+  98.9 % of it.
+- **Fallback WiFi networks**: add, remove, reorder and promote an ordered
+  list of networks over USB or the relay-staged path. Per-SSID `keep`
+  semantics mean reordering never resends a stored password; the staged
+  transaction's trial and commit verification model the redacted list
+  exactly. Gated on firmware that reports a `networks` array.
+- **Update discoverability**: a banner on the device panel when the bundled
+  firmware is newer than what the signer reports, and a device-confirmed
+  version line after the update completes.
+
+### Fixed
+
+- The bridge-path OTA approval prompt was synchronously overwritten before it
+  ever rendered — clicking update appeared to do nothing. The waiting and
+  verifying phases now also show a live progress sweep.
+- The flasher releases DTR/RTS before closing the serial port. Left asserted,
+  a CH9102/CP210x bridge pins GPIO0 low and the freshly flashed device looks
+  dead (buttons ignored, display asleep) until the cable is replugged.
+- The reflash flow says **up front** — on the review step, before flashing —
+  that a non-erase flash keeps the existing identity and needs no recovery
+  words, instead of only after the reset.
+- The board picker names the TTGO/TENSTAR T-Display clones, and the network
+  form is visually grouped with its Save button.
+
 ## 0.11.3 — 2026-07-14
 
 Remote phone management now survives signer reconnect timing and reports the

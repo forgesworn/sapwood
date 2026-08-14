@@ -12,10 +12,10 @@ Bootstrap Heartwood over USB, then leave it online in WiFi-standalone mode and m
 - **Named identities** -- type a name and the signer derives the identity from the master it already holds (nsec-tree child derivation, no secret in the browser); older firmware falls back to phrase/nsec entry. Connect apps to it via the identity picker
 - **Backup & restore** -- back up and recover every signer secret: the [identity key](docs/backup-and-restore.md) (12 words on the device, or a [24-word](docs/key-backup.md) backup of an imported nsec/ncryptsec), the operator key, re-derivable named identities, and your **app pairings** (connection slots + bridge secret) to an encrypted file (Argon2id + XChaCha20-Poly1305), button-confirmed on the device. See the [backup and restore guide](docs/backup-and-restore.md)
 - **Clients** -- remotely create, list, revoke, and update exact client policies
-- **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely
+- **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely; manage an ordered list of fallback WiFi networks (add, remove, reorder, promote) without ever resending a stored password
 - **Phone handoff** -- transfer the separate operator credential to a phone with a protected QR flow
 - **USB recovery** -- read password-redacted state, preserve credentials during network edits, and physically rotate only the management operator
-- **Firmware** -- OTA updates with SHA-256 verification and progress bar
+- **Firmware** -- signed OTA updates with SHA-256 verification and progress; an update banner when newer firmware is bundled, and a quick app-only USB update for boards without an OTA slot that keeps identity, keys, and settings in place
 - **Logs** -- real-time ESP-IDF log output from the device
 - **Factory Reset** -- erase all keys (requires physical button confirmation)
 
