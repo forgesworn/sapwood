@@ -441,6 +441,35 @@
         </p>
       </div>
 
+      <!-- Household framing: a signer that already holds an identity is often
+           gaining a second adult, and the right shape for that is a fresh tree
+           in its own slot, never a named child of someone else's words. -->
+      {#if signerParents.length > 0}
+        <details class="adult-note">
+          <summary>Adding another adult to this signer?</summary>
+          {#if mode === 'named-child'}
+            <p>
+              A named identity is a branch of the selected master's own tree: it is recreated
+              from that master's recovery words, so it belongs to the same person. For another
+              adult in the household, choose <strong>Fresh key</strong> or their own
+              <strong>recovery phrase</strong> instead, so they get a tree of their own.
+            </p>
+          {:else}
+            <p>
+              This is the right way to do it. Each adult lives in their own slot with their own
+              recovery words: a separate tree, cryptographically unlinked from the others.
+              They can take those words to their own signer later and keep every identity,
+              and removing their slot never touches anyone else's keys.
+            </p>
+            <p>
+              One honest limit: a family's child identities derive from the guardian's words
+              alone. Another adult's words cannot recover the children; their day-to-day access
+              comes from app pairings with their own permissions, not from their tree.
+            </p>
+          {/if}
+        </details>
+      {/if}
+
       {#if mode === 'named-child' && canDeriveOnSigner}
         <div class="source-toggle" role="radiogroup" aria-label="Where to derive">
           <button
@@ -678,6 +707,18 @@
 
   .name-hint { display: block; margin-top: 0.35rem; }
   .reserved-warning { display: block; margin-top: 0.35rem; color: var(--amber); }
+
+  /* Second-adult household framing, folded away for the common single-person case */
+  .adult-note {
+    border: 1px solid #243; border-radius: 4px; background: #08120e;
+    padding: 0.5rem 0.8rem; margin: -0.25rem 0 0.25rem;
+  }
+  .adult-note summary {
+    cursor: pointer; font-size: 0.78rem; color: var(--green-dim); font-weight: 600;
+  }
+  .adult-note summary:hover { color: var(--green); }
+  .adult-note p { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin: 0.5rem 0 0; }
+  .adult-note strong { color: var(--text); }
 
   /* Where a named identity derives: on the signer (default) or in the browser */
   .source-toggle { display: flex; flex-direction: column; gap: 0.5rem; }
