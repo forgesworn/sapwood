@@ -270,6 +270,25 @@ describe('network config frame', () => {
     expect(JSON.stringify(body)).not.toContain('op_mgmt')
   })
 
+  it('buildPatchNetConfig carries the fallback-network list verbatim', () => {
+    const frame = parseFrame(buildPatchNetConfig(9, {
+      mode: 'wifi',
+      ssid: 'hotspot',
+      password: { action: 'keep' },
+      networks: [
+        { ssid: 'old-primary', password: { action: 'keep' } },
+        { ssid: 'cafe', password: { action: 'set', value: 'cafe-password' } },
+        { ssid: 'open-net', password: { action: 'clear' } },
+      ],
+    }))
+    const body = JSON.parse(new TextDecoder().decode(frame.payload))
+    expect(body.patch.networks).toEqual([
+      { ssid: 'old-primary', password: { action: 'keep' } },
+      { ssid: 'cafe', password: { action: 'set', value: 'cafe-password' } },
+      { ssid: 'open-net', password: { action: 'clear' } },
+    ])
+  })
+
   it('buildSetOperator uses u32 big-endian revision plus exactly 32 pubkey bytes', () => {
     const frame = parseFrame(buildSetOperator(0x01020304, 'ab'.repeat(32)))
     expect(frame.type).toBe(FrameType.SET_OPERATOR)

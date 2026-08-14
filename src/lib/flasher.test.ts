@@ -9,6 +9,7 @@ vi.mock('@noble/curves/ed25519.js', () => ({
 import { ed25519 } from '@noble/curves/ed25519.js'
 import {
   flashDevice,
+  flashAppOnly,
   flashTetheredImage,
   defaultBackend,
   BOARDS,
@@ -398,6 +399,35 @@ describe('defaultBackend — fetches fresh (no browser cache)', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('flashAppOnly — quick USB update for non-OTA boards', () => {
+  const tdisplay = BOARDS.find((b) => b.id === 'tdisplay')!
+
+  it('writes only the app region at 0x10000 — no erase, no config, no bootloader', async () => {
+    const h = makeHarness()
+    await flashAppOnly(tdisplay, {}, h.backend)
+    const regions = h.wrote()!
+    expect(regions.map((r) => r.address)).toEqual([0x10000])
+    expect(regions[0].data).toEqual(DUMMY_APP)
+    expect(h.fetched).toEqual(['/firmware/tdisplay/app.bin'])
+    expect(h.calls.eraseFlash).toBe(0)
+    expect(h.calls.hardReset).toBe(1)
+    expect(h.calls.close).toBe(1)
+  })
+
+  it('refuses a tampered image before opening the esptool session', async () => {
+    const h = makeHarness()
+    ;(h.backend.fetchManifest as ReturnType<typeof vi.fn>)
+      .mockResolvedValue(manifestForSha('tdisplay', ONE_BYTE_SHA))
+    await expect(flashAppOnly(tdisplay, {}, h.backend)).rejects.toThrow(/integrity check failed/i)
+    expect(h.calls.openSession).toBe(0)
+  })
+
+  it('requires Web Serial', async () => {
+    const h = makeHarness({ hasWebSerial: false })
+    await expect(flashAppOnly(tdisplay, {}, h.backend)).rejects.toThrow(/Web Serial unavailable/)
   })
 })
 

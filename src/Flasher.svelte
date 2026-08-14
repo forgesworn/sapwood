@@ -111,7 +111,7 @@
     switch (id) {
       case 'heltec-v4': return 'USB-C, display, RST and PRG buttons'
       case 'heltec-v3': return 'USB-UART bridge, display, RST and PRG buttons'
-      case 'tdisplay': return 'USB-C, color display, two front buttons'
+      case 'tdisplay': return 'USB-C, color display, two front buttons — TENSTAR and other clones work too'
       case 'c6': return 'USB-C, small LCD, BOOT and RESET buttons'
       case 'esp8266': return 'USB-UART tethered board, no onboard WiFi signer mode'
       default: return 'USB development board'
@@ -402,8 +402,18 @@
         {:else}
           <li><span>Network</span><strong>USB-only, radio off (hardened)</strong></li>
         {/if}
-        {#if data.fullErase}<li><span>Wipe first</span><strong class="danger">Yes, erases existing keys</strong></li>{/if}
+        {#if data.fullErase}
+          <li><span>Wipe first</span><strong class="danger">Yes, erases existing keys</strong></li>
+        {:else}
+          <li><span>Identity</span><strong>Kept — reconnects with its existing keys</strong></li>
+        {/if}
       </ul>
+      {#if !data.fullErase}
+        <p class="hint-sm">
+          Flashing replaces only the firmware. Any identity already on the device stays put —
+          you won't need your recovery words.
+        </p>
+      {/if}
       <p class="hint-sm">
         When you start, your browser asks which USB device to use. Pick your board from the list.
       </p>

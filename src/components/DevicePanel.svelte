@@ -16,6 +16,7 @@
     generateVaultKeyHex, loadVaultKey, storeVaultKey, removeVaultKey,
     normaliseVaultKeyHex, serialVaultSet,
   } from '../lib/vault.js'
+  import { checkForUpdate, type UpdateCheck } from '../lib/update-check.js'
   import Connectivity from './Connectivity.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import Backup from './Backup.svelte'
@@ -36,6 +37,7 @@
   // from FIRMWARE_INFO. Turns "it keeps rebooting" from an anecdote into data —
   // a planned restart reads differently from a crash.
   let usbHealth = $state<{
+    version?: string
     uptime_s?: number; last_reset?: string; crashed_during?: string
     max_sign_bytes?: number; max_sign_bytes_object?: number
     free_heap?: number; largest_block?: number
@@ -47,6 +49,23 @@
       usbHealth = null
     }
   })
+  // Update nudge: firmware updating shouldn't rely on the owner scrolling to
+  // the Firmware section unprompted. When the bundle is newer than what the
+  // connected signer reports, a banner at the top points them there.
+  let updateInfo = $state<UpdateCheck | null>(null)
+  let firmwareSection = $state<HTMLElement | null>(null)
+  const runningVersion = $derived(device.mode === 'relay'
+    ? device.relayStatus?.version ?? null
+    : usbHealth?.version ?? null)
+  $effect(() => {
+    const running = runningVersion
+    if (!device.connected || !running) {
+      updateInfo = null
+      return
+    }
+    void checkForUpdate(running).then((check) => { updateInfo = check })
+  })
+
   const health = $derived(device.mode === 'relay'
     ? { uptime_s: device.relayStatus?.uptime_s, last_reset: device.relayStatus?.last_reset, crashed_during: device.relayStatus?.crashed_during }
     : { uptime_s: usbHealth?.uptime_s, last_reset: usbHealth?.last_reset, crashed_during: usbHealth?.crashed_during })
@@ -341,6 +360,16 @@
 </script>
 
 <div class="device-panel">
+  {#if updateInfo?.upgrade}
+    <button
+      type="button"
+      class="update-banner"
+      onclick={() => firmwareSection?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+    >
+      Firmware v{updateInfo.latest} is available (running v{updateInfo.running}) — update below ↓
+    </button>
+  {/if}
+
   <!-- Connection -->
   <section>
     <h2 class="section-title">Connection</h2>
@@ -422,7 +451,7 @@
   </section>
 
   <!-- Firmware -->
-  <section>
+  <section bind:this={firmwareSection}>
     <OtaUpdate />
   </section>
 
@@ -699,6 +728,13 @@
   .lq-on { border-color: var(--green-dim); color: var(--green); background: #08130d; }
 
   .device-panel { display: flex; flex-direction: column; gap: 1.75rem; }
+  .update-banner {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    background: #0c1a13; color: var(--green);
+    border: 1px solid var(--green-dim); border-radius: 8px;
+    padding: 0.7rem 1rem; font-family: inherit; font-size: 0.9rem;
+  }
+  .update-banner:hover { border-color: var(--green); }
 
   .sub-title { font-size: 0.9rem; font-weight: 600; color: var(--text); margin: 1.1rem 0 0.4rem; }
   .sub-title:first-of-type { margin-top: 0; }

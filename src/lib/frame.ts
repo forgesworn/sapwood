@@ -291,6 +291,12 @@ export interface LocalNetConfigPatch {
   ssid?: string
   relays?: string[]
   password?: { action: 'keep' | 'set' | 'clear'; value?: string }
+  /** Replacement fallback-network list (order = priority). Per-entry `keep`
+   * reuses the password the signer already stores for that SSID, so
+   * add/remove/reorder never resends secrets. Only include this field for
+   * firmware that reports a `networks` array in its redacted state — older
+   * firmware rejects unknown patch fields outright. */
+  networks?: Array<{ ssid: string; password: { action: 'keep' | 'set' | 'clear'; value?: string } }>
 }
 
 /** Build a SET_NET_CONFIG frame. Payload: JSON-encoded NetConfig. */

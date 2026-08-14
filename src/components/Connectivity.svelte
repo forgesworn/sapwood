@@ -44,11 +44,65 @@
   let scanMsg = $state('')
   let scanNote = $state('')
 
+  // Fallback networks after the primary, in priority order. `password: null`
+  // means "keep what the signer already stores for this SSID" — reordering and
+  // deleting never resend a secret. A string is a new password to set ('' =
+  // open network).
+  let fallbacks = $state<Array<{ ssid: string; password: string | null }>>([])
+  let newNetSsid = $state('')
+  let newNetPassword = $state('')
+
   const overUsb = $derived(device.connected && device.mode === 'serial')
   const overRelay = $derived(device.connected && device.mode === 'relay')
   const usbState = $derived(device.usbNetworkState)
   const usbConfigured = $derived(overUsb && usbState?.configured === true)
   const canConfigure = $derived(overUsb || overRelay)
+  // Firmware that reports a `networks` array (even empty) understands the
+  // fallback list; older firmware rejects the patch field outright.
+  const supportsNetworkList = $derived(usbConfigured && usbState?.networks !== undefined)
+  const MAX_FALLBACKS = 7
+
+  function addFallback() {
+    const cleanSsid = newNetSsid.trim()
+    if (!cleanSsid || fallbacks.length >= MAX_FALLBACKS) return
+    if (cleanSsid === ssid.trim() || fallbacks.some((n) => n.ssid === cleanSsid)) {
+      scanNote = ''
+      status = 'error'
+      message = `"${cleanSsid}" is already in the list.`
+      return
+    }
+    fallbacks = [...fallbacks, { ssid: cleanSsid, password: newNetPassword }]
+    newNetSsid = ''
+    newNetPassword = ''
+    if (status === 'error') { status = 'idle'; message = '' }
+  }
+
+  function moveFallback(index: number, delta: number) {
+    const target = index + delta
+    if (target < 0 || target >= fallbacks.length) return
+    const next = [...fallbacks]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    fallbacks = next
+  }
+
+  function removeFallback(index: number) {
+    fallbacks = fallbacks.filter((_, i) => i !== index)
+  }
+
+  /** Swap a fallback with the primary. A stored fallback promotes with `keep`
+   * (its password resolves by SSID on the signer); a just-added one carries
+   * its entered password into the primary field. The old primary drops into
+   * the list at the same position, keeping its stored password. */
+  function promoteFallback(index: number) {
+    const target = fallbacks[index]
+    if (!target) return
+    const next = [...fallbacks]
+    next[index] = { ssid: ssid.trim(), password: null }
+    fallbacks = next
+    ssid = target.ssid
+    password = target.password ?? ''
+    clearPassword = target.password === ''
+  }
   let loadEpoch = 0
 
   function connectionKey(): string {
@@ -82,6 +136,9 @@
     scanResults = null
     scanMsg = ''
     scanNote = ''
+    fallbacks = []
+    newNetSsid = ''
+    newNetPassword = ''
   }
 
   async function loadRemoteConfig(targetKey: string, epoch: number) {
@@ -134,6 +191,7 @@
     password = ''
     passwordSet = state.password_set === true
     clearPassword = false
+    fallbacks = (state.networks ?? []).map((n) => ({ ssid: n.ssid, password: null }))
     loading = false
   })
 
@@ -144,6 +202,8 @@
     // defence in depth; the browser app itself stores no password.
     password = ''
     clearPassword = false
+    newNetPassword = ''
+    fallbacks = fallbacks.map((n) => ({ ...n, password: n.password === null ? null : '' }))
   })
 
   async function discardPending() {
@@ -221,7 +281,13 @@
       message = 'WiFi mode needs an SSID and at least one relay'
       return
     }
-    if ((overRelay || usbConfigured) && activeSsid && cleanSsid !== activeSsid && !password && !clearPassword) {
+    // Switching the primary SSID needs an explicit password decision — except
+    // to a network the signer already stores, where `keep` resolves by SSID
+    // (promoting a fallback never resends its secret).
+    const storedFallback = supportsNetworkList
+      && (usbState?.networks ?? []).some((n) => n.ssid === cleanSsid)
+    if ((overRelay || usbConfigured) && activeSsid && cleanSsid !== activeSsid
+      && !password && !clearPassword && !storedFallback) {
       status = 'error'
       message = 'Changing the WiFi name needs a new password, or explicitly choose Clear for an open network. Blank only keeps the password when the SSID is unchanged.'
       return
@@ -261,6 +327,22 @@
               ssid: cleanSsid,
               relays: cleanRelays,
               password: passwordChange,
+              // Only firmware that reports a networks array understands the
+              // list; older firmware rejects unknown patch fields.
+              ...(supportsNetworkList
+                ? {
+                    // The primary must not also appear in the list (the
+                    // firmware rejects duplicate SSIDs).
+                    networks: fallbacks.filter((n) => n.ssid !== cleanSsid).map((n) => ({
+                      ssid: n.ssid,
+                      password: n.password === null
+                        ? { action: 'keep' as const }
+                        : n.password
+                          ? { action: 'set' as const, value: n.password }
+                          : { action: 'clear' as const },
+                    })),
+                  }
+                : {}),
             })
         if (epoch !== loadEpoch || connectionKey() !== requestKey) return
         ok = true
@@ -399,6 +481,47 @@
           </label>
         {/if}
       </div>
+      {#if supportsNetworkList}
+        <div class="field">
+          <span class="field-label">Fallback networks</span>
+          <p class="hint-sm">Tried in order when the network above is out of reach — home first,
+            then a phone hotspot, say. Reordering and removing never resend a password.</p>
+          {#if fallbacks.length}
+            <ul class="fallback-list">
+              {#each fallbacks as net, i (net.ssid)}
+                <li class="fallback-row">
+                  <span class="fallback-ssid">{net.ssid}</span>
+                  <span class="fallback-pw">{net.password === null ? 'saved password' : net.password ? 'new password' : 'open'}</span>
+                  <button type="button" class="fallback-btn" title="Make primary" aria-label={`Make ${net.ssid} the primary network`}
+                    onclick={() => promoteFallback(i)} disabled={loading || status === 'sending'}>★</button>
+                  <button type="button" class="fallback-btn" title="Move up" aria-label={`Move ${net.ssid} up`}
+                    onclick={() => moveFallback(i, -1)} disabled={i === 0 || loading || status === 'sending'}>↑</button>
+                  <button type="button" class="fallback-btn" title="Move down" aria-label={`Move ${net.ssid} down`}
+                    onclick={() => moveFallback(i, 1)} disabled={i === fallbacks.length - 1 || loading || status === 'sending'}>↓</button>
+                  <button type="button" class="fallback-btn fallback-remove" title="Remove" aria-label={`Remove ${net.ssid}`}
+                    onclick={() => removeFallback(i)} disabled={loading || status === 'sending'}>✕</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if fallbacks.length < MAX_FALLBACKS}
+            <div class="fallback-add">
+              <input class="field-input" placeholder="Network name (SSID)" bind:value={newNetSsid}
+                autocomplete="off" data-1p-ignore data-lpignore="true"
+                disabled={loading || status === 'sending'} />
+              <input class="field-input" type="password" placeholder="Password (blank = open)" bind:value={newNetPassword}
+                autocomplete="off" data-1p-ignore data-lpignore="true"
+                disabled={loading || status === 'sending'} />
+              <button type="button" class="btn btn-secondary" onclick={addFallback}
+                disabled={!newNetSsid.trim() || loading || status === 'sending'}>Add</button>
+            </div>
+          {:else}
+            <p class="hint-sm">List full — the signer stores up to {MAX_FALLBACKS} fallbacks beside the primary network.</p>
+          {/if}
+        </div>
+      {:else if overRelay}
+        <p class="hint-sm">Editing the fallback-network list needs the USB cable.</p>
+      {/if}
       <div class="field">
         <span class="field-label">Relays</span>
         <RelayEditor
@@ -435,7 +558,13 @@
 </div>
 
 <style>
-  .form { display: flex; flex-direction: column; gap: 0.75rem; }
+  /* Outlined so the fields and the Save button that commits them read as one
+     unit — mid-page, an unboxed Save looked detached from the section. */
+  .form {
+    display: flex; flex-direction: column; gap: 0.75rem;
+    border: 1px solid var(--green-dim); border-radius: 8px;
+    padding: 1rem;
+  }
   .form-submit { align-self: flex-start; margin-top: 0.25rem; }
 
   .ssid-row { display: flex; gap: 0.5rem; align-items: stretch; }
@@ -462,5 +591,27 @@
   .scan-auth { flex: 0 0 auto; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.03em; }
   .scan-sig { flex: 0 0 auto; color: var(--green); letter-spacing: 1px; font-size: 0.8rem; }
   .scan-note { margin: 0.4rem 0 0; color: var(--amber, #d9a441); }
+
+  /* Fallback-network list: same bordered idiom as .scan-list. */
+  .fallback-list {
+    list-style: none; margin: 0.5rem 0 0; padding: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    border: 1px solid var(--green-dim); border-radius: 6px;
+  }
+  .fallback-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.45rem 0.7rem; font-size: 0.85rem;
+  }
+  .fallback-ssid { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fallback-pw { flex: 0 0 auto; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.03em; }
+  .fallback-btn {
+    flex: 0 0 auto; background: none; border: 1px solid var(--green-dim); border-radius: 4px;
+    color: var(--text); cursor: pointer; padding: 0.1rem 0.4rem; font-family: inherit;
+  }
+  .fallback-btn:hover:not(:disabled) { background: #0c1a13; }
+  .fallback-btn:disabled { opacity: 0.4; cursor: default; }
+  .fallback-remove { color: var(--danger, #d05f5f); border-color: var(--danger, #d05f5f); }
+  .fallback-add { display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: stretch; }
+  .fallback-add .field-input { flex: 1 1 auto; min-width: 0; }
   .clear-password { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.45rem; font-size: 0.78rem; color: var(--text-muted); }
 </style>

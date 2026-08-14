@@ -108,6 +108,10 @@ export interface UsbNetworkState {
   ssid?: string
   relays?: string[]
   password_set?: boolean
+  /** Ordered fallback networks after the primary SSID (redacted). Present
+   * (possibly empty) exactly when the firmware supports the network list —
+   * older firmware omits it and rejects `networks` in patches. */
+  networks?: Array<{ ssid: string; password_set: boolean }>
   op_mgmt?: string
   recovery_ok: boolean
   /** A non-null value means the stored active route is not proof of the route
@@ -2329,12 +2333,25 @@ function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {
   if (typeof value.password_set !== 'boolean') return null
   if (typeof value.op_mgmt !== 'string'
     || (value.op_mgmt !== '' && !/^[0-9a-f]{64}$/.test(value.op_mgmt))) return null
+  let networks: UsbNetworkState['networks']
+  if (value.networks !== undefined) {
+    if (!Array.isArray(value.networks) || value.networks.length > 8) return null
+    const parsed: Array<{ ssid: string; password_set: boolean }> = []
+    for (const entry of value.networks) {
+      const item = record(entry)
+      if (!item || typeof item.ssid !== 'string' || item.ssid.length > 32
+        || typeof item.password_set !== 'boolean') return null
+      parsed.push({ ssid: item.ssid, password_set: item.password_set })
+    }
+    networks = parsed
+  }
   return {
     ...base,
     mode: value.mode,
     ssid: value.ssid,
     relays: [...value.relays] as string[],
     password_set: value.password_set,
+    ...(networks !== undefined ? { networks } : {}),
     op_mgmt: value.op_mgmt,
   }
 }

@@ -280,6 +280,32 @@ describe('USB redacted network and operator recovery', () => {
     expect(device.error).toMatch(/malformed network state/)
   })
 
+  it('parses the fallback-network list and rejects a malformed one', async () => {
+    device.mode = 'serial'
+    device.connected = true
+    serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse({
+      networks: [
+        { ssid: 'hotspot', password_set: true },
+        { ssid: 'starlink', password_set: false },
+      ],
+    }))
+    const state = await refreshUsbNetworkState()
+    expect(state?.networks).toEqual([
+      { ssid: 'hotspot', password_set: true },
+      { ssid: 'starlink', password_set: false },
+    ])
+
+    serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse({
+      networks: [{ ssid: 'x'.repeat(33), password_set: true }],
+    }))
+    expect(await refreshUsbNetworkState()).toBeNull()
+
+    // Absent list (older firmware) stays absent, so the UI can gate the editor.
+    serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse())
+    const legacy = await refreshUsbNetworkState()
+    expect(legacy?.networks).toBeUndefined()
+  })
+
   it('preserves a USB network trial and never persists its stale active route', async () => {
     const { pubHex, master } = freshMaster()
     device.mode = 'serial'

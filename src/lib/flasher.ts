@@ -55,7 +55,7 @@ export interface BoardSpec {
 export const BOARDS: BoardSpec[] = [
   { id: 'heltec-v4', label: 'Heltec WiFi LoRa 32 V4', assets: '/firmware/v4', configOffset: 0x410000, portHint: /usbmodem/i },
   { id: 'heltec-v3', label: 'Heltec WiFi LoRa 32 V3', assets: '/firmware/v3', configOffset: 0x410000, portHint: /usbserial|SLAB/i },
-  { id: 'tdisplay', label: 'LilyGO T-Display (ESP32)', assets: '/firmware/tdisplay', configOffset: 0x310000, bootloaderOffset: 0x1000, portHint: /wchusb|usbserial|CH9102/i },
+  { id: 'tdisplay', label: 'LilyGO TTGO T-Display (ESP32)', assets: '/firmware/tdisplay', configOffset: 0x310000, bootloaderOffset: 0x1000, portHint: /wchusb|usbserial|CH9102/i },
   { id: 'c6', label: 'Waveshare ESP32-C6 (LCD 1.47)', assets: '/firmware/c6', configOffset: 0x310000, portHint: /usbmodem|wchusb|usbserial/i },
 ]
 
@@ -282,7 +282,22 @@ export const defaultBackend: FlasherBackend = {
         })
       },
       hardReset: async () => { await esploader.after('hard_reset') },
-      close: async () => { await transport.disconnect() },
+      close: async () => {
+        // Release the control lines before closing. esptool-js's hard_reset
+        // leaves DTR wherever the reset sequence put it, and on CH9102/CP210x
+        // bridges an asserted line keeps GPIO0 pinned low through the
+        // auto-download circuit — the freshly flashed device then looks dead
+        // (buttons ignored, display never wakes) until the cable is
+        // re-plugged. Deassert DTR before RTS: setRTS re-issues the stored
+        // DTR state as a Windows workaround.
+        try {
+          await transport.setDTR(false)
+          await transport.setRTS(false)
+        } catch {
+          // Port may already be gone — closing still proceeds.
+        }
+        await transport.disconnect()
+      },
     }
   },
 }
@@ -412,6 +427,66 @@ export async function flashDevice(
     // best-effort: the flash itself already succeeded. The caller tells the
     // user to press RESET / replug if the device doesn't reboot on its own.
     log('Flash complete — resetting…')
+    try {
+      await session.hardReset()
+      log('Reset sent. If the device does not reboot, press its RESET button (or unplug/replug).')
+    } catch (e) {
+      log(`Auto-reset failed (${e instanceof Error ? e.message : e}). Press RESET on the device (or unplug/replug) to boot the new firmware.`)
+    }
+    h.onProgress?.(100, 'done')
+  } finally {
+    try {
+      await session.close()
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Quick firmware update over USB for boards without an OTA slot: writes ONLY
+ * the app region at 0x10000. Bootloader, partition table, NVS (master seeds)
+ * and the config partition are all untouched, so the device keeps its
+ * identity and network settings — no wizard, no re-entering Wi-Fi. The app
+ * image passes the same signed-manifest gate as a full flash.
+ */
+export async function flashAppOnly(
+  board: BoardSpec,
+  h: FlashHandlers = {},
+  backend: FlasherBackend = defaultBackend,
+): Promise<void> {
+  if (!backend.hasWebSerial()) {
+    throw new Error('Web Serial unavailable — use Chrome or Edge.')
+  }
+  const log = (s: string) => h.onLog?.(s.replace(/\s+$/, ''))
+
+  // Port first: requestPort() must run inside the click's user-gesture window
+  // (see flashDevice).
+  log('Select the device serial port…')
+  const port = await backend.requestPort()
+  await releaseGrantedPorts()
+
+  log(`Fetching firmware for ${board.label}…`)
+  const appData = await backend.fetchBin(`${board.assets}/app.bin`)
+  const manifest = await backend.fetchManifest().catch((e) => {
+    throw new Error(`Firmware manifest unavailable: ${e instanceof Error ? e.message : e}`)
+  })
+  await verifyAppIntegrity(manifest, board.id, appData, log)
+  log('Identity, settings and keys stay on the device — only the firmware is replaced.')
+
+  const terminal: FlashTerminal = {
+    clean() {},
+    writeLine: (data: string) => log(data),
+    write: (data: string) => log(data),
+  }
+  const session = await backend.openSession(port, { baudrate: BAUD_RATE, terminal })
+  try {
+    const chip = await session.detectChip()
+    log(`Connected: ${chip}`)
+    await session.writeFlash([{ address: 0x10000, data: appData }], (_fileIndex, written, total) => {
+      h.onProgress?.(total > 0 ? Math.round((written / total) * 100) : 0, 'firmware')
+    })
+    log('Update written — resetting…')
     try {
       await session.hardReset()
       log('Reset sent. If the device does not reboot, press its RESET button (or unplug/replug).')
