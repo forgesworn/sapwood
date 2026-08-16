@@ -6,7 +6,7 @@
   // and client-presets.ts (both pure + unit-tested); this holds the reactive UI.
   import { encodeQR } from '@paulmillr/qr'
   import {
-    device, mgmtCreateClient, mgmtNostrconnect,
+    device, mgmtCreateClient, mgmtNostrconnect, supportsPairingIdentity,
   } from '../lib/device.svelte.js'
   import { COMMON_KINDS, kindLabel, riskColour } from '../lib/kinds.js'
   import { nameError, canCreate, type ConnectStep } from '../lib/connect-flow.js'
@@ -16,6 +16,7 @@
     requestedKindRows, sharedRelay,
   } from '../lib/nostrconnect.js'
   import { identityKey } from '../lib/identity-key.js'
+  import { nip19 } from 'nostr-tools'
   import {
     PERMISSION_PRESETS, resolvePolicy, type PresetId,
   } from '../lib/client-presets.js'
@@ -43,12 +44,54 @@
   let copied = $state(false)
 
   const overUsb = $derived(device.mode === 'serial')
-  // Which identity the new connection binds to — selectable on every
-  // transport. Personas share their owner's slot table, so only masters count.
-  const identityCount = $derived(device.masters?.filter((m) => !m.persona).length ?? 0)
+  // Which identity the new connection is ADDRESSED to — selectable on every
+  // transport, personas included (D2): a persona row shares its owner's slot
+  // table, so picking one keeps the owning master as the management target
+  // and re-addresses only the pairing endpoint.
+  const identities = $derived(device.masters ?? [])
+  const identityCount = $derived(identities.length)
+  let chosenKey = $state<string | null>(null)
   const activeIdentity = $derived(
-    device.masters?.find((m) => !m.persona && m.slot === device.selectedSlot) ?? device.masters?.[0] ?? null,
+    identities.find((m) => identityKey(m) === chosenKey)
+    ?? identities.find((m) => !m.persona && m.slot === device.selectedSlot)
+    ?? identities[0] ?? null,
   )
+  const personaEndpointHex = $derived.by(() => {
+    if (!activeIdentity?.persona) return null
+    try {
+      const d = nip19.decode(activeIdentity.npub)
+      return d.type === 'npub' ? (d.data as string).toLowerCase() : null
+    } catch { return null }
+  })
+  function pickIdentity(e: Event) {
+    const key = (e.currentTarget as HTMLSelectElement).value
+    chosenKey = key
+    const row = identities.find((m) => identityKey(m) === key)
+    // Persona rows carry the OWNING master's slot, so this always lands the
+    // management session on the right master.
+    if (row) device.selectedSlot = row.slot
+  }
+  const identityLabel = (m: { label?: string | null; slot: number; persona?: boolean; npub: string }) =>
+    m.persona
+      ? `${m.label || m.npub.slice(0, 12)} — persona`
+      : m.label ?? `slot ${m.slot}`
+  // The nostrconnect flow cannot re-address locally (the signer must AUTHOR
+  // the connect ACK as the persona), so personas are offered there only on
+  // pairing_identity_v1 firmware.
+  const ncIdentities = $derived(identities.filter((m) => !m.persona || supportsPairingIdentity()))
+  const ncActiveIdentity = $derived(
+    activeIdentity && (!activeIdentity.persona || supportsPairingIdentity())
+      ? activeIdentity
+      : identities.find((m) => !m.persona && m.slot === device.selectedSlot)
+        ?? identities.find((m) => !m.persona) ?? null,
+  )
+  const ncPersonaEndpointHex = $derived.by(() => {
+    if (!ncActiveIdentity?.persona) return null
+    try {
+      const d = nip19.decode(ncActiveIdentity.npub)
+      return d.type === 'npub' ? (d.data as string).toLowerCase() : null
+    } catch { return null }
+  })
   const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
   const commonKindSet = new Set(COMMON_KINDS.map((k) => k.kind))
   const customExtraKinds = $derived(customKinds.filter((k) => !commonKindSet.has(k)).sort((a, b) => a - b))
@@ -80,6 +123,7 @@
     customKindError = null
     error = null
     created = null
+    chosenKey = null
     ncUri = ''
     ncError = null
     ncPaired = null
@@ -133,7 +177,11 @@
     try {
       // The complete method + kind ceiling is committed before a usable secret
       // is returned, so a failed restriction can never become a broad link.
-      const res = await mgmtCreateClient(name.trim(), resolvePolicy(presetId, customKinds))
+      const res = await mgmtCreateClient(
+        name.trim(),
+        resolvePolicy(presetId, customKinds),
+        personaEndpointHex ?? undefined,
+      )
 
       created = { bunker_uri: res.bunker_uri, secret: res.secret }
       step = 'result'
@@ -168,6 +216,7 @@
         label: ncReq.appName,
         policy: ncPermissions.policy,
         ...(ackRelay ? { relay: ackRelay } : {}),
+        ...(ncPersonaEndpointHex ? { identityHex: ncPersonaEndpointHex } : {}),
       })
       ncJoined = res.joined_relay
       ncPaired = { appName: ncReq.appName }
@@ -214,12 +263,13 @@
       {#if identityCount > 1}
         <!-- The signer holds several identities: the app binds to exactly one,
              so the choice belongs here in the first step, not hidden away.
-             Works over USB and WiFi alike. -->
+             Works over USB and WiFi alike, personas included (D2 — the link
+             is re-addressed to the persona's own pubkey). -->
         <label class="field flow-note">
           <span class="field-label">It will sign as</span>
-          <select class="field-input" bind:value={device.selectedSlot} disabled={creating}>
-            {#each device.masters.filter((m) => !m.persona) as m (identityKey(m))}
-              <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
+          <select class="field-input" value={activeIdentity ? identityKey(activeIdentity) : ''} onchange={pickIdentity} disabled={creating}>
+            {#each identities as m (identityKey(m))}
+              <option value={identityKey(m)}>{identityLabel(m)}</option>
             {/each}
           </select>
         </label>
@@ -297,7 +347,7 @@
       {#if identityCount > 1 && activeIdentity}
         <!-- Echo the choice made on the first step so it is visible at the
              moment of creation too. -->
-        <p class="hint-sm flow-note">“{name.trim()}” will sign as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>.</p>
+        <p class="hint-sm flow-note">“{name.trim()}” will sign as <strong>“{identityLabel(activeIdentity)}”</strong>.</p>
       {/if}
       {#if error}<p class="error-text">{error}</p>{/if}
       <div class="flow-actions">
@@ -313,7 +363,7 @@
         <h3 class="flow-title">Connection ready</h3>
       </div>
       {#if created.bunker_uri && bunkerHasRelay(created.bunker_uri)}
-        <p class="hint">Scan this with the app, or copy the link and paste it in to finish pairing.{#if identityCount > 1 && activeIdentity}&#32;It signs as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>.{/if}</p>
+        <p class="hint">Scan this with the app, or copy the link and paste it in to finish pairing.{#if identityCount > 1 && activeIdentity}&#32;It signs as <strong>“{identityLabel(activeIdentity)}”</strong>.{/if}</p>
         <div class="qr">{@html qr}</div>
         <div class="uri-box copy-uri">
           <code>{created.bunker_uri}</code>
@@ -338,14 +388,16 @@
       <h3 class="flow-title">Paste the app's connect link</h3>
       <p class="hint">Some apps offer a <code>nostrconnect://</code> link or QR to connect a signer.
         Paste it here and your signer pairs with it, no link to copy back.</p>
-      {#if identityCount > 1}
+      {#if ncIdentities.length > 1}
         <!-- This entry point skips the name step, so the identity choice must
-             be offered here too: the pairing binds the app to exactly one. -->
+             be offered here too: the pairing binds the app to exactly one.
+             Personas appear only on firmware that can author the connect ACK
+             as the persona (pairing_identity_v1). -->
         <label class="field nc-identity">
           <span class="field-label">It will sign as</span>
-          <select class="field-input" bind:value={device.selectedSlot} disabled={ncPairing}>
-            {#each device.masters.filter((m) => !m.persona) as m (identityKey(m))}
-              <option value={m.slot}>{m.label ?? `slot ${m.slot}`}</option>
+          <select class="field-input" value={ncActiveIdentity ? identityKey(ncActiveIdentity) : ''} onchange={pickIdentity} disabled={ncPairing}>
+            {#each ncIdentities as m (identityKey(m))}
+              <option value={identityKey(m)}>{identityLabel(m)}</option>
             {/each}
           </select>
         </label>
@@ -406,7 +458,7 @@
         <h3 class="flow-title">Paired “{ncPaired.appName}”</h3>
       </div>
       <p class="hint">Your signer sent the connection reply. The app should show as connected now, and
-        appears under your connected apps.{#if identityCount > 1 && activeIdentity}&#32;It signs as <strong>“{activeIdentity.label ?? `slot ${activeIdentity.slot}`}”</strong>.{/if}</p>
+        appears under your connected apps.{#if ncIdentities.length > 1 && ncActiveIdentity}&#32;It signs as <strong>“{identityLabel(ncActiveIdentity)}”</strong>.{/if}</p>
       {#if ncJoined}
         <p class="hint-sm">Your signer joined the app's relay and keeps serving it while this
           connection exists. Removing the app releases the relay.</p>

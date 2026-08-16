@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/svelte'
+import { nip19 } from 'nostr-tools'
 import ConnectApp from './ConnectApp.svelte'
 import {
   mgmtCreateClient, mgmtNostrconnect, device,
@@ -10,6 +11,7 @@ vi.mock('../lib/device.svelte.js', () => ({
   device: { mode: 'relay', connected: true, error: null, relays: ['wss://relay.trotters.cc'], masters: [], selectedSlot: 0 },
   mgmtCreateClient: vi.fn(),
   mgmtNostrconnect: vi.fn(),
+  supportsPairingIdentity: vi.fn(() => false),
 }))
 
 const mockCreate = vi.mocked(mgmtCreateClient)
@@ -56,7 +58,7 @@ describe('ConnectApp — happy path', () => {
       allowed_methods: ['get_public_key', 'sign_event'],
       allowed_kinds: [1, 5, 6, 7, 30023, 30078],
       auto_approve: true,
-    })
+    }, undefined)
   })
 
   it('applies a kind limit when a restricting preset is chosen', async () => {
@@ -73,7 +75,7 @@ describe('ConnectApp — happy path', () => {
       allowed_methods: ['get_public_key', 'nip44_encrypt', 'nip44_decrypt', 'nip04_encrypt', 'nip04_decrypt', 'sign_event'],
       allowed_kinds: [4, 13, 1059],
       auto_approve: true,
-    })
+    }, undefined)
   })
 
   it('lets custom permissions include a numeric kind', async () => {
@@ -93,7 +95,7 @@ describe('ConnectApp — happy path', () => {
       allowed_methods: ['get_public_key', 'sign_event'],
       allowed_kinds: [1, 999999],
       auto_approve: true,
-    })
+    }, undefined)
   })
 
   it('does not let an empty custom preset become unrestricted', async () => {
@@ -107,6 +109,38 @@ describe('ConnectApp — happy path', () => {
 
     expect(screen.getByText('Choose at least one kind, or choose Everything.')).toBeTruthy()
     expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('addresses the pairing to a chosen persona (D2)', async () => {
+    const personaHex = 'c'.repeat(64)
+    const d = device as unknown as { masters: unknown[]; selectedSlot: number }
+    d.masters = [
+      { slot: 0, label: 'family', npub: nip19.npubEncode('a'.repeat(64)) },
+      { slot: 0, label: 'Ada', npub: nip19.npubEncode(personaHex), persona: true },
+    ]
+    d.selectedSlot = 0
+    try {
+      const { container } = render(ConnectApp)
+      await fireEvent.click(screen.getByText('Connect an app'))
+      await fireEvent.input(container.querySelector('input')!, { target: { value: 'Ada app' } })
+
+      const picker = container.querySelector('select')!
+      expect(picker.textContent).toContain('Ada — persona')
+      await fireEvent.change(picker, { target: { value: `p:0:${nip19.npubEncode(personaHex)}` } })
+
+      await fireEvent.click(screen.getByText('Continue'))
+      await fireEvent.click(screen.getByText('Create connection'))
+      await screen.findByText('Connection ready')
+
+      expect(mockCreate).toHaveBeenCalledWith('Ada app', {
+        allowed_methods: ['get_public_key', 'sign_event'],
+        allowed_kinds: [1, 5, 6, 7, 30023, 30078],
+        auto_approve: true,
+      }, personaHex)
+    } finally {
+      d.masters = []
+      d.selectedSlot = 0
+    }
   })
 
   it('surfaces a creation failure without advancing', async () => {

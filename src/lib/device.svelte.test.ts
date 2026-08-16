@@ -1796,6 +1796,116 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
+  it('mints a persona-addressed client on pairing_identity_v1 firmware', async () => {
+    const { pubHex } = freshMaster()
+    const policy = fullClientPolicy()
+    const persona = 'c'.repeat(64)
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r', capabilities: ['client_policy_v2', 'pairing_identity_v1'] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'create_client_v2') {
+        expect(params).toEqual({ label: 'Ada app', policy, identity: persona })
+        return {
+          slot_index: 5,
+          npub_hex: persona,
+          bunker_uri: `bunker://${persona}?relay=wss%3A%2F%2Fr&secret=sek`,
+          secret: 'sek',
+          signing_approved: true,
+          secret_fingerprint: SLOT_FP,
+          policy_version: 2,
+          ...policy,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtCreateClient('Ada app', policy, persona)).resolves.toEqual(
+        expect.objectContaining({ bunker_uri: `bunker://${persona}?relay=wss%3A%2F%2Fr&secret=sek` }),
+      )
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('re-addresses the link locally when the firmware lacks pairing_identity_v1', async () => {
+    const { pubHex } = freshMaster()
+    const policy = fullClientPolicy()
+    const persona = 'c'.repeat(64)
+    const masterEndpoint = 'd'.repeat(64)
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r', capabilities: ['client_policy_v2'] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'create_client_v2') {
+        // Old firmware must never be sent the identity param it would ignore.
+        expect(params).toEqual({ label: 'Ada app', policy })
+        return {
+          slot_index: 5,
+          npub_hex: masterEndpoint,
+          bunker_uri: `bunker://${masterEndpoint}?relay=wss%3A%2F%2Fr&secret=sek`,
+          secret: 'sek',
+          signing_approved: true,
+          secret_fingerprint: SLOT_FP,
+          policy_version: 2,
+          ...policy,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtCreateClient('Ada app', policy, persona)).resolves.toEqual(
+        expect.objectContaining({ bunker_uri: `bunker://${persona}?relay=wss%3A%2F%2Fr&secret=sek` }),
+      )
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('revokes and fails closed when the signer does not echo the addressed persona', async () => {
+    const { pubHex } = freshMaster()
+    const policy = fullClientPolicy()
+    const persona = 'c'.repeat(64)
+    resolveMock.mockResolvedValue(new Map())
+    const revoked: unknown[] = []
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r', capabilities: ['pairing_identity_v1'] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'revoke_client') { revoked.push(params); return { ok: true } }
+      if (method === 'create_client_v2') {
+        return {
+          slot_index: 5,
+          npub_hex: 'e'.repeat(64),
+          bunker_uri: `bunker://${'e'.repeat(64)}?relay=wss%3A%2F%2Fr&secret=sek`,
+          secret: 'sek',
+          signing_approved: true,
+          secret_fingerprint: SLOT_FP,
+          policy_version: 2,
+          ...policy,
+        }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtCreateClient('Ada app', policy, persona)).rejects.toThrow(/did not confirm/)
+      expect(revoked).toHaveLength(1)
+    } finally {
+      await disconnect()
+    }
+  })
+
   it('refreshes the slot list before surfacing a cross-manager mutation conflict', async () => {
     const { pubHex } = freshMaster()
     let clientReads = 0

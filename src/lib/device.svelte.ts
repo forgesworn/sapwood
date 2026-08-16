@@ -23,6 +23,7 @@ import {
   type DerivedPersona,
 } from './nip46-usb.js'
 import { dedupeIdentities } from './identity-key.js'
+import { bunkerUriWithEndpoint } from './bunker.js'
 import { dedupeBy } from './dedupe.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
@@ -1315,20 +1316,57 @@ function relayMgmtTarget(): string | undefined {
   } catch { return undefined }
 }
 
+/** Whether the connected signer's firmware mints persona-addressed pairings
+ *  itself (`params.identity` on create_client_v2 / nostrconnect_v2 /
+ *  client_uri — the D2 route). Relay-only knowledge: the capability rides
+ *  `get_status`. Sync view for the UI — null until the background status
+ *  refresh lands; the write paths use `relayCapabilities()` instead so they
+ *  never mis-route on a race. */
+export function supportsPairingIdentity(): boolean {
+  return device.relayStatus?.capabilities?.includes('pairing_identity_v1') ?? false
+}
+
+/** The signer's capability list, probing `get_status` once when the
+ *  background refresh has not populated it yet. */
+async function relayCapabilities(): Promise<string[]> {
+  if (device.relayStatus) return device.relayStatus.capabilities
+  if (!relayTransport) return []
+  try {
+    const raw = await relayTransport.request('get_status', {}, RELAY_STATUS_TIMEOUT_MS) as Record<string, unknown>
+    return Array.isArray(raw.capabilities)
+      ? raw.capabilities.filter((value): value is string => typeof value === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
 /**
  * Create a client over the relay with one exact, atomic policy. The versioned
  * method makes older firmware fail before mutation instead of ignoring fields.
+ *
+ * `identityHex` addresses the pairing to a persona the signer serves (D2).
+ * Firmware with `pairing_identity_v1` mints it on-device (and defaults the
+ * slot's `bound_identity`); older firmware gets the master-addressed URI
+ * re-addressed locally — the slot is endpoint-agnostic either way.
  */
 export async function relayCreateClient(
   label: string,
   policy: ExactClientPolicy,
+  identityHex?: string,
 ): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number; secret_fingerprint: string }> {
   if (!relayTransport) throw new Error('not connected over relay')
   // Capture once so the create and any cleanup revoke address the SAME identity.
   const target = relayMgmtTarget()
+  const identityOnDevice = Boolean(identityHex)
+    && (await relayCapabilities()).includes('pairing_identity_v1')
   let res: Record<string, unknown>
   try {
-    res = await relayTransport.request('create_client_v2', { label, policy }, MGMT_WRITE_TIMEOUT_MS, target)
+    res = await relayTransport.request('create_client_v2', {
+      label,
+      policy,
+      ...(identityOnDevice ? { identity: identityHex } : {}),
+    }, MGMT_WRITE_TIMEOUT_MS, target)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/unknown method.*create_client_v2/i.test(message)) {
@@ -1342,7 +1380,11 @@ export async function relayCreateClient(
     : ''
   const validSlot = Number.isSafeInteger(slotIndex) && slotIndex >= 0 && slotIndex <= 255
   const validFingerprint = SLOT_FINGERPRINT_RE.test(fingerprint)
-  if (Number(res.policy_version) !== 2 || !policiesEqual(policy, res) || !validSlot || !validFingerprint) {
+  // A device-side identity mint must echo the addressed identity back
+  // (`npub_hex` is the URI's endpoint) — fail closed like the policy echo.
+  const identityConfirmed = !identityOnDevice
+    || String(res.npub_hex ?? '').toLowerCase() === identityHex
+  if (Number(res.policy_version) !== 2 || !policiesEqual(policy, res) || !validSlot || !validFingerprint || !identityConfirmed) {
     if (validSlot && validFingerprint) {
       try {
         await relayTransport.request('revoke_client', {
@@ -1356,8 +1398,11 @@ export async function relayCreateClient(
     throw new Error('The signer did not confirm the exact app policy and slot credential, so the connection was not exposed.')
   }
   await relayRefresh()
+  const uri = String(res.bunker_uri ?? '')
   return {
-    bunker_uri: String(res.bunker_uri ?? ''),
+    bunker_uri: identityHex && !identityOnDevice && uri
+      ? bunkerUriWithEndpoint(uri, identityHex)
+      : uri,
     secret: String(res.secret ?? ''),
     signing_approved: Boolean(res.signing_approved),
     slot_index: slotIndex,
@@ -3172,10 +3217,11 @@ export function mgmtCanApproveSigning(): boolean {
 export async function mgmtCreateClient(
   label: string,
   policy: ExactClientPolicy,
+  identityHex?: string,
 ): Promise<{ bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number; secret_fingerprint?: string }> {
   let res: { bunker_uri: string; secret: string; signing_approved: boolean; slot_index: number; secret_fingerprint?: string }
   if (device.mode === 'relay') {
-    res = await relayCreateClient(label, policy)
+    res = await relayCreateClient(label, policy, identityHex)
   } else if (device.mode === 'serial') {
     res = await serialCreateClient(label)
     try {
@@ -3185,6 +3231,12 @@ export async function mgmtCreateClient(
     } catch (error) {
       try { await serialRevokeClient(res.slot_index) } catch { /* leave no visible credential */ }
       throw error
+    }
+    // Persona-addressed pairing over the cable (D2): the slot is
+    // endpoint-agnostic, so re-address the link locally — works on any
+    // firmware, exactly the hand-built URI the CP2 bench proved.
+    if (identityHex && res.bunker_uri) {
+      res = { ...res, bunker_uri: bunkerUriWithEndpoint(res.bunker_uri, identityHex) }
     }
   }
   else throw new Error('not connected')
@@ -3212,9 +3264,16 @@ export async function mgmtNostrconnect(params: {
   policy: ExactClientPolicy
   /** The app's relay, when it is not already in the signer's relay set. */
   relay?: string
+  /** Persona endpoint (D2). Device-side only: the connect ACK must be
+   *  AUTHORED by the persona, which no local rewrite can do — so this
+   *  requires `pairing_identity_v1` firmware. */
+  identityHex?: string
 }): Promise<{ slot_index: number; joined_relay: boolean }> {
   if (device.mode !== 'relay' || !relayTransport) {
     throw new Error('Pairing a nostrconnect app needs the signer connected over WiFi, so it can publish the connect reply. Connect over WiFi and try again.')
+  }
+  if (params.identityHex && !(await relayCapabilities()).includes('pairing_identity_v1')) {
+    throw new Error('This signer firmware cannot pair an app to a persona yet. Update the signer, or pair without choosing a persona.')
   }
   let res: Record<string, unknown>
   try {
@@ -3225,6 +3284,7 @@ export async function mgmtNostrconnect(params: {
       label: params.label,
       policy: params.policy,
       ...(params.relay ? { relay: params.relay } : {}),
+      ...(params.identityHex ? { identity: params.identityHex } : {}),
     }, MGMT_DIAL_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -3239,7 +3299,11 @@ export async function mgmtNostrconnect(params: {
     : ''
   const validSlot = Number.isSafeInteger(slotIndex) && slotIndex >= 0 && slotIndex <= 255
   const validFingerprint = SLOT_FINGERPRINT_RE.test(fingerprint)
-  if (Number(res.policy_version) !== 2 || !policiesEqual(params.policy, res) || !validSlot || !validFingerprint) {
+  // A persona pairing must be confirmed as addressed to that persona — the
+  // firmware echoes the endpoint as `identity`. Fail closed like the policy.
+  const identityConfirmed = !params.identityHex
+    || String(res.identity ?? '').toLowerCase() === params.identityHex
+  if (Number(res.policy_version) !== 2 || !policiesEqual(params.policy, res) || !validSlot || !validFingerprint || !identityConfirmed) {
     if (validSlot && validFingerprint) {
       try {
         await relayTransport.request('revoke_client', {
