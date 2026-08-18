@@ -133,6 +133,8 @@
     <p class="hint-sm">
       The file holds your app secrets. It is encrypted with the passphrase you set here, so choose a
       strong one and store it separately. Losing the passphrase makes the backup unrecoverable.
+      Bearer notes are <strong>not</strong> in this backup: a note restored onto two signers could be
+      spent twice, so notes live only on the signer that holds them.
     </p>
     <div class="fields">
       <input class="field-input" type="password" bind:value={exportPass} placeholder="Passphrase"

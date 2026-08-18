@@ -71,6 +71,12 @@ export const FrameType = {
   BACKUP_EXPORT_RESPONSE: 0x51,
   BACKUP_IMPORT_REQUEST:  0x52,
   BACKUP_IMPORT_RESPONSE: 0x53,
+  // Bearer-note locker (USB tier only; WiFi-standalone NACKs these and serves
+  // the locker as heartwood_note_* NIP-46 extensions instead). NOTE_CMD carries
+  // one lnurl-vault-protocol JSON command; NOTE_RESP the matching JSON reply —
+  // always answered, never silent. Mirrors heartwood-common/src/types.rs.
+  NOTE_CMD:               0x70,
+  NOTE_RESP:              0x71,
 } as const
 
 export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType]

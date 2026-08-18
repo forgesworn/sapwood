@@ -123,6 +123,10 @@ At the command line: `sapwood backup export` writes the encrypted file, and
 
 ## What is not backed up
 
+- **Bearer notes.** Deliberately excluded: a bearer note restored onto two signers
+  is two claims on the same money — the second spend double-spends the first. Notes
+  live only on the signer that holds them; withdraw or transfer them before a
+  factory reset.
 - **Device settings.** The boot PIN is local device state and is not part of any
   backup. (The bridge secret *is* included in the app-pairing backup above.)
 - **Anything, after the fact.** Key secrets cannot be read back off the signer over
