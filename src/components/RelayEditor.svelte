@@ -20,6 +20,11 @@
 
   const available = $derived(suggestions.filter((s) => !relays.includes(s)))
 
+  // A ws:// relay is cleartext Nostr: payloads stay NIP-44-encrypted, but the
+  // network path sees the metadata. Legitimate on your own LAN — flag anything
+  // else loudly before it gets flashed onto the signer.
+  const insecure = $derived(relays.filter((r) => /^ws:\/\//i.test(r)))
+
   // Live reachability, keyed by URL — advisory, from this browser (a signer on
   // another network may fare differently, but a dead relay here is a red flag).
   let health = $state<Record<string, RelayProbe>>({})
@@ -116,6 +121,13 @@
     <button type="button" class="btn btn-secondary btn-sm" disabled={disabled || !input.trim()} onclick={() => add(input)}>Add</button>
   </div>
   {#if error}<p class="error-text">{error}</p>{/if}
+  {#if insecure.length}
+    <p class="warn-text">
+      <strong>{insecure.join(', ')}</strong> uses <code>ws://</code>, which is not encrypted.
+      Message contents stay end-to-end encrypted, but anyone on the network path can see the
+      signer's traffic and when it talks. Use <code>ws://</code> only for a relay on your own network.
+    </p>
+  {/if}
 </div>
 
 <style>

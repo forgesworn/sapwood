@@ -367,10 +367,12 @@
         if it ever gets out, every door is open and you can't change the locks.
       </p>
       <p class="usb-gate-why">
-        Because it matters that much, we only ever hand it over down a <strong>cable you can
+        Because it matters that much, the default is to hand it over down a <strong>cable you can
         see and hold</strong>, never over WiFi or the internet, where it would pass through
-        routers and computers you don't control. Once the device is set up, everything else
-        (adding apps, approving, revoking) <em>can</em> be done over WiFi, just not this.
+        routers and computers you don't control. If this signer is already set up and you reach
+        it over WiFi, a key you add travels encrypted end-to-end (NIP-44) to the signer itself —
+        relays see only ciphertext — but the cable is the recommended path for this step.
+        Everything else (adding apps, approving, revoking) <em>can</em> be done over WiFi.
       </p>
       <p class="usb-gate-todo">→ Connect the device to this computer with a USB cable, then come back to this tab.</p>
     </div>

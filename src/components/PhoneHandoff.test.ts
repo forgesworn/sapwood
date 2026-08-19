@@ -103,6 +103,8 @@ describe('PhoneHandoff authority selection', () => {
     render(PhoneHandoff)
     await fireEvent.click(screen.getByRole('button', { name: 'Pair a device' }))
     await fireEvent.click(screen.getByRole('button', { name: /Show without a PIN/ }))
+    // The plain link sits behind an explicit confirm step (SW-L3).
+    await fireEvent.click(screen.getByRole('button', { name: /show the plain link/ }))
 
     expect(handoff.buildHandoffLink).toHaveBeenCalledWith(
       expect.any(String),
@@ -155,6 +157,8 @@ describe('PhoneHandoff authority selection', () => {
     render(PhoneHandoff)
     await fireEvent.click(screen.getByRole('button', { name: 'Pair a device' }))
     await fireEvent.click(screen.getByRole('button', { name: /Show without a PIN/ }))
+    // The plain link sits behind an explicit confirm step (SW-L3).
+    await fireEvent.click(screen.getByRole('button', { name: /show the plain link/ }))
 
     expect(handoff.buildHandoffLink).toHaveBeenCalledWith(
       expect.any(String),
@@ -223,6 +227,8 @@ describe('PhoneHandoff authority selection', () => {
     render(PhoneHandoff)
     await fireEvent.click(screen.getByRole('button', { name: 'Pair a device' }))
     await fireEvent.click(screen.getByRole('button', { name: /Show without a PIN/ }))
+    // The plain link sits behind an explicit confirm step (SW-L3).
+    await fireEvent.click(screen.getByRole('button', { name: /show the plain link/ }))
 
     expect(handoff.buildHandoffLink).toHaveBeenCalledWith(
       expect.any(String),
@@ -293,6 +299,8 @@ describe('PhoneHandoff authority selection', () => {
     render(PhoneHandoff)
     await fireEvent.click(screen.getByRole('button', { name: 'Pair a device' }))
     await fireEvent.click(screen.getByRole('button', { name: /Show without a PIN/ }))
+    // The plain link sits behind an explicit confirm step (SW-L3).
+    await fireEvent.click(screen.getByRole('button', { name: /show the plain link/ }))
     expect(screen.getByLabelText('pairing QR').getAttribute('data-link')).toContain('plain-a')
 
     ;(device as { usbNetworkState: object | null }).usbNetworkState = {
@@ -323,6 +331,8 @@ describe('PhoneHandoff authority selection', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Pair a device' }))
     await fireEvent.click(screen.getByRole('button', { name: /Show without a PIN/ }))
+    // The plain link sits behind an explicit confirm step (SW-L3).
+    await fireEvent.click(screen.getByRole('button', { name: /show the plain link/ }))
     expect(screen.getByLabelText('pairing QR').getAttribute('data-link')).toContain('plain-b')
     expect(screen.getByLabelText('pairing QR').getAttribute('data-link')).not.toContain('plain-a')
     expect(handoff.buildHandoffLink).toHaveBeenNthCalledWith(

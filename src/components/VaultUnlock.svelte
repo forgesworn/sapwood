@@ -14,6 +14,7 @@
   } from '../lib/device.svelte.js'
   import { npubToHex } from '../lib/known-devices.js'
   import { loadVaultKey, storeVaultKey, normaliseVaultKeyHex, serialVaultUnlock } from '../lib/vault.js'
+  import PasswordReveal from './PasswordReveal.svelte'
 
   // Announcements re-publish about every 60s while locked; older than this
   // and the signer has either unlocked or gone quiet — stop asking.
@@ -44,6 +45,7 @@
   $effect(() => { storedKey = deviceKey ? loadVaultKey(deviceKey) : null })
 
   let pasteValue = $state('')
+  let pasteShow = $state(false)
   let busy = $state(false)
   let status = $state<string | null>(null)
   let sent = $state(false)
@@ -131,15 +133,19 @@
         This browser doesn't hold the vault key. Paste the copy you escrowed to unlock.
       </p>
       <div class="vault-actions">
-        <input
-          class="field-input vault-key-input"
-          bind:value={pasteValue}
-          placeholder="64 hex characters"
-          maxlength="64"
-          spellcheck="false"
-          autocomplete="off"
-          disabled={busy}
-        />
+        <div class="pw-wrap">
+          <input
+            class="field-input vault-key-input"
+            class:masked={!pasteShow}
+            bind:value={pasteValue}
+            placeholder="64 hex characters"
+            maxlength="64"
+            spellcheck="false"
+            autocomplete="off"
+            disabled={busy}
+          />
+          <PasswordReveal bind:shown={pasteShow} disabled={busy} />
+        </div>
         <button class="btn btn-warn" disabled={busy || !pastedKey()} onclick={() => unlockUsb(pastedKey()!, true)}>
           {busy ? 'Unlocking…' : 'Unlock'}
         </button>
@@ -169,15 +175,19 @@
         This browser doesn't hold the vault key. Paste the copy you escrowed to unlock.
       </p>
       <div class="vault-actions">
-        <input
-          class="field-input vault-key-input"
-          bind:value={pasteValue}
-          placeholder="64 hex characters"
-          maxlength="64"
-          spellcheck="false"
-          autocomplete="off"
-          disabled={busy}
-        />
+        <div class="pw-wrap">
+          <input
+            class="field-input vault-key-input"
+            class:masked={!pasteShow}
+            bind:value={pasteValue}
+            placeholder="64 hex characters"
+            maxlength="64"
+            spellcheck="false"
+            autocomplete="off"
+            disabled={busy}
+          />
+          <PasswordReveal bind:shown={pasteShow} disabled={busy} />
+        </div>
         <button class="btn btn-warn" disabled={busy || !pastedKey()} onclick={() => unlockRelay(pastedKey()!, true)}>
           {busy ? 'Sending…' : 'Unlock'}
         </button>
@@ -199,6 +209,7 @@
   .vault-title { font-size: 1.05rem; font-weight: 700; color: var(--amber); margin: 0 0 0.5rem; }
   .vault-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.8rem; }
   .vault-key-input { font-size: 0.85rem; padding: 0.45rem 0.7rem; flex: 1; min-width: 16rem; }
+  .vault-actions .pw-wrap { min-width: 16rem; }
   .vault-sub { margin: 0.5rem 0 0; }
   .vault-status { margin: 0.6rem 0 0; color: var(--text-dim); }
 </style>

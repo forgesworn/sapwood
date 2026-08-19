@@ -103,8 +103,15 @@
     }
     const t = importText.trim()
     if (t.startsWith('nsec1')) {
-      const r = deriveFromNsec(decodeNsec(t))
-      return { secret: r.secret, mode: 'tree-nsec', npub: r.npub }
+      // deriveFromNsec copies the bytes into its result, so the decoded nsec
+      // can (and must) be wiped straight after — same pattern as restore.ts.
+      const bytes = decodeNsec(t)
+      try {
+        const r = deriveFromNsec(bytes)
+        return { secret: r.secret, mode: 'tree-nsec', npub: r.npub }
+      } finally {
+        zeroize(bytes)
+      }
     }
     const r = await deriveFromMnemonic(t, '')
     return { secret: r.secret, mode: 'tree-mnemonic', npub: r.npub }
@@ -147,6 +154,12 @@
 
       npub = d.npub
       provisionMsg = ''
+      // The seed material now lives on the device — drop every browser-side
+      // copy held in component state so it does not linger for the page's
+      // lifetime. (The derived bytes are zeroized in the finally below.)
+      mnemonic = ''
+      importText = ''
+      written = false
       step = 'bridge'
     } catch (e) {
       provisionMsg = e instanceof Error ? e.message : 'Provisioning failed.'

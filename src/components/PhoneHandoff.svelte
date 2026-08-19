@@ -21,6 +21,7 @@
   let link = $state('') // the built handoff link (protected or plain)
   let linkAuthorityKey = $state('')
   let protectedLink = $state(false)
+  let confirmPlain = $state(false) // explicit second step before a PIN-less link is shown
   let observedAuthorityKey = $state<string | null>(null)
   let revealEpoch = $state(0)
   let hideTimer: ReturnType<typeof setTimeout> | null = null
@@ -136,6 +137,7 @@
     linkAuthorityKey = ''
     pin = ''
     copied = false
+    confirmPlain = false
   }
 
   async function showProtected() {
@@ -174,7 +176,7 @@
 
   function showPlain() {
     const authority = currentAuthority()
-    if (!reveal || !authority || authority.key !== authorityKey
+    if (!reveal || !confirmPlain || !authority || authority.key !== authorityKey
       || authority.key !== revealAuthorityKey) return
     linkAuthorityKey = authority.key
     link = buildHandoffLink(
@@ -196,6 +198,7 @@
     pin = ''
     copied = false
     protectedLink = false
+    confirmPlain = false
     if (hideTimer) {
       clearTimeout(hideTimer)
       hideTimer = null
@@ -290,7 +293,21 @@
         </button>
         <button class="btn btn-ghost btn-sm" onclick={hidePairing}>Cancel</button>
       </div>
-      <button class="plain-link" onclick={showPlain}>Show without a PIN (only on a screen you trust)</button>
+      {#if !confirmPlain}
+        <button class="plain-link" onclick={() => (confirmPlain = true)}>Show without a PIN (only on a screen you trust)</button>
+      {:else}
+        <div class="plain-confirm">
+          <p class="warn-text">
+            A PIN-less link carries your operator key in the clear. Anyone who scans, photographs,
+            or saves it can manage this signer — never paste it into notes or chat that syncs.
+            Scan it once, on a screen you trust, then let it hide.
+          </p>
+          <div class="handoff-actions">
+            <button class="btn btn-warn btn-sm" onclick={showPlain}>I understand — show the plain link</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => (confirmPlain = false)}>Back</button>
+          </div>
+        </div>
+      {/if}
 
     {:else}
       <p class="hint">
@@ -330,4 +347,6 @@
     cursor: pointer; font-family: inherit; font-size: 0.78rem; text-align: center;
   }
   .plain-link:hover { color: var(--text-dim); text-decoration: underline; }
+  .plain-confirm { margin-top: 0.9rem; }
+  .plain-confirm .handoff-actions { margin-top: 0.6rem; }
 </style>

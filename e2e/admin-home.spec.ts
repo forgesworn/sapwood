@@ -94,8 +94,12 @@ test('phone handoff QR is hidden until explicitly revealed', async ({ page }) =>
   await expect(page.getByText(/PIN or passphrase/)).toBeVisible()
   await expect(page.locator('.handoff .qr')).toHaveCount(0)
 
-  // A protected QR needs a PIN; the plain fallback shows the operator-key warning.
+  // A protected QR needs a PIN; the plain fallback sits behind an explicit
+  // confirm step, then shows the operator-key warning with the QR.
   await page.getByRole('button', { name: /Show without a PIN/ }).click()
+  await expect(page.getByText(/carries your operator key in the clear/)).toBeVisible()
+  await expect(page.locator('.handoff .qr')).toHaveCount(0)
+  await page.getByRole('button', { name: /show the plain link/ }).click()
   await expect(page.locator('.handoff .qr')).toBeVisible()
   await expect(page.getByText(/This link carries your operator key/)).toBeVisible()
   const overflow = await page.evaluate(
