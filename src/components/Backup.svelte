@@ -5,7 +5,7 @@
   // the device) and encrypts them under a passphrase; import restores them after
   // the identities have been re-provisioned. USB only. The heavy lifting and the
   // crypto live in lib/backup.ts; this component is the form around it.
-  import { device, serialTransport } from '../lib/device.svelte.js'
+  import { device, serialTransport, ensureBridgeAuth } from '../lib/device.svelte.js'
   import { npubToHex } from '../lib/known-devices.js'
   import {
     exportBackup, importBackup, matchBackup, encryptBackup, decryptBackup, parseBackupEnvelope,
@@ -44,6 +44,11 @@
     if (exportPass !== exportPass2) { exportErr = 'The passphrases do not match.'; return }
     exporting = true
     try {
+      // BACKUP_EXPORT and BACKUP_IMPORT both require an authenticated bridge
+      // session. Without this the device NACKs, and lib/backup.ts reports it as
+      // "confirm the prompt on its screen" -- but no prompt is ever shown, so
+      // the operator holds a button against a card that does not exist.
+      await ensureBridgeAuth()
       const payload = await exportBackup(serialTransport)
       const envelope = encryptBackup(payload, exportPass)
       const slots = payload.masters.reduce((total, m) => total + m.connection_slots.length, 0)
@@ -105,6 +110,7 @@
     importMsg = null
     importing = true
     try {
+      await ensureBridgeAuth()
       const result = await importBackup(serialTransport, preview.payload, deviceMasters)
       importMsg = `Restored ${result.restored} app slots. The connected apps reconnect on their own.`
       preview = null

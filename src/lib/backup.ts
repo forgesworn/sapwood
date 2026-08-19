@@ -158,7 +158,7 @@ export async function exportBackup(t: BackupTransport): Promise<BackupPayload> {
     BUTTON_TIMEOUT_MS,
   )
   if (resp.type !== FrameType.BACKUP_EXPORT_RESPONSE) {
-    throw new BackupError('The signer did not export a backup. Confirm the prompt on its screen with the button.')
+    throw new BackupError('The signer refused the export. If it showed a prompt, confirm it with the button; if it showed nothing, this browser is not paired to it over USB (the export needs an authenticated bridge session).')
   }
   return parseBackupPayload(resp.payload)
 }
