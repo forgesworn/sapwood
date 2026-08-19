@@ -11,6 +11,7 @@
   import { copyText } from '../lib/clipboard.js'
   import { device, setOperatorOverUsb } from '../lib/device.svelte.js'
   import ConfirmButton from './ConfirmButton.svelte'
+  import PasswordReveal from './PasswordReveal.svelte'
 
   let operator = $state(getOrCreateOperator())
   let opMnemonic = $state(getOperatorMnemonic())
@@ -18,6 +19,8 @@
   let opPhraseReveal = $state(false)
   let opImportValue = $state('')
   let opPhraseImport = $state('')
+  let opPhraseImportShow = $state(false)
+  let opImportShow = $state(false)
   let opStatus = $state<string | null>(null)
   let settingOperator = $state(false)
   const signerOperator = $derived(
@@ -46,6 +49,7 @@
       opMnemonic = getOperatorMnemonic()
       opImportValue = ''
       opReveal = false
+      opImportShow = false
       opStatus = `Imported. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… Reconnect over WiFi.`
     } catch (e) {
       opStatus = e instanceof Error ? e.message : 'Import failed'
@@ -58,6 +62,7 @@
       opMnemonic = getOperatorMnemonic()
       opPhraseImport = ''
       opPhraseReveal = false
+      opPhraseImportShow = false
       opStatus = `Restored from phrase. Operator pubkey is now ${operator.pubHex.slice(0, 16)}… Reconnect over WiFi.`
     } catch (e) {
       opStatus = e instanceof Error ? e.message : 'Restore failed'
@@ -178,14 +183,18 @@
   </tbody></table>
 
   <div class="inline-form">
-    <input
-      type="text"
-      class="field-input"
-      bind:value={opPhraseImport}
-      placeholder="Paste the matching 12/24-word operator recovery phrase"
-      spellcheck="false"
-      autocomplete="off"
-    />
+    <div class="pw-wrap">
+      <input
+        type="text"
+        class="field-input"
+        class:masked={!opPhraseImportShow}
+        bind:value={opPhraseImport}
+        placeholder="Paste the matching 12/24-word operator recovery phrase"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <PasswordReveal bind:shown={opPhraseImportShow} />
+    </div>
     <button class="btn btn-secondary btn-sm" disabled={opPhraseImport.trim().split(/\s+/).length < 12} onclick={handleImportPhrase}>Restore key</button>
     <ConfirmButton
       label="Regenerate"
@@ -198,15 +207,19 @@
   <details class="disclosure">
     <summary>Advanced: import a raw 64-hex secret</summary>
     <div class="inline-form">
-      <input
-        type="text"
-        class="field-input"
-        bind:value={opImportValue}
-        placeholder="Paste 64-hex operator secret"
-        maxlength="64"
-        spellcheck="false"
-        autocomplete="off"
-      />
+      <div class="pw-wrap">
+        <input
+          type="text"
+          class="field-input"
+          class:masked={!opImportShow}
+          bind:value={opImportValue}
+          placeholder="Paste 64-hex operator secret"
+          maxlength="64"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <PasswordReveal bind:shown={opImportShow} />
+      </div>
       <button class="btn btn-secondary btn-sm" disabled={opImportValue.trim().length !== 64} onclick={handleImport}>Import</button>
     </div>
     <p class="hint-sm">A raw secret has no recovery phrase. Use this only to match a signer flashed elsewhere.</p>
@@ -234,6 +247,7 @@
   .amber { color: var(--amber); }
   .inline-form { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
   .inline-form input { flex: 1; min-width: 12rem; padding: 0.4rem 0.6rem; font-size: 0.82rem; }
+  .inline-form .pw-wrap { min-width: 12rem; }
   .status { color: var(--text-dim); }
   .op-guide a { color: var(--green); }
   .operator-binding { display: flex; flex-direction: column; gap: 0.5rem; }

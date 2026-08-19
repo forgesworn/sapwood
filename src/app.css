@@ -154,6 +154,12 @@ select.field-input { cursor: pointer; }
 .pw-wrap { position: relative; display: flex; flex: 1; }
 .pw-wrap .field-input { padding-right: 2.2rem; }
 
+/* Mask a secret typed into a type="text" input, without using type="password"
+   (a password field makes the browser's manager offer to SAVE the secret into
+   the OS password store). Pair with PasswordReveal inside a .pw-wrap: the eye
+   drops the class to show the value. */
+.field-input.masked { -webkit-text-security: disc; }
+
 /* Secrets and one-time links: selectable text in a quiet box. */
 .uri-box {
   display: flex; align-items: flex-start; gap: 0.75rem;

@@ -1,3 +1,17 @@
+// Clickjacking guard: Sapwood must never run framed. The CSP is injected as a
+// <meta> (which cannot express frame-ancestors) and the GitHub Pages
+// deployment can set no X-Frame-Options header, so the enforcement has to live
+// here — script-src 'self' permits this external module. Try to take over the
+// top browsing context; if that is blocked (sandboxed frame), blank the
+// document and refuse to boot rather than render secrets inside the frame.
+if (window.top !== window.self) {
+  try {
+    window.top!.location.href = window.self.location.href
+  } catch { /* cross-origin frame — the blank-out below still applies */ }
+  document.documentElement.replaceChildren()
+  throw new Error('Sapwood refuses to run inside a frame')
+}
+
 // Self-hosted JetBrains Mono — bundled and served from our own origin, so the
 // app makes no third-party font request (no IP leak). Enforced by the CSP in
 // vite.config.ts. Weights match the old Google Fonts request (400/500/600/700).

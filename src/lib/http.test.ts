@@ -229,6 +229,14 @@ describe('HttpTransport', () => {
   })
 
   describe('API token', () => {
+    /** Seed the per-origin token store. */
+    function seedToken(origin: string, token: string) {
+      localStorage.setItem('heartwood-api-tokens', JSON.stringify({ [origin]: token }))
+    }
+    function storedTokens(): Record<string, string> {
+      return JSON.parse(localStorage.getItem('heartwood-api-tokens') ?? '{}')
+    }
+
     it('sends no Authorization header when no token is available', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
 
@@ -241,33 +249,87 @@ describe('HttpTransport', () => {
       )
     })
 
-    it('uses the localStorage token when no meta tag is present', async () => {
-      localStorage.setItem('heartwood-api-token', 'stored-token')
+    it('probes a new origin WITHOUT its stored token, attaches it only after identification', async () => {
+      seedToken('http://pi:3100', 'stored-token')
       mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
 
       const transport = new HttpTransport()
       await transport.connect('pi:3100')
 
-      const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>
-      expect(headers.Authorization).toMatch(/^Bearer /)
-      expect(headers.Authorization).toContain('stored-token')
+      // First contact carries no credential, even though one is stored.
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://pi:3100/api/info',
+        expect.objectContaining({ headers: {} }),
+      )
+
+      // The /api/info shape check identified a Heartwood bridge: the token is
+      // attached from here on.
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+      await transport.factoryReset()
+      const headers = mockFetch.mock.calls[1][1].headers as Record<string, string>
+      expect(headers.Authorization).toBe('Bearer stored-token')
     })
 
-    it('prefers the meta-tag token over localStorage', async () => {
-      localStorage.setItem('heartwood-api-token', 'stored-token')
+    it("never sends one origin's token to a different origin", async () => {
+      seedToken('http://pi:3100', 'pi-token')
+      // The evil origin mimics the heartwoodd /api/info shape — identification
+      // alone must not unlock another origin's token.
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main', mode: 'device-decrypts' }))
+
+      const transport = new HttpTransport()
+      await transport.connect('https://bridge.evil.example')
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://bridge.evil.example/api/info',
+        expect.objectContaining({ headers: {} }),
+      )
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+      await transport.factoryReset()
+      const headers = mockFetch.mock.calls[1][1].headers as Record<string, string>
+      expect(headers.Authorization).toBeUndefined()
+    })
+
+    it('starts unauthenticated when connecting to a different origin', async () => {
+      seedToken('http://pi:3100', 'pi-token')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+      await transport.factoryReset()
+      expect(
+        (mockFetch.mock.calls[1][1].headers as Record<string, string>).Authorization,
+      ).toBe('Bearer pi-token')
+
+      // Reconnect elsewhere: the pi token must not follow.
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+      await transport.connect('other.local:3100')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+      await transport.factoryReset()
+      const headers = mockFetch.mock.calls[3][1].headers as Record<string, string>
+      expect(headers.Authorization).toBeUndefined()
+    })
+
+    it('uses the meta-tag token only when connecting to the origin that served the page', async () => {
+      seedToken('http://pi:3100', 'stored-token')
       const meta = document.createElement('meta')
       meta.name = 'heartwood-api-token'
       meta.content = 'meta-token'
       document.head.appendChild(meta)
       try {
+        // Cross-origin: the meta token belongs to the serving origin and must
+        // not leak — not even after the target identifies as a bridge.
         mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+        const cross = new HttpTransport()
+        await cross.connect('pi:3100')
+        let headers = mockFetch.mock.calls[0][1].headers as Record<string, string>
+        expect(headers.Authorization).toBeUndefined()
 
-        const transport = new HttpTransport()
-        await transport.connect('pi:3100')
-
-        const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>
-        expect(headers.Authorization).toContain('meta-token')
-        expect(headers.Authorization).not.toContain('stored-token')
+        // Same-origin: the token came from this origin, so it is attached.
+        mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+        const same = new HttpTransport()
+        await same.connect(window.location.origin)
+        headers = mockFetch.mock.calls[1][1].headers as Record<string, string>
+        expect(headers.Authorization).toBe('Bearer meta-token')
       } finally {
         meta.remove()
       }
@@ -293,49 +355,59 @@ describe('HttpTransport', () => {
       }
     })
 
-    it('setToken persists to localStorage and authenticates later requests', async () => {
+    it('migrates a legacy single token onto the saved bridge address origin', () => {
+      localStorage.setItem('heartwood-api-token', 'legacy-token')
+      localStorage.setItem('sapwood-bridge-address', '192.168.1.9:3100')
+
+      new HttpTransport()
+
+      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+      expect(storedTokens()).toEqual({ 'http://192.168.1.9:3100': 'legacy-token' })
+    })
+
+    it('setToken persists under the current origin and authenticates later requests', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
       const transport = new HttpTransport()
       await transport.connect('pi:3100')
 
       transport.setToken('  new-token  ')
-      expect(localStorage.getItem('heartwood-api-token')).toBe('new-token')
+      expect(storedTokens()).toEqual({ 'http://pi:3100': 'new-token' })
 
       mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
       await transport.factoryReset()
 
       const headers = mockFetch.mock.calls[1][1].headers as Record<string, string>
-      expect(headers.Authorization).toContain('new-token')
+      expect(headers.Authorization).toBe('Bearer new-token')
     })
 
-    it('clearToken drops the stored token', async () => {
-      localStorage.setItem('heartwood-api-token', 'stored-token')
+    it('clearToken drops only the stored token for the current origin', async () => {
+      seedToken('http://pi:3100', 'stored-token')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
       const transport = new HttpTransport()
+      await transport.connect('pi:3100')
 
       transport.clearToken()
-      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+      expect(storedTokens()).toEqual({})
 
-      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
-      await transport.connect('pi:3100')
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://pi:3100/api/info',
-        expect.objectContaining({ headers: {} }),
-      )
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+      await transport.factoryReset()
+      const headers = mockFetch.mock.calls[1][1].headers as Record<string, string>
+      expect(headers.Authorization).toBeUndefined()
     })
 
     it('emits auth-required with rejected=true and clears a stale stored token on 401', async () => {
-      localStorage.setItem('heartwood-api-token', 'stale-token')
-      mockFetch
-        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 })) // /api/info
-        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 })) // /api/bridge/info
-
+      seedToken('http://pi:3100', 'stale-token')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
       const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
       const events: { kind: string; rejected?: boolean }[] = []
       transport.on(e => events.push(e))
+      mockFetch.mockResolvedValueOnce(new Response('unauthorised', { status: 401 }))
+      await transport.factoryReset()
 
-      await expect(transport.connect('pi:3100')).rejects.toThrow('HTTP 401')
       expect(events).toContainEqual({ kind: 'auth-required', rejected: true })
-      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+      expect(storedTokens()).toEqual({})
     })
 
     it('reports rejected=false when a 401 arrives with no token at all', async () => {
@@ -353,6 +425,23 @@ describe('HttpTransport', () => {
       expect(events.filter(e => e.kind === 'auth-required')).toHaveLength(1)
     })
 
+    it('does not clear an unsent stored token when an unauthenticated probe gets a 401', async () => {
+      // A front-end proxy 401s even /api/info: the stored token was never sent,
+      // so it must survive for the retry after the operator confirms it.
+      seedToken('http://pi:3100', 'stored-token')
+      mockFetch
+        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 }))
+        .mockResolvedValueOnce(new Response('unauthorised', { status: 401 }))
+
+      const transport = new HttpTransport()
+      const events: { kind: string; rejected?: boolean }[] = []
+      transport.on(e => events.push(e))
+
+      await expect(transport.connect('pi:3100')).rejects.toThrow('HTTP 401')
+      expect(events).toContainEqual({ kind: 'auth-required', rejected: false })
+      expect(storedTokens()).toEqual({ 'http://pi:3100': 'stored-token' })
+    })
+
     it('re-prompts with rejected=true after a newly entered token also fails', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
       const transport = new HttpTransport()
@@ -366,7 +455,42 @@ describe('HttpTransport', () => {
       await transport.factoryReset()
 
       expect(events).toContainEqual({ kind: 'auth-required', rejected: true })
-      expect(localStorage.getItem('heartwood-api-token')).toBeNull()
+      expect(storedTokens()).toEqual({})
+    })
+
+    it('appends the origin token to the log WebSocket once the origin is trusted', async () => {
+      const wsUrls: string[] = []
+      vi.stubGlobal('WebSocket', class {
+        onmessage: unknown = null
+        onerror: unknown = null
+        onclose: unknown = null
+        constructor(url: string) { wsUrls.push(url) }
+        close() { /* */ }
+      })
+      seedToken('http://pi:3100', 'stored-token')
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      expect(wsUrls).toEqual(['ws://pi:3100/api/logs?token=stored-token'])
+    })
+
+    it('opens the log WebSocket without a token when the origin has none', async () => {
+      const wsUrls: string[] = []
+      vi.stubGlobal('WebSocket', class {
+        onmessage: unknown = null
+        onerror: unknown = null
+        onclose: unknown = null
+        constructor(url: string) { wsUrls.push(url) }
+        close() { /* */ }
+      })
+      mockFetch.mockResolvedValueOnce(jsonResponse({ tier: 'main' }))
+
+      const transport = new HttpTransport()
+      await transport.connect('pi:3100')
+
+      expect(wsUrls).toEqual(['ws://pi:3100/api/logs'])
     })
   })
 

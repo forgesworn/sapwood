@@ -226,6 +226,26 @@
     } catch { /* emitted via listener */ }
     finally { connecting = false }
   }
+
+  /** True when the entered bridge address is neither loopback nor LAN — a
+   *  bridge daemon lives on the local network, so a public address is a
+   *  phishing smell (the bridge API token is a full-authority credential).
+   *  Warns only: a deliberately exposed bridge (e.g. behind a TLS proxy) is
+   *  legitimate. Mirrors the auto-connect probe's LAN-only restriction above. */
+  const httpAddressPublic = $derived.by(() => {
+    const raw = httpAddress.trim()
+    if (!raw) return false
+    let host: string
+    try {
+      host = new URL(/^https?:\/\//i.test(raw) ? raw : `http://${raw}`).hostname
+    } catch {
+      return false // unparseable — let connect() report the failure instead
+    }
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') return false
+    if (host.endsWith('.local')) return false
+    if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return false
+    return true
+  })
 </script>
 
 <div class="connection card">
@@ -456,6 +476,13 @@
         <button type="button" class="btn btn-ghost" onclick={() => showHttpForm = false}>
           Cancel
         </button>
+        {#if httpAddressPublic}
+          <p class="warn-text bridge-warn">
+            That address is on the public internet, not your local network. A bridge is a
+            LAN daemon — connecting hands its API token full authority over the signer, so
+            only continue if you deliberately exposed this bridge yourself.
+          </p>
+        {/if}
       </form>
     {/if}
   {/if}
@@ -586,6 +613,8 @@
   }
 
   .http-form input { width: 240px; }
+
+  .bridge-warn { flex-basis: 100%; }
 
   .more-ways { margin-top: 1rem; }
   .more-ways summary { letter-spacing: 0.02em; list-style: revert; }

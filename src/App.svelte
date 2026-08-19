@@ -1,6 +1,7 @@
 <script lang="ts">
   import ConnectionPicker from './components/ConnectionPicker.svelte'
   import ApiTokenPrompt from './components/ApiTokenPrompt.svelte'
+  import PasswordReveal from './components/PasswordReveal.svelte'
   import StatusBar from './components/StatusBar.svelte'
   import Home from './components/Home.svelte'
   import Cockpit from './components/Cockpit.svelte'
@@ -48,16 +49,19 @@
 
   // Receiving side of a PIN-protected handoff link: collect the PIN, decrypt.
   let pinInput = $state('')
+  let pinShow = $state(false)
   let pinError = $state('')
   function unlockPin() {
     const res = submitPin(pinInput)
     if (!res.ok) { pinError = res.error ?? 'Wrong PIN'; return }
     pinInput = ''
+    pinShow = false
     pinError = ''
   }
   function cancelPin() {
     dismissPin()
     pinInput = ''
+    pinShow = false
     pinError = ''
   }
 
@@ -140,20 +144,24 @@
       <h2 id="pin-title">Unlock this pairing link</h2>
       <p>This link is protected. Enter the PIN shown on the other device to connect to your signer.</p>
       <label class="field-label" for="pairing-pin">PIN or passphrase</label>
-      <input
-        id="pairing-pin"
-        type="text"
-        class="field-input"
-        bind:value={pinInput}
-        placeholder="PIN or passphrase"
-        autocomplete="off"
-        autocapitalize="off"
-        autocorrect="off"
-        spellcheck="false"
-        data-1p-ignore
-        data-lpignore="true"
-        onkeydown={(e) => { if (e.key === 'Enter') unlockPin() }}
-      />
+      <div class="pw-wrap">
+        <input
+          id="pairing-pin"
+          type="text"
+          class="field-input"
+          class:masked={!pinShow}
+          bind:value={pinInput}
+          placeholder="PIN or passphrase"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          data-1p-ignore
+          data-lpignore="true"
+          onkeydown={(e) => { if (e.key === 'Enter') unlockPin() }}
+        />
+        <PasswordReveal bind:shown={pinShow} />
+      </div>
       {#if pinError}<p class="error-text">{pinError}</p>{/if}
       <div class="import-confirm-actions">
         <button class="btn btn-secondary" onclick={cancelPin}>Cancel</button>
