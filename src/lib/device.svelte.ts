@@ -20,6 +20,7 @@ import {
   removePersona as nip46UsbRemovePersona,
   renamePersona as nip46UsbRenamePersona,
   decryptAsIdentity as nip46UsbDecrypt,
+  isUnpairedError,
   type DerivedPersona,
 } from './nip46-usb.js'
 import { dedupeIdentities } from './identity-key.js'
@@ -3048,6 +3049,43 @@ export async function relayDeriveIdentity(
   return info
 }
 
+/** Connection slots per identity (heartwood-common policy.rs MAX_CONNECT_SLOTS). */
+const MAX_CONNECT_SLOTS = 16
+
+/** A refused CONNSLOT_CREATE, carrying the signer's own reason. The firmware
+ *  answers a full table with `slots full`; older builds send a bare NACK, so an
+ *  empty reason is treated as possibly-full too. */
+export class SlotCreateError extends Error {
+  readonly reason: string
+  constructor(reason: string) {
+    super(reason ? `The signer refused the connection: ${reason}.` : 'The signer refused the connection.')
+    this.name = 'SlotCreateError'
+    this.reason = reason
+  }
+  /** True when the refusal is (or may be) a full slot table. */
+  get full(): boolean {
+    return this.reason === '' || /full/i.test(this.reason)
+  }
+}
+
+/** Read the connection slots for a master and WAIT for the answer.
+ *  `refreshSlots` fires CONNSLOT_LIST and lets the frame handler catch up
+ *  later, which is fine for repainting a list but not for a decision taken on
+ *  the result. Secrets are redacted in the response, so no session is needed. */
+async function serialFetchSlots(masterSlot: number): Promise<ConnectSlot[]> {
+  const resp = await serialTransport.sendAndReceive(
+    buildConnSlotList(masterSlot),
+    [FrameType.CONNSLOT_LIST_RESP, FrameType.NACK],
+    SERIAL_RTT_MS,
+  )
+  if (resp.type !== FrameType.CONNSLOT_LIST_RESP) {
+    throw new Error('The signer would not list its connections.')
+  }
+  const slots = JSON.parse(new TextDecoder().decode(resp.payload)) as ConnectSlot[]
+  device.slots = slots
+  return slots
+}
+
 /** Create a client slot over USB. Returns the bunker URI + secret (shown once). */
 export async function serialCreateClient(
   label: string,
@@ -3055,7 +3093,7 @@ export async function serialCreateClient(
   await ensureBridgeAuth()
   const ms = device.selectedSlot
   const resp = await serialTransport.sendAndReceive(buildConnSlotCreate(ms, label), [FrameType.CONNSLOT_CREATE_RESP, FrameType.NACK], SERIAL_RTT_MS)
-  if (resp.type !== FrameType.CONNSLOT_CREATE_RESP) throw new Error('Create rejected (slots full?)')
+  if (resp.type !== FrameType.CONNSLOT_CREATE_RESP) throw new SlotCreateError(new TextDecoder().decode(resp.payload).trim())
   const info = JSON.parse(new TextDecoder().decode(resp.payload)) as { slot_index: number; secret: string }
   const bunker_uri = await serialGetUri(info.slot_index).catch(() => '')
   await refreshSlots()
@@ -3112,6 +3150,45 @@ function selectedMasterHex(): string {
   return decoded.data
 }
 
+/** Label every Sapwood manager pairing carries. Also the marker that says a
+ *  slot is Sapwood's own bookkeeping rather than one of the operator's apps. */
+const MANAGER_SLOT_LABEL = 'Sapwood manager'
+
+/** Mint the manager slot, reclaiming Sapwood's own abandoned pairings when the
+ *  identity's 16 connection slots are full.
+ *
+ *  A manager slot bound to a client key this browser no longer holds (storage
+ *  cleared, another machine, another profile) can never be used from here
+ *  again: the slot secret is shown once at creation and redacted in every
+ *  listing thereafter. Left alone they accumulate, and once the table fills,
+ *  every persona action fails at the pairing step — including removing a
+ *  persona to make room, which is the one action that should still work. */
+async function createManagerSlot(client: string): Promise<{ secret: string; slot_index: number }> {
+  const masterSlot = device.selectedSlot
+  try {
+    return await serialCreateClient(MANAGER_SLOT_LABEL)
+  } catch (error) {
+    if (!(error instanceof SlotCreateError) || !error.full) throw error
+    // Confirm the table really is full before revoking anything: a bare NACK
+    // is ambiguous on older firmware, and a sweep is not the answer to some
+    // other refusal.
+    const slots = await serialFetchSlots(masterSlot)
+    if (slots.length < MAX_CONNECT_SLOTS) throw error
+    const stale = slots.filter(
+      (slot) => slot.label === MANAGER_SLOT_LABEL && slot.current_pubkey !== client,
+    )
+    if (stale.length === 0) {
+      throw new Error(
+        `This identity has no free connection slot (${MAX_CONNECT_SLOTS} of ${MAX_CONNECT_SLOTS} in use), and Sapwood needs one to manage personas. Revoke an app under Apps and try again.`,
+      )
+    }
+    for (const slot of stale) {
+      try { await serialRevokeClient(slot.slot_index) } catch { /* best effort */ }
+    }
+    return await serialCreateClient(MANAGER_SLOT_LABEL)
+  }
+}
+
 /** Ensure the Sapwood manager pairing exists for the selected master; returns
  *  the master's hex pubkey. One button press on the device the first time. */
 export async function ensureSapwoodPairing(): Promise<string> {
@@ -3120,14 +3197,33 @@ export async function ensureSapwoodPairing(): Promise<string> {
   // when the pairing itself already exists — without this, the first persona
   // action after reopening Sapwood (or rebooting the signer) is refused.
   await ensureBridgeAuth()
+  const client = nip46UsbClientPubkeyHex()
   const stored = localStorage.getItem(pairingKey(masterHex))
   if (stored) {
     try {
       const record = JSON.parse(stored) as { client?: string }
-      if (record.client === nip46UsbClientPubkeyHex()) return masterHex
-    } catch { /* fall through to a fresh pairing */ }
+      if (record.client === client) return masterHex
+    } catch { /* fall through to adoption, then a fresh pairing */ }
   }
-  const created = await serialCreateClient('Sapwood manager')
+  // A lost localStorage record does not un-pair the device: the signer still
+  // holds a slot bound to this browser's client key, and the binding is by
+  // pubkey, not by the (once-only) secret. Adopt it rather than minting a
+  // second slot — there are only 16 per identity, and a full table is exactly
+  // what turns "remove this persona" into a create failure.
+  const existing = (await serialFetchSlots(device.selectedSlot)).find(
+    (slot) => slot.current_pubkey === client,
+  )
+  if (existing) {
+    if (!MANAGER_METHODS.every((method) => existing.allowed_methods.includes(method))) {
+      await serialUpdateClient(existing.slot_index, managerClientPolicy())
+    }
+    localStorage.setItem(
+      pairingKey(masterHex),
+      JSON.stringify({ slotIndex: existing.slot_index, client }),
+    )
+    return masterHex
+  }
+  const created = await createManagerSlot(client)
   try {
     await serialUpdateClient(created.slot_index, managerClientPolicy())
     await nip46UsbConnect(masterHex, created.secret)
@@ -3139,17 +3235,45 @@ export async function ensureSapwoodPairing(): Promise<string> {
   }
   localStorage.setItem(
     pairingKey(masterHex),
-    JSON.stringify({ slotIndex: created.slot_index, client: nip46UsbClientPubkeyHex() }),
+    JSON.stringify({ slotIndex: created.slot_index, client }),
   )
   return masterHex
+}
+
+/** Run a persona-management call under the manager pairing, rebuilding the
+ *  pairing once if the signer no longer honours it.
+ *
+ *  The localStorage record is a cache of what the DEVICE holds, and the device
+ *  can drop its side without telling us: a revoked slot, a factory reset, a
+ *  restored backup, or another browser reclaiming the slot out of a full table.
+ *  All of those surface as one NACK, and without this the operator is stuck
+ *  with "Sapwood is not paired" and no way back short of clearing site data. */
+async function withSapwoodPairing<T>(run: (masterHex: string) => Promise<T>): Promise<T> {
+  const masterHex = await ensureSapwoodPairing()
+  try {
+    return await run(masterHex)
+  } catch (error) {
+    if (!isUnpairedError(error)) throw error
+    localStorage.removeItem(pairingKey(masterHex))
+    await ensureSapwoodPairing()
+    return run(masterHex)
+  }
+}
+
+/** Decode a persona npub to hex, rejecting anything that is not an npub. */
+function personaHex(personaNpub: string): string {
+  const decoded = nip19.decode(personaNpub)
+  if (decoded.type !== 'npub') throw new Error('Unexpected persona encoding')
+  return decoded.data
 }
 
 /** Create a registry persona on the signer (derive-by-name, reserved
  *  `nostr:persona:` namespace, C2). Refreshes the identity list so the new
  *  persona row appears with its own bunker addressability. */
 export async function serialDerivePersona(name: string, index = 0): Promise<DerivedPersona> {
-  const masterHex = await ensureSapwoodPairing()
-  const persona = await nip46UsbDerivePersona(masterHex, name, index)
+  const persona = await withSapwoodPairing((masterHex) =>
+    nip46UsbDerivePersona(masterHex, name, index),
+  )
   await refreshMasters()
   return persona
 }
@@ -3157,19 +3281,15 @@ export async function serialDerivePersona(name: string, index = 0): Promise<Deri
 /** Remove a registry persona. Registry-only: the derivation tree is
  *  untouched, so re-deriving the same name reproduces the identity. */
 export async function serialRemovePersona(personaNpub: string): Promise<void> {
-  const masterHex = await ensureSapwoodPairing()
-  const decoded = nip19.decode(personaNpub)
-  if (decoded.type !== 'npub') throw new Error('Unexpected persona encoding')
-  await nip46UsbRemovePersona(masterHex, decoded.data)
+  const hex = personaHex(personaNpub)
+  await withSapwoodPairing((masterHex) => nip46UsbRemovePersona(masterHex, hex))
   await refreshMasters()
 }
 
 /** Rename a registry persona's display label (empty clears it). */
 export async function serialRenamePersona(personaNpub: string, name: string): Promise<void> {
-  const masterHex = await ensureSapwoodPairing()
-  const decoded = nip19.decode(personaNpub)
-  if (decoded.type !== 'npub') throw new Error('Unexpected persona encoding')
-  await nip46UsbRenamePersona(masterHex, decoded.data, name)
+  const hex = personaHex(personaNpub)
+  await withSapwoodPairing((masterHex) => nip46UsbRenamePersona(masterHex, hex, name))
   await refreshMasters()
 }
 
@@ -3199,9 +3319,10 @@ export async function serialDeviceDecrypt(
   peerHex: string,
   ciphertext: string,
 ): Promise<string> {
-  const masterHex = await ensureSapwoodPairing()
-  await ensureManagerCeiling(masterHex)
-  return nip46UsbDecrypt(targetHex, peerHex, ciphertext)
+  return withSapwoodPairing(async (masterHex) => {
+    await ensureManagerCeiling(masterHex)
+    return nip46UsbDecrypt(targetHex, peerHex, ciphertext)
+  })
 }
 
 // --- Mode-dispatching client management (serial OR relay) ---

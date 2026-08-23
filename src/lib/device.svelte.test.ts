@@ -5,7 +5,15 @@ import { nip19 } from 'nostr-tools'
 // avatar/profile modules so no canvas or relay is needed. The serial mock
 // captures the listener device.svelte.ts registers at import, which is the
 // only way to feed frames into its (unexported) handleFrame.
-const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildMetaMock, relayRequestMock, relayRepublishRequestMock, relayInstances } = vi.hoisted(() => ({
+const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildMetaMock, relayRequestMock, relayRepublishRequestMock, relayInstances, nip46Mock } = vi.hoisted(() => ({
+  nip46Mock: {
+    clientPubkeyHex: vi.fn(() => 'c'.repeat(64)),
+    connectWithSecret: vi.fn(async () => {}),
+    derivePersona: vi.fn(),
+    removePersona: vi.fn(async () => {}),
+    renamePersona: vi.fn(),
+    decryptAsIdentity: vi.fn(),
+  },
   relayRequestMock: vi.fn(),
   relayRepublishRequestMock: vi.fn(),
   relayInstances: [] as Array<{ devicePub: string; relays: string[]; closed: boolean }>,
@@ -24,6 +32,18 @@ const { serialMock, httpOn, resolveMock, loadAvatarMock, placeholderMock, buildM
   buildMetaMock: vi.fn(),
 }))
 vi.mock('./serial.js', () => ({ transport: serialMock }))
+// Persona management rides NIP-46 over the cable; the pairing logic under test
+// only cares about the client key it presents and whether `connect` succeeded.
+vi.mock('./nip46-usb.js', () => ({
+  clientPubkeyHex: nip46Mock.clientPubkeyHex,
+  connectWithSecret: nip46Mock.connectWithSecret,
+  derivePersona: nip46Mock.derivePersona,
+  removePersona: nip46Mock.removePersona,
+  renamePersona: nip46Mock.renamePersona,
+  decryptAsIdentity: nip46Mock.decryptAsIdentity,
+  isUnpairedError: (error: unknown) =>
+    error instanceof Error && (error as { unpaired?: unknown }).unpaired === true,
+}))
 vi.mock('./http.js', () => ({
   httpTransport: { on: httpOn, connect: vi.fn(), disconnect: vi.fn() },
   HttpTransport: class {},
@@ -92,11 +112,12 @@ import {
   mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning,
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
+  ensureSapwoodPairing, serialRemovePersona,
 } from './device.svelte.js'
 import { FrameType } from './frame.js'
 import { generateOperatorMnemonic, getOrCreateOperator, pubHexFromSecret } from './op-mgmt.js'
 import type { MasterInfo } from './types.js'
-import { fullClientPolicy } from './client-policy.js'
+import { fullClientPolicy, MANAGER_METHODS } from './client-policy.js'
 import {
   listKnownDevices, pendingNetworkHandoff, rememberDevice, savePendingNetworkHandoff,
 } from './known-devices.js'
@@ -196,6 +217,12 @@ beforeEach(() => {
     return relayRequestMock.apply(this, args)
   })
   relayInstances.length = 0
+  nip46Mock.clientPubkeyHex.mockReset()
+  nip46Mock.clientPubkeyHex.mockReturnValue('c'.repeat(64))
+  nip46Mock.connectWithSecret.mockReset()
+  nip46Mock.connectWithSecret.mockResolvedValue(undefined)
+  nip46Mock.removePersona.mockReset()
+  nip46Mock.removePersona.mockResolvedValue(undefined)
 })
 
 describe('transport guards', () => {
@@ -2052,5 +2079,152 @@ describe('scanWifi', () => {
     device.mode = 'relay'
     expect(await scanWifi()).toBeNull()
     expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
+  })
+})
+
+describe('Sapwood manager pairing', () => {
+  const CLIENT = 'c'.repeat(64)
+  const OTHER_CLIENT = 'd'.repeat(64)
+  const MASTER_HEX = 'ab'.repeat(32)
+  const MANAGER_LABEL = 'Sapwood manager'
+  const enc = (text: string) => new TextEncoder().encode(text)
+
+  type FakeSlot = {
+    slot_index: number
+    label: string
+    secret: string
+    current_pubkey: string | null
+    allowed_methods: string[]
+    allowed_kinds: number[]
+    auto_approve: boolean
+    signing_approved: boolean
+  }
+
+  function fakeSlot(index: number, label: string, pubkey: string | null, methods = [...MANAGER_METHODS]): FakeSlot {
+    return {
+      slot_index: index,
+      label,
+      secret: '',
+      current_pubkey: pubkey,
+      allowed_methods: methods,
+      allowed_kinds: [],
+      auto_approve: true,
+      signing_approved: false,
+    }
+  }
+
+  /** A signer holding `slots` on the selected master, with a 16-slot table.
+   *  Returns the live slot list plus a log of the frame types it answered. */
+  function armSigner(slots: FakeSlot[]) {
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    device.selectedSlot = 3
+    device.masters = [{ slot: 3, label: 'me', mode: 0, npub: nip19.npubEncode(MASTER_HEX) }]
+    const sent: number[] = []
+    serialMock.sendAndReceive.mockImplementation(async (bytes: Uint8Array, expected: number[]) => {
+      sent.push(bytes[2]!)
+      if (expected.includes(FrameType.CONNSLOT_LIST_RESP)) {
+        return { type: FrameType.CONNSLOT_LIST_RESP, payload: enc(JSON.stringify(slots)) }
+      }
+      if (expected.includes(FrameType.CONNSLOT_CREATE_RESP)) {
+        if (slots.length >= 16) return { type: FrameType.NACK, payload: enc('slots full') }
+        const index = Array.from({ length: 16 }, (_, i) => i).find((i) => !slots.some((s) => s.slot_index === i))!
+        slots.push(fakeSlot(index, MANAGER_LABEL, null))
+        return {
+          type: FrameType.CONNSLOT_CREATE_RESP,
+          payload: enc(JSON.stringify({ slot_index: index, secret: 'e'.repeat(64) })),
+        }
+      }
+      if (expected.includes(FrameType.CONNSLOT_REVOKE_RESP)) {
+        // payload is [master_slot][slot_index], straight after the 5-byte header
+        const index = bytes[6]!
+        const at = slots.findIndex((s) => s.slot_index === index)
+        if (at >= 0) slots.splice(at, 1)
+        return { type: FrameType.CONNSLOT_REVOKE_RESP, payload: new Uint8Array() }
+      }
+      if (expected.includes(FrameType.CONNSLOT_UPDATE_RESP)) {
+        return { type: FrameType.CONNSLOT_UPDATE_RESP, payload: new Uint8Array() }
+      }
+      if (expected.includes(FrameType.CONNSLOT_URI_RESP)) {
+        return { type: FrameType.CONNSLOT_URI_RESP, payload: enc('bunker://x') }
+      }
+      return ACK
+    })
+    return { slots, sent }
+  }
+
+  it('adopts the pairing the signer already holds instead of minting a second slot', async () => {
+    // Cleared browser storage does not un-pair the device: the binding is by
+    // client pubkey, and the slot secret is unrecoverable, so a second slot
+    // would be pure waste out of a 16-slot table.
+    const signer = armSigner([fakeSlot(0, MANAGER_LABEL, CLIENT)])
+
+    expect(await ensureSapwoodPairing()).toBe(MASTER_HEX)
+
+    expect(signer.sent).not.toContain(FrameType.CONNSLOT_CREATE)
+    expect(signer.slots).toHaveLength(1)
+    expect(JSON.parse(localStorage.getItem(`heartwood_nip46_usb_pairing:${MASTER_HEX}`)!))
+      .toEqual({ slotIndex: 0, client: CLIENT })
+  })
+
+  it('widens an adopted slot that predates the current manager ceiling', async () => {
+    const signer = armSigner([fakeSlot(0, MANAGER_LABEL, CLIENT, ['get_public_key'])])
+
+    await ensureSapwoodPairing()
+
+    expect(signer.sent).toContain(FrameType.CONNSLOT_UPDATE)
+    expect(signer.sent).not.toContain(FrameType.CONNSLOT_CREATE)
+  })
+
+  it('reclaims an abandoned Sapwood manager slot when the table is full', async () => {
+    // 15 real apps plus a manager slot bound to a client key this browser no
+    // longer holds. Without the sweep, removing a persona to free space is
+    // itself blocked by the full table.
+    const apps = Array.from({ length: 15 }, (_, i) => fakeSlot(i, `App ${i}`, 'a'.repeat(64)))
+    const signer = armSigner([...apps, fakeSlot(15, MANAGER_LABEL, OTHER_CLIENT)])
+
+    expect(await ensureSapwoodPairing()).toBe(MASTER_HEX)
+
+    expect(signer.slots.filter((s) => s.label === MANAGER_LABEL)).toHaveLength(1)
+    expect(signer.slots.filter((s) => s.label !== MANAGER_LABEL)).toHaveLength(15)
+    expect(nip46Mock.connectWithSecret).toHaveBeenCalledWith(MASTER_HEX, 'e'.repeat(64))
+  })
+
+  it('explains a genuinely full table rather than reporting a create failure', async () => {
+    const signer = armSigner(Array.from({ length: 16 }, (_, i) => fakeSlot(i, `App ${i}`, 'a'.repeat(64))))
+
+    await expect(ensureSapwoodPairing()).rejects.toThrow(/no free connection slot/i)
+
+    expect(signer.sent).not.toContain(FrameType.CONNSLOT_REVOKE)
+    expect(signer.slots).toHaveLength(16)
+  })
+
+  it('rebuilds a pairing the signer has forgotten, then retries the call once', async () => {
+    // The stored record is only a cache of what the DEVICE holds. A revoked
+    // slot (or another browser reclaiming it out of a full table) leaves the
+    // record intact and every persona action refused, with no way back short
+    // of clearing site data.
+    const signer = armSigner([])
+    const key = `heartwood_nip46_usb_pairing:${MASTER_HEX}`
+    localStorage.setItem(key, JSON.stringify({ slotIndex: 9, client: CLIENT }))
+    const unpaired = Object.assign(new Error('refused'), { unpaired: true })
+    nip46Mock.removePersona.mockRejectedValueOnce(unpaired)
+
+    const persona = 'ba'.repeat(32)
+    await serialRemovePersona(nip19.npubEncode(persona))
+
+    expect(nip46Mock.removePersona).toHaveBeenCalledTimes(2)
+    expect(signer.sent).toContain(FrameType.CONNSLOT_CREATE)
+    expect(JSON.parse(localStorage.getItem(key)!).client).toBe(CLIENT)
+  })
+
+  it('lets a real signer error through instead of re-pairing on every failure', async () => {
+    armSigner([fakeSlot(0, MANAGER_LABEL, CLIENT)])
+    nip46Mock.removePersona.mockRejectedValue(new Error('unknown persona'))
+
+    await expect(serialRemovePersona(nip19.npubEncode('ba'.repeat(32))))
+      .rejects.toThrow('unknown persona')
+    expect(nip46Mock.removePersona).toHaveBeenCalledTimes(1)
   })
 })

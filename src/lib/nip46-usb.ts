@@ -115,6 +115,23 @@ export function parseEnvelopeResponse(
   return rpc.result
 }
 
+/** The signer refused an encrypted request outright. Either it has forgotten
+ *  the pairing (revoked slot, factory reset, restored backup) or the slot's
+ *  policy denies the method. Callers repair the pairing and retry once; the
+ *  `unpaired` flag is a plain property so the check survives module mocking. */
+export class Nip46UnpairedError extends Error {
+  readonly unpaired = true
+  constructor() {
+    super('The signer refused the request: Sapwood is not paired with this identity, or policy denies the method. Pair Sapwood from the Identity panel and try again.')
+    this.name = 'Nip46UnpairedError'
+  }
+}
+
+/** True when a failure means the pairing itself needs rebuilding. */
+export function isUnpairedError(error: unknown): boolean {
+  return error instanceof Error && (error as { unpaired?: unknown }).unpaired === true
+}
+
 /** One NIP-46 round trip over the cable. `targetPubkeyHex` is any identity
  *  the signer serves (a master or a registry persona). Interactive tiers can
  *  hold the reply for the on-device button, hence the generous timeout. */
@@ -138,9 +155,7 @@ export async function nip46UsbRequest(
     timeoutMs,
   )
   if (frame.type === FrameType.NACK) {
-    throw new Error(
-      'The signer refused the request: Sapwood is not paired with this identity, or policy denies the method. Pair Sapwood from the Identity panel and try again.',
-    )
+    throw new Nip46UnpairedError()
   }
   return parseEnvelopeResponse(frame.payload, sk, rpc.id)
 }
