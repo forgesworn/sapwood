@@ -1,22 +1,26 @@
 <script lang="ts">
   // The guided "give your signer its first identity" flow, shown on Home when a
   // device is connected over USB but has no identity yet. Two doors:
-  //   Create   — the DEVICE generates its own seed and shows the 12-word phrase
+  //   Create   — the DEVICE generates its own seed and shows typed recovery words
   //              on its OWN screen; the secret never appears in the browser.
-  //   Restore  — an existing key. Most private: type the 12 words on the device.
+  //   Restore  — an existing key. Most private: type the words on the device.
   //              Or paste a phrase / nsec / ncryptsec here; it is derived in the
   //              browser and sent straight to the device over USB (never stored,
   //              never networked), exactly as Advanced › Provision does.
   import { device, connectRelay, generateIdentity, restoreIdentity, provisionSecret, getFirmwareVersion } from '../lib/device.svelte.js'
   import { rememberDevice } from '../lib/known-devices.js'
+  import { compareVersions } from '../lib/version.js'
   import { navigate } from '../lib/route.svelte.js'
   import {
     type IdentityStep, nameOk, nameError, provisionLabel, friendlyLabel,
   } from '../lib/first-identity.js'
   import {
     resolveRestore, isValidNsec, isValidNcryptsec, isValidPhrase,
-    isKeyBackupCandidate, keyToWords, decryptNcryptsec,
+    isKeyBackupCandidate, decryptNcryptsec,
   } from '../lib/restore.js'
+  import {
+    createNsecRecoveryWords, inspectRecoveryWords,
+  } from '../lib/recovery-words.js'
   import { zeroize, decodeNsec, type ProvisionMode } from '../lib/provision.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import { nip19 } from 'nostr-tools'
@@ -94,13 +98,17 @@
   })
 
   const usesNsecKey = $derived(mode === 'restore-nsec' || mode === 'restore-ncryptsec')
+  const recoveryInfo = $derived(mode === 'restore-phrase' ? inspectRecoveryWords(phrase) : null)
+  const typedRecovery = $derived(recoveryInfo !== null)
   // The pasted phrase is being treated as a key backup, not a seed.
-  const wordsAreKey = $derived(mode === 'restore-phrase' && phraseKind === 'key' && isKeyBackupCandidate(phrase))
-  const keepsNpub = $derived((usesNsecKey || wordsAreKey) && !derive)
+  const wordsAreKey = $derived(mode === 'restore-phrase' && !typedRecovery && phraseKind === 'key' && isKeyBackupCandidate(phrase))
+  const keepsNpub = $derived(
+    recoveryInfo?.kind === 'raw-nsec-v1' || ((usesNsecKey || wordsAreKey) && !derive),
+  )
 
   // Whether the pasted material is well-formed enough to derive from.
   const pasteValid = $derived(
-    mode === 'restore-phrase' ? isValidPhrase(phrase)
+    mode === 'restore-phrase' ? (typedRecovery || isValidPhrase(phrase))
     : mode === 'restore-nsec' ? isValidNsec(nsecInput)
     : mode === 'restore-ncryptsec' ? (isValidNcryptsec(ncryptsecInput) && password.length > 0)
     : false,
@@ -138,12 +146,19 @@
 
   // Phrase length for on-device generation: 12 words (128-bit) or 24 (256-bit).
   let genWords = $state<12 | 24>(12)
+  const generatedRecoveryWords = $derived(genWords === 12 ? 19 : 31)
+  let restoreWords = $state<12 | 15 | 18 | 19 | 21 | 22 | 24 | 25 | 28 | 31>(19)
 
   async function generateOnDevice() {
     if (!nameOk(name)) return
     status = 'generating'
     error = ''
     try {
+      const firmware = await getFirmwareVersion()
+      const comparison = compareVersions(firmware?.version ?? '', '0.18.0-alpha.1')
+      if (comparison === null || comparison < 0) {
+        throw new Error('Typed recovery generation needs the untested Heartwood 0.18.0 alpha or newer. Use a test signer and update it first.')
+      }
       // The device makes the seed and shows the phrase on its screen; only the
       // public npub comes back.
       npub = await generateIdentity(provisionLabel(name), genWords)
@@ -162,12 +177,27 @@
     error = ''
     // Learn the board before the (blocking) restore so the on-device entry
     // instructions match its buttons.
-    try { deviceBoard = (await getFirmwareVersion())?.board ?? '' } catch { deviceBoard = '' }
+    let firmwareVersion = ''
+    try {
+      const firmware = await getFirmwareVersion()
+      deviceBoard = firmware?.board ?? ''
+      firmwareVersion = firmware?.version ?? ''
+    } catch {
+      deviceBoard = ''
+    }
+    if (restoreWords !== 12) {
+      const comparison = compareVersions(firmwareVersion, '0.18.0-alpha.1')
+      if (comparison === null || comparison < 0) {
+        status = 'error'
+        error = 'This word count needs the untested Heartwood 0.18.0 alpha or newer. Use a test signer and update it, choose the legacy 12-word path, or paste the words here instead.'
+        return
+      }
+    }
     step = 'restoring'
     try {
-      // The owner enters their 12 words on the device's screen; only the
+      // The owner enters the selected recovery sequence on the device's screen; only the
       // resulting public npub comes back over the cable.
-      npub = await restoreIdentity(provisionLabel(name))
+      npub = await restoreIdentity(provisionLabel(name), restoreWords)
       rememberProvisioned()
       status = 'idle'
       finish()
@@ -186,7 +216,9 @@
     try {
       const resolved = await resolveRestore(
         mode === 'restore-phrase'
-          ? (wordsAreKey ? { kind: 'key-words', phrase, derive } : { kind: 'phrase', phrase, passphrase })
+          ? (typedRecovery
+            ? { kind: 'recovery-words', words: phrase, passphrase: recoveryInfo?.passphraseRequired ? passphrase : '' }
+            : wordsAreKey ? { kind: 'key-words', phrase, derive } : { kind: 'phrase', phrase, passphrase })
         : mode === 'restore-nsec' ? { kind: 'nsec', nsec: nsecInput, derive }
         : { kind: 'ncryptsec', ncryptsec: ncryptsecInput, password, derive },
       )
@@ -238,16 +270,16 @@
     step = 'paste'
   }
 
-  /** Write the pasted key out as 24 words, computed only when asked for. The
-   *  words encode the nsec itself (before any derive choice), so they restore
-   *  it exactly; the derived tree comes back by making the same choice again. */
+  /** Write the pasted key as typed recovery words. The chosen exact/tree
+   *  interpretation is embedded, so restoration never asks the owner to
+   *  remember which address option they originally picked. */
   function toggleBackupWords() {
     if (!showBackup && !backupWords) {
       try {
         const bytes = mode === 'restore-ncryptsec'
           ? decryptNcryptsec(ncryptsecInput, password)
           : decodeNsec(nsecInput)
-        try { backupWords = keyToWords(bytes) } finally { zeroize(bytes) }
+        try { backupWords = createNsecRecoveryWords(bytes, derive) } finally { zeroize(bytes) }
       } catch { return }
     }
     showBackup = !showBackup
@@ -301,17 +333,17 @@
     <div class="source-list">
       <button class="source" onclick={pickWordsDevice}>
         <span class="source-body">
-          <span class="source-label">12 or 24 words, typed on the device</span>
-          <span class="source-desc">Most private. Enter your recovery phrase on the signer's own
-            screen with its button. Nothing is typed here.</span>
+          <span class="source-label">Recovery words, typed on the device</span>
+          <span class="source-desc">Most private. Enter typed ForgeSworn words or an explicit legacy phrase on the signer's own
+            screen with its button. Nothing is typed here. Passphrase-protected mnemonic backups must use the paste option.</span>
         </span>
         <span class="source-tag good">recommended</span>
       </button>
       <button class="source" onclick={pickWordsPaste}>
         <span class="source-body">
-          <span class="source-label">12 or 24 words, pasted here</span>
-          <span class="source-desc">Faster. Paste your recovery phrase into this browser; it goes to
-            the device over the cable and is never stored. Takes a 24-word key backup made here too.</span>
+          <span class="source-label">Recovery words, pasted here</span>
+          <span class="source-desc">Faster. Paste typed ForgeSworn words or an explicit legacy phrase into this browser; it goes to
+            the device over the cable and is never stored.</span>
         </span>
       </button>
       <button class="source" onclick={pickNsec}>
@@ -335,12 +367,12 @@
     <h2 class="fi-title">Name your signer</h2>
     <p class="fi-lede">
       {#if mode === 'restore-device'}
-        Give it a friendly name (optional), then we'll ask the device to take your recovery phrase.
-        You'll type your <strong>12 words on the device's screen</strong> using its button, never here.
+        Give it a friendly name (optional), then we'll ask the device to take your recovery words.
+        You'll type the complete recovery sequence on the device's screen, never here.
       {:else}
         Give it a friendly name (optional), then we'll ask the device to make its identity.
         The device first offers a <strong>quick button game</strong> — your timing adds extra
-        randomness to the key (tap to play, hold to skip). The recovery phrase then appears
+        randomness to the key (tap to play, hold to skip). Typed recovery words then appear
         <strong>on the device's screen</strong>, not here.
       {/if}
     </p>
@@ -352,16 +384,31 @@
     </label>
     {#if mode === 'create'}
       <fieldset class="word-count">
-        <legend class="field-label">Recovery phrase length</legend>
+        <legend class="field-label">Recovery strength</legend>
         <label class="word-opt" class:on={genWords === 12}>
           <input type="radio" name="gen-words" checked={genWords === 12} onchange={() => (genWords = 12)} disabled={status === 'generating'} />
-          <span>12 words — 128-bit, quicker to write down</span>
+          <span>19 typed words — 128-bit payload, quicker to write down</span>
         </label>
         <label class="word-opt" class:on={genWords === 24}>
           <input type="radio" name="gen-words" checked={genWords === 24} onchange={() => (genWords = 24)} disabled={status === 'generating'} />
-          <span>24 words — 256-bit, maximum strength</span>
+          <span>31 typed words — 256-bit payload, maximum strength</span>
         </label>
       </fieldset>
+    {:else if mode === 'restore-device'}
+      <label class="field">
+        <span class="field-label">Words you wrote down</span>
+        <select class="field-input" bind:value={restoreWords} disabled={status === 'restoring'}>
+          <optgroup label="Typed ForgeSworn recovery">
+            {#each [19, 22, 25, 28, 31] as count}<option value={count}>{count} words</option>{/each}
+          </optgroup>
+          <optgroup label="Legacy BIP-39">
+            {#each [12, 15, 18, 21, 24] as count}<option value={count}>{count} words</option>{/each}
+          </optgroup>
+        </select>
+      </label>
+      {#if restoreWords === 19 || restoreWords === 22 || restoreWords === 25 || restoreWords === 28 || restoreWords === 31}
+        <p class="hint-sm">If these words require a separate recovery passphrase, go back and choose the paste option instead; arbitrary passphrases cannot be entered with the signer's buttons.</p>
+      {/if}
     {/if}
     {#if nameError(name)}<p class="error-text">{nameError(name)}</p>{/if}
     {#if error}<p class="error-text">{error}</p>{/if}
@@ -375,7 +422,7 @@
             them. Your tap timing is mixed into the key's randomness. <strong>Hold</strong> to skip
             and use the chip's generator alone.</li>
           <li><strong>Working…</strong> — the key is created inside the signer.</li>
-          <li><strong>Write down the {genWords} words</strong>, one per screen — tap for the next,
+          <li><strong>Write down all {generatedRecoveryWords} words</strong>, one per screen — tap for the next,
             hold on the last screen to confirm. They only appear this once.</li>
         </ol>
       </div>
@@ -414,12 +461,17 @@
 
     {#if mode === 'restore-phrase'}
       <label class="field">
-        <span class="field-label">Recovery phrase (12 or 24 words)</span>
-        <textarea class="field-input" bind:value={phrase} rows="3" placeholder="12 or 24 words"
+        <span class="field-label">ForgeSworn recovery words, or a legacy 12/24-word phrase</span>
+        <textarea class="field-input" bind:value={phrase} rows="4" placeholder="Paste the complete recovery words"
           autocomplete="off" autocapitalize="off" spellcheck="false"
           data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></textarea>
       </label>
-      {#if isKeyBackupCandidate(phrase)}
+      {#if recoveryInfo}
+        <p class="hint-sm">
+          Typed recovery v{recoveryInfo.version}: {recoveryInfo.kind}. The derivation is embedded
+          and its fingerprint will be checked before the key is sent.
+        </p>
+      {:else if isKeyBackupCandidate(phrase)}
         <fieldset class="derive-choice">
           <legend class="field-label">Which kind of words are these?</legend>
           <label class="derive-opt" class:on={phraseKind === 'seed'}>
@@ -440,7 +492,8 @@
           </label>
         </fieldset>
       {/if}
-      {#if phraseKind === 'seed' || !isKeyBackupCandidate(phrase)}
+      {#if (recoveryInfo?.kind === 'nsec-tree-mnemonic-v1' && recoveryInfo.passphraseRequired)
+        || (!recoveryInfo && (phraseKind === 'seed' || !isKeyBackupCandidate(phrase)))}
         <label class="field">
           <span class="field-label">Passphrase (optional 25th word)</span>
           <div class="pw-wrap">
@@ -479,7 +532,7 @@
       </label>
     {/if}
 
-    {#if usesNsecKey || wordsAreKey}
+    {#if (usesNsecKey || wordsAreKey) && !typedRecovery}
       <fieldset class="derive-choice">
         <legend class="field-label">What should the signer's address be?</legend>
         <label class="derive-opt" class:on={!derive}>
@@ -526,18 +579,14 @@
     {#if usesNsecKey}
       <div class="backup">
         <button class="backup-toggle" onclick={toggleBackupWords}>
-          {showBackup ? 'Hide the backup words' : 'Back up this key as 24 words first'}
+          {showBackup ? 'Hide the backup words' : 'Back up this key as typed recovery words first'}
         </button>
         {#if showBackup}
           <p class="backup-note">
-            These 24 words are this key, written out in full and not protected by any password.
+            These words are this key, written out in full and not protected by any password.
             Anyone who has them controls the identity, so write them down and keep them offline.
-            {#if derive}
-              You chose to derive a fresh key: pick that same option when you restore these words,
-              and the same new address comes back.
-            {:else}
-              To restore, choose "12 or 24 words, pasted here" and mark them as a key backup.
-            {/if}
+            Their typed header records whether this is the exact key or a tree source, so Sapwood
+            restores the same address automatically.
           </p>
           <ol class="backup-words">
             {#each backupWords.split(' ') as word}
@@ -558,7 +607,7 @@
   {:else if step === 'writedown'}
     <h2 class="fi-title">Write down the words on your device</h2>
     <p class="fi-lede">
-      Your signer is showing its <strong>{genWords}-word recovery phrase, one big word at a time</strong>.
+      Your signer is showing its <strong>{generatedRecoveryWords} typed recovery words, one big word at a time</strong>.
       <strong>Tap the button on the signer to step through them</strong>, writing each one down in
       order. Keep them safe: they're the only way to recover this signer, and
       <strong>anyone who has them controls it</strong>. They appear only on the device, never here.
@@ -573,14 +622,14 @@
     {/if}
     <label class="confirm-save">
       <input type="checkbox" bind:checked={saved} />
-      <span>I've stepped through all {genWords} words, written them down, and held the button to save.</span>
+      <span>I've stepped through all {generatedRecoveryWords} words, written them down, and held the button to save.</span>
     </label>
     <div class="fi-actions">
       <button class="btn btn-primary" disabled={!saved} onclick={finish}>Continue</button>
     </div>
 
   {:else if step === 'restoring'}
-    <h2 class="fi-title">Enter your 12 words on the device</h2>
+    <h2 class="fi-title">Enter your {restoreWords} words on the device</h2>
     <p class="fi-lede">
       Your signer is now asking for your recovery phrase <strong>on its own screen</strong>. Enter each
       word there with the button. Nothing is typed on this computer.
@@ -592,7 +641,7 @@
         <li><strong>Hold A</strong> to delete the last letter, or step back a word</li>
       </ul>
       <p class="fi-lede">
-        After the 12th word, the device shows the account it worked out: check it's the right one,
+        After word {restoreWords}, the device shows the account it worked out: check it's the right one,
         then <strong>hold B to save</strong>. We'll confirm here when it's done.
       </p>
     {:else}
@@ -602,7 +651,7 @@
         <li><strong>Hold</strong> to delete the last letter or step back a word</li>
       </ul>
       <p class="fi-lede">
-        After the 12th word, the device shows the account it worked out: check it's the right one,
+        After word {restoreWords}, the device shows the account it worked out: check it's the right one,
         then <strong>hold the button to save</strong>. We'll confirm here when it's done.
       </p>
     {/if}

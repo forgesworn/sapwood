@@ -131,7 +131,7 @@ function questionHidden(query: string): Promise<string> {
   })
 }
 
-/** `key backup`: turn an nsec/ncryptsec into a 24-word key backup. Offline; the
+/** `key backup`: turn an nsec/ncryptsec into typed recovery words. Offline; the
  *  secret is read from stdin (piped) or a prompt, never from argv, so it does
  *  not land in shell history or `ps`. The device is never opened. */
 async function runKeyBackup(json: boolean): Promise<never> {

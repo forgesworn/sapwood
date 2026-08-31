@@ -2,6 +2,12 @@
 
 # Sapwood
 
+> **Untested alpha:** Recovery Words v1 and Heartwood `0.18.0-alpha.1` are
+> available for integration testing, but the complete write-down, wipe, and
+> hardware restore ceremony has not run. Use test keys only, keep an
+> independent backup, and do not rely on this flow for funds or an
+> irreplaceable identity.
+
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/TheCryptoDonkey?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/TheCryptoDonkey)
 
 **Shape your signer** -- browser-based local and remote management UI for the [Heartwood](https://github.com/forgesworn/heartwood-esp32) ESP32 signing device.
@@ -12,7 +18,7 @@ Bootstrap Heartwood over USB, then leave it online in WiFi-standalone mode and m
 
 - **Masters** -- view provisioned master slots, npubs, and derivation modes
 - **Named identities** -- type a name and the signer derives the identity from the master it already holds (nsec-tree child derivation, no secret in the browser); older firmware falls back to phrase/nsec entry. Connect apps to it via the identity picker
-- **Backup & restore** -- back up and recover every signer secret: the [identity key](docs/backup-and-restore.md) (12 words on the device, or a [24-word](docs/key-backup.md) backup of an imported nsec/ncryptsec), the operator key, re-derivable named identities, and your **app pairings** (connection slots + bridge secret) to an encrypted file (Argon2id + XChaCha20-Poly1305), button-confirmed on the device. Bearer notes are deliberately excluded (restoring them twice would double-spend). See the [backup and restore guide](docs/backup-and-restore.md)
+- **Backup & restore** -- back up and recover every signer secret: typed 19/31-word [identity recovery](docs/backup-and-restore.md) with an embedded derivation and fingerprint, the operator key, re-derivable named identities, and your **app pairings** (connection slots + bridge secret) to an encrypted file (Argon2id + XChaCha20-Poly1305), button-confirmed on the device. Historical bare BIP-39 and 24-word key backups remain explicit legacy imports. Bearer notes are deliberately excluded (restoring them twice would double-spend).
 - **Clients** -- remotely create, list, revoke, and update exact client policies
 - **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely; manage an ordered list of fallback WiFi networks (add, remove, reorder, promote) without ever resending a stored password
 - **Phone handoff** -- transfer the separate operator credential to a phone with a protected QR flow

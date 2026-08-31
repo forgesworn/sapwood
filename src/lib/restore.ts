@@ -25,6 +25,7 @@ import {
   deriveFromMnemonic, deriveFromNsec, useRawNsec, decodeNsec,
   type ProvisionMode, type ProvisionResult,
 } from './provision.js'
+import { resolveRecoveryWords } from './recovery-words.js'
 
 /** Whether the input is a valid bech32 nsec (checksum included). */
 export function isValidNsec(input: string): boolean {
@@ -95,6 +96,7 @@ export function decryptNcryptsec(ncryptsec: string, password: string): Uint8Arra
  *  keeping the key's own npub (bunker) and deriving a fresh tree root (tree-nsec);
  *  it is ignored for a phrase, which is always a tree. */
 export type RestoreSource =
+  | { kind: 'recovery-words'; words: string; passphrase: string }
   | { kind: 'phrase'; phrase: string; passphrase: string }
   | { kind: 'nsec'; nsec: string; derive: boolean }
   | { kind: 'ncryptsec'; ncryptsec: string; password: string; derive: boolean }
@@ -123,6 +125,8 @@ function fromNsecBytes(bytes: Uint8Array, derive: boolean): ResolvedRestore {
  *  phrase) so the UI can surface a specific message. */
 export async function resolveRestore(src: RestoreSource): Promise<ResolvedRestore> {
   switch (src.kind) {
+    case 'recovery-words':
+      return resolveRecoveryWords(src.words, src.passphrase)
     case 'phrase':
       return { result: await deriveFromMnemonic(normalisePhrase(src.phrase), src.passphrase), mode: 'tree-mnemonic' }
     case 'nsec': {

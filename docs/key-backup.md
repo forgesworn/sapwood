@@ -1,92 +1,90 @@
-# The 24-word key backup
+# Typed recovery words for an imported key
 
-When you add an existing key to a signer (an `nsec1...` or a password-encrypted
-`ncryptsec1...`), Sapwood offers to write it out as 24 words. Words are easier
-to copy onto paper without error than a bech32 string, and they restore the
-same identity, with the same npub, later -- in Sapwood or through the offline
-provision CLI.
+> **Untested alpha:** this format passes automated and cross-language tests,
+> but the complete paper backup and Heartwood hardware restore ceremony has not
+> run. Use a test key and keep an independent backup.
 
-## What the words are (and are not)
+When you add an existing `nsec1...` or password-encrypted `ncryptsec1...`,
+Sapwood can write it as **31 ForgeSworn recovery words**. The first seven words
+identify the format, version, and exact recovery meaning. The remaining 24
+words carry the key bytes using the BIP-39 English wordlist.
 
-The 24 words are the key itself: its 32 bytes encoded with the BIP-39 wordlist,
-the way a wallet encodes entropy. They are **not** a seed phrase. Nothing is
-derived from them; decoding gives back the byte-identical key, so the identical
-npub.
+The complete 31-word sequence is deliberately not valid BIP-39. That prevents
+a generic wallet from accepting it as a seed and silently deriving a different
+identity.
 
-This is also why the backup is always 24 words and never 12. A Nostr key is
-256 bits; a 12-word phrase carries only 128 bits, so it can never hold an
-existing key. Only a freshly *created* identity can start from 12 words,
-because there the words come first and the key is derived from them.
+## What is embedded
 
-One caveat follows from the encoding: a standard wallet or NIP-06 tool reading
-these 24 words would treat them as a seed phrase and derive a *different* key.
-Restore them in Sapwood or the provision CLI, which know the difference and
-ask.
+Typed recovery words carry:
+
+- whether the nsec restores the **exact identity** or is the source for the
+  frozen **nsec-tree v1** derivation;
+- a public-key fingerprint, checked before the recovered key is accepted;
+- a recovery checksum covering the type, flags, fingerprint, and secret
+  payload; and
+- the unencrypted 32-byte nsec payload.
+
+Anyone with the words controls the identity. The fingerprint and checksum are
+error detection, not encryption or authentication.
+
+For an `ncryptsec`, the words contain the decrypted key. They do not need its
+password later. If you selected **derive a fresh key**, that choice is embedded
+too: restoring the words applies the same derivation and returns the same new
+npub automatically.
 
 ## Making a backup
 
-1. Connect the signer over USB. On a signer with no identity yet, choose
-   **Restore a key I already have** on Home; on one that already has
-   identities, add one from **Identity** in the advanced console.
-2. Pick **An nsec** or **An encrypted key** and paste it. For an encrypted key,
-   enter its password.
-3. On the **Check the address** step, choose **Back up this key as 24 words
-   first**.
-4. Write the words down on paper, in order, and keep them offline. Then send
-   the key to the signer as normal.
+1. Start **Restore a key I already have** on Home, or add an identity from the
+   advanced **Identity** screen.
+2. Paste the `nsec` or `ncryptsec` and, for an encrypted key, enter its password.
+3. Choose whether this signer keeps the exact npub or derives an nsec-tree root.
+4. On **Check the address**, choose **Make typed recovery words first**.
+5. Write all 31 words down in order and keep them offline.
 
-Two things worth knowing:
+The offer appears only while the key is available for import. A key already on
+the signer cannot be read back out over any interface. If you skipped the
+backup, re-import it from the original source.
 
-- **Encrypted keys.** The words are the decrypted key. They are not protected
-  by the password, which also means they outlive a forgotten one: the words
-  alone bring the identity back.
-- **If you chose "Derive a fresh key".** The words back up the key you pasted,
-  not the derived one. Pick the same option again when restoring and the same
-  new address comes back.
-
-The offer appears only while you are importing a key. Once a key is on the
-signer it can never be read back out, over any interface. That is the security
-model, not a missing feature: if you skipped the backup, the only way to make
-one is to re-import the key from wherever it came from.
-
-At the command line, the same conversion is available offline for a key you
-already hold: `... | sapwood key backup` reads an `nsec` (or an `ncryptsec` and
-its password) on stdin and prints the 24 words. It never touches a device.
+The offline CLI performs the same exact-key conversion without opening a
+device. Pipe or paste the secret through stdin; do not put an nsec directly on
+the command line because argv and shell history can persist it. For
+`ncryptsec`, the CLI accepts the password as the second stdin line or prompts
+for it privately.
 
 ## Restoring
 
-Three interchangeable ways, all producing the same npub:
+Paste the **complete sequence** anywhere Sapwood asks for recovery words. Its
+embedded type selects exact-key, nsec-tree-nsec, or mnemonic-tree handling; the
+address confirmation remains the final human check.
 
-- **Guided flow.** Choose **Restore a key I already have**, then **12 or 24
-  words, pasted here**. Paste the words; Sapwood asks **which kind of words
-  these are** -- pick **A key backup made here**. Check the address matches,
-  then send.
-- **Advanced console.** In **Identity**, pick either existing-nsec mode and
-  paste the 24 words where the nsec goes.
-- **Offline CLI.** In [heartwood-esp32](https://github.com/forgesworn/heartwood-esp32),
-  run `heartwood-provision --port <port> provision --mode bunker` and paste the
-  words at the key prompt. Use `--mode tree-nsec` if the key was imported with
-  "Derive a fresh key".
+With current Heartwood firmware you can instead choose **Type the words on the
+device** and select **31 words — typed ForgeSworn recovery**. This keeps the
+secret off the browser and cable. The offline `heartwood-provision` CLI also
+recognises the typed sequence and ignores a conflicting legacy `--mode`
+selection.
 
-Key backups are pasted, not typed on the device: the signer's on-screen word
-entry is for 12-word recovery phrases only.
+## Historical 24-word backups
 
-If you paste the words and leave them marked as a seed phrase, Sapwood will
-derive a different, unfamiliar npub -- the address confirmation step is there
-to catch exactly that. Go back and mark them as a key backup.
+Sapwood versions before ForgeSworn Recovery Words v1 emitted only the 24-word
+BIP-39 payload. Those words remain recoverable, but they carry no type,
+derivation version, or fingerprint. Restore them through the UI's explicit
+**legacy 24-word** path and state whether they were an exact key or an
+nsec-tree source.
 
-## Keeping the words safe
+Never guess from word count or validity: a historical 24-word key backup is
+also a valid BIP-39 mnemonic and produces a different key if treated as a seed.
+The legacy distinction must come from the record made with the old backup.
 
-The words are the unencrypted key. Anyone who has them controls the identity,
-permanently. Write them on paper or metal, keep them offline, and treat them
-with the same care as the nsec they encode.
+## Technical format
 
-## Technical note
+The canonical specification and frozen vectors live in
+[`nsec-tree/RECOVERY.md`](https://github.com/forgesworn/nsec-tree/blob/main/RECOVERY.md).
+Sapwood, nsec-tree, and Heartwood pin the same mnemonic, raw scalar-one, and
+tree scalar-one vectors in TypeScript and Rust tests.
 
-Encoding: `mnemonic = entropyToMnemonic(secret_32_bytes)` per BIP-39, English
-wordlist; decoding reverses it and rejects anything other than 24 valid words.
-Implementations: `keyToWords`/`wordsToKey` in [`src/lib/restore.ts`](../src/lib/restore.ts)
-and `decode_key_input` in heartwood-esp32's `provision/src/main.rs`. A frozen
-cross-implementation vector (the scalar-1 key encodes as 23 `abandon`s and
-`diesel`) is pinned by tests in both repos, so the two sides cannot drift
-apart silently.
+For Shamir splitting, compact the complete typed sequence with nsec-tree's
+`recoveryWordsToBytes()` and use `@forgesworn/shamir-words`
+`splitSecretToWordsV3()` / `reconstructWordsV3()` with `payloadKind:
+'forgesworn-recovery-words-v1'`. Its original-secret fingerprint rejects shares
+mixed across separate split operations. Historical Shamir v2 shares are still
+decoded explicitly as opaque; their meaning is never inferred.

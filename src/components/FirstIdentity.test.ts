@@ -5,8 +5,9 @@ import { encrypt as nip49Encrypt } from 'nostr-tools/nip49'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import FirstIdentity from './FirstIdentity.svelte'
-import { generateIdentity, restoreIdentity, provisionSecret, refreshMasters } from '../lib/device.svelte.js'
+import { generateIdentity, restoreIdentity, provisionSecret, refreshMasters, getFirmwareVersion } from '../lib/device.svelte.js'
 import { keyToWords } from '../lib/restore.js'
+import { createNsecRecoveryWords } from '../lib/recovery-words.js'
 
 // Transport is mocked (no hardware). The DEVICE generates (or takes) the seed +
 // shows the phrase on its own screen for the on-device paths; the paste paths
@@ -18,7 +19,7 @@ vi.mock('../lib/device.svelte.js', () => ({
   generateIdentity: vi.fn(),
   restoreIdentity: vi.fn(),
   provisionSecret: vi.fn().mockResolvedValue(undefined),
-  getFirmwareVersion: vi.fn().mockResolvedValue({ version: '0.9.12', board: 'lilygo' }),
+  getFirmwareVersion: vi.fn().mockResolvedValue({ version: '0.18.0', board: 'lilygo' }),
 }))
 
 // A real, decodable npub so rememberProvisioned() can derive its hex.
@@ -32,12 +33,14 @@ const OWN_NPUB = nip19.npubEncode(bytesToHex(schnorr.getPublicKey(SK)))
 const gen = vi.mocked(generateIdentity)
 const restore = vi.mocked(restoreIdentity)
 const provision = vi.mocked(provisionSecret)
+const firmwareInfo = vi.mocked(getFirmwareVersion)
 
 beforeEach(() => {
   localStorage.clear()
   gen.mockReset().mockResolvedValue(NPUB)
   restore.mockReset().mockResolvedValue(NPUB)
   provision.mockReset().mockResolvedValue(undefined)
+  firmwareInfo.mockReset().mockResolvedValue({ version: '0.18.0', board: 'lilygo' })
   vi.mocked(refreshMasters).mockClear()
 })
 
@@ -107,12 +110,13 @@ describe('FirstIdentity — restore on the device', () => {
     await fireEvent.click(screen.getByText(/typed on the device/))
     await fireEvent.click(screen.getByText(/Restore on my device/))
 
-    expect(await screen.findByText(/Enter your 12 words on the device/)).toBeTruthy()
+    expect(await screen.findByText(/Enter your 19 words on the device/)).toBeTruthy()
     expect(screen.getByText(/Double-tap/)).toBeTruthy()
 
     resolveRestore(NPUB)
     expect(await screen.findByText('Your signer has an identity')).toBeTruthy()
     expect(restore).toHaveBeenCalledTimes(1)
+    expect(restore).toHaveBeenCalledWith('default', 19)
   })
 
   it('surfaces a restore failure and returns to naming', async () => {
@@ -124,6 +128,17 @@ describe('FirstIdentity — restore on the device', () => {
 
     expect(await screen.findByText(/did not check out/)).toBeTruthy()
     expect(screen.queryByText('Your signer has an identity')).toBeNull()
+  })
+
+  it('does not send a typed word count to firmware that only supports legacy 12-word restore', async () => {
+    firmwareInfo.mockResolvedValue({ version: '0.17.0', board: 'lilygo' })
+    render(FirstIdentity)
+    await fireEvent.click(screen.getByText(/Restore a key I already have/))
+    await fireEvent.click(screen.getByText(/typed on the device/))
+    await fireEvent.click(screen.getByText(/Restore on my device/))
+
+    expect(await screen.findByText(/Heartwood 0\.18\.0 alpha or newer/)).toBeTruthy()
+    expect(restore).not.toHaveBeenCalled()
   })
 })
 
@@ -173,7 +188,7 @@ describe('FirstIdentity — restore from a pasted nsec', () => {
     expect(provision.mock.calls[0][2]).toBe('tree-nsec')
   })
 
-  it('offers a 24-word backup of the pasted key on the confirm step', async () => {
+  it('offers a typed backup of the pasted key on the confirm step', async () => {
     render(FirstIdentity)
     await fireEvent.click(screen.getByText(/Restore a key I already have/))
     await fireEvent.click(screen.getByText(/An nsec/))
@@ -183,9 +198,9 @@ describe('FirstIdentity — restore from a pasted nsec', () => {
 
     // The words appear only when asked for, and spell out this exact key.
     expect(screen.queryByRole('listitem')).toBeNull()
-    await fireEvent.click(screen.getByText(/Back up this key as 24 words/))
+    await fireEvent.click(screen.getByText(/Back up this key as typed recovery words/))
     const words = screen.getAllByRole('listitem').map((li) => li.textContent)
-    expect(words).toEqual(keyToWords(SK).split(' '))
+    expect(words).toEqual(createNsecRecoveryWords(SK, false).split(' '))
     expect(screen.getByText(/Anyone who has them controls the identity/)).toBeTruthy()
   })
 
@@ -206,9 +221,9 @@ describe('FirstIdentity — restore from a pasted nsec', () => {
     expect(screen.getByText(OWN_NPUB)).toBeTruthy()
 
     // The backup is the key itself, out from under the password.
-    await fireEvent.click(screen.getByText(/Back up this key as 24 words/))
+    await fireEvent.click(screen.getByText(/Back up this key as typed recovery words/))
     const words = screen.getAllByRole('listitem').map((li) => li.textContent)
-    expect(words).toEqual(keyToWords(SK).split(' '))
+    expect(words).toEqual(createNsecRecoveryWords(SK, false).split(' '))
   })
 })
 
@@ -218,8 +233,8 @@ describe('FirstIdentity — restore from a 24-word key backup', () => {
   async function pasteWords(words: string) {
     render(FirstIdentity)
     await fireEvent.click(screen.getByText(/Restore a key I already have/))
-    await fireEvent.click(screen.getByText(/12 or 24 words, pasted here/))
-    await fireEvent.input(screen.getByPlaceholderText('12 or 24 words'), { target: { value: words } })
+    await fireEvent.click(screen.getByText(/Recovery words, pasted here/))
+    await fireEvent.input(screen.getByPlaceholderText('Paste the complete recovery words'), { target: { value: words } })
   }
 
   it('marked as a key backup, it restores the exact key and its npub', async () => {
@@ -255,5 +270,20 @@ describe('FirstIdentity — restore from a 24-word key backup', () => {
     const TWELVE = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
     await pasteWords(TWELVE)
     expect(screen.queryByText(/Which kind of words are these/)).toBeNull()
+  })
+
+  it('typed key words restore the embedded exact-key meaning without a choice', async () => {
+    await pasteWords(createNsecRecoveryWords(SK, false))
+    expect(screen.queryByText(/Which kind of words are these/)).toBeNull()
+    expect(screen.queryByText(/What should the signer's address be/)).toBeNull()
+    expect(screen.getByText(/Typed recovery v1: raw-nsec-v1/)).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    expect(await screen.findByText('Check the address')).toBeTruthy()
+    expect(screen.getByText(OWN_NPUB)).toBeTruthy()
+    expect(screen.getByText('Same npub')).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: /Send to my signer/ }))
+    expect(provision.mock.calls[0][2]).toBe('bunker')
   })
 })

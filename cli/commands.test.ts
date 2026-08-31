@@ -375,18 +375,19 @@ describe('parseSignature', () => {
 })
 
 describe('cmdKeyBackup', () => {
-  // The scalar-1 key is the frozen cross-implementation vector: it encodes as
-  // 23 'abandon' and 'diesel' (see docs/key-backup.md).
+  // The scalar-1 key is the frozen ForgeSworn Recovery Words vector shared
+  // with nsec-tree. Seven typed words precede the 24-word BIP-39 payload.
   const scalarOne = new Uint8Array(32)
   scalarOne[31] = 1
   const nsec = nip19.nsecEncode(scalarOne)
 
-  it('turns an nsec into a 24-word key backup', () => {
+  it('turns an nsec into typed recovery words', () => {
     const r = cmdKeyBackup(nsec)
     const words = (r.data as { words: string[] }).words
-    expect(words).toHaveLength(24)
-    expect(words.slice(0, 23).every((w) => w === 'abandon')).toBe(true)
-    expect(words[23]).toBe('diesel')
+    expect(words).toHaveLength(31)
+    expect(words.slice(0, 7)).toEqual(['edge', 'obtain', 'lizard', 'frost', 'kitten', 'own', 'grit'])
+    expect(words.slice(7, 30).every((w) => w === 'abandon')).toBe(true)
+    expect(words[30]).toBe('diesel')
   })
 
   it('prints the safety note and the guide link', () => {
@@ -398,7 +399,7 @@ describe('cmdKeyBackup', () => {
   it('decrypts an ncryptsec with its password to the same words', () => {
     const ncryptsec = nip49Encrypt(scalarOne, 'correct horse')
     const r = cmdKeyBackup(ncryptsec, 'correct horse')
-    expect((r.data as { words: string[] }).words[23]).toBe('diesel')
+    expect((r.data as { words: string[] }).words[30]).toBe('diesel')
   })
 
   it('demands a password for an encrypted key', () => {
@@ -415,9 +416,14 @@ describe('cmdKeyBackup', () => {
     expect(() => cmdKeyBackup('   ')).toThrow(/No key/)
   })
 
-  it('tells the owner a 24-word backup is already a backup', () => {
+  it('tells the owner typed recovery words are already a backup', () => {
     const words = (cmdKeyBackup(nsec).data as { words: string[] }).words.join(' ')
-    expect(() => cmdKeyBackup(words)).toThrow(/already a 24-word key backup/)
+    expect(() => cmdKeyBackup(words)).toThrow(/already ForgeSworn recovery words/)
+  })
+
+  it('recognises an old 24-word key backup as legacy rather than re-encoding it', () => {
+    const words = [...Array(23).fill('abandon'), 'diesel'].join(' ')
+    expect(() => cmdKeyBackup(words)).toThrow(/legacy 24-word key backup/)
   })
 
   it('tells the owner a recovery phrase is already a backup', () => {

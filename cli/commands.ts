@@ -22,10 +22,10 @@ import {
   isValidNcryptsec,
   isValidPhrase,
   isKeyBackupCandidate,
-  keyToWords,
   decryptNcryptsec,
 } from '../src/lib/restore.js'
 import { decodeNsec, zeroize } from '../src/lib/provision.js'
+import { createNsecRecoveryWords, isRecoveryWords } from '../src/lib/recovery-words.js'
 import {
   generateOperatorMnemonic,
   isValidOperatorMnemonic,
@@ -389,7 +389,7 @@ export async function cmdIdentitiesRemove(
   }
 }
 
-/** Format a 24-word key backup: numbered words, then the same safety and
+/** Format typed recovery words: numbered words, then the same safety and
  *  restore guidance the web import flow gives. Pure; no device involved. */
 function keyBackupResult(words: string): CommandResult {
   const list = words.split(' ')
@@ -397,20 +397,24 @@ function keyBackupResult(words: string): CommandResult {
   return {
     data: { words: list },
     lines: [
-      '24-word key backup. Write these down in order and keep them offline:',
+      'ALPHA: ForgeSworn recovery words v1 has not completed hardware restore testing.',
+      'Use a test key, keep an independent backup, and do not rely on this for funds.',
+      '',
+      'Write these words down in order and keep them offline:',
       '',
       ...numbered,
       '',
-      'These words are the key itself, unencrypted: anyone who has them controls the identity.',
-      'To restore, paste them into Sapwood (Restore a key I already have, marked as a key',
-      'backup) or into heartwood-provision.',
+      'These words contain the key itself, unencrypted, plus its recovery type and a public',
+      'fingerprint. Anyone who has them controls the identity.',
+      'To restore, paste the complete words into Sapwood or heartwood-provision. The embedded',
+      'type restores the same npub automatically.',
       `Guide: ${BACKUP_GUIDE_URL}`,
     ],
   }
 }
 
 /**
- * Make a 24-word BIP-39 key backup of a key you already hold: an `nsec1…`, or a
+ * Make ForgeSworn Recovery Words v1 for a key you already hold: an `nsec1…`, or a
  * password-encrypted `ncryptsec1…`. Offline and device-free, the same maths the
  * web import screen runs — the words are the key's own bytes, so decoding them
  * later restores the identical npub. A key already on a signer can never be read
@@ -424,7 +428,7 @@ export function cmdKeyBackup(secretInput: string, password?: string): CommandRes
   if (isValidNsec(secret)) {
     const bytes = decodeNsec(secret)
     try {
-      return keyBackupResult(keyToWords(bytes))
+      return keyBackupResult(createNsecRecoveryWords(bytes, false))
     } finally {
       zeroize(bytes)
     }
@@ -440,15 +444,18 @@ export function cmdKeyBackup(secretInput: string, password?: string): CommandRes
       throw new CommandError('That password did not unlock the encrypted key. Check it and try again.')
     }
     try {
-      return keyBackupResult(keyToWords(bytes))
+      return keyBackupResult(createNsecRecoveryWords(bytes, false))
     } finally {
       zeroize(bytes)
     }
   }
   // Words the owner already holds are already a backup; say so rather than
   // re-encoding or, worse, deriving a different key from them.
+  if (isRecoveryWords(secret)) {
+    throw new CommandError('Those are already ForgeSworn recovery words: keep the complete sequence as is.')
+  }
   if (isKeyBackupCandidate(secret)) {
-    throw new CommandError('That is already a 24-word key backup: it is the key itself, so keep it as is.')
+    throw new CommandError('That is already a legacy 24-word key backup: it is the key itself, so keep it as is.')
   }
   if (isValidPhrase(secret)) {
     throw new CommandError('That is a recovery phrase, which is already your backup: keep the words safe. This command backs up an nsec or ncryptsec.')

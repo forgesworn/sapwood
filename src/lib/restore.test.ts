@@ -7,6 +7,7 @@ import {
   isValidNsec, isValidNcryptsec, isValidPhrase, normalisePhrase,
   decryptNcryptsec, resolveRestore, isKeyBackupCandidate, keyToWords, wordsToKey,
 } from './restore.js'
+import { createMnemonicRecoveryWords, createNsecRecoveryWords } from './recovery-words.js'
 
 // A fixed, valid secp256k1 scalar (= 1) so npub assertions are reproducible.
 const SK = new Uint8Array(32)
@@ -43,6 +44,26 @@ describe('input validation', () => {
 })
 
 describe('resolveRestore', () => {
+  it('typed recovery words choose and verify their own derivation', async () => {
+    const mnemonicWords = await createMnemonicRecoveryWords(PHRASE, '')
+    const mnemonic = await resolveRestore({ kind: 'recovery-words', words: mnemonicWords, passphrase: '' })
+    expect(mnemonic.mode).toBe('tree-mnemonic')
+    mnemonic.result.secret.fill(0)
+
+    const exact = await resolveRestore({
+      kind: 'recovery-words', words: createNsecRecoveryWords(SK, false), passphrase: '',
+    })
+    expect(exact.mode).toBe('bunker')
+    expect(exact.result.npub).toBe(OWN_NPUB)
+    exact.result.secret.fill(0)
+
+    const tree = await resolveRestore({
+      kind: 'recovery-words', words: createNsecRecoveryWords(SK, true), passphrase: '',
+    })
+    expect(tree.mode).toBe('tree-nsec')
+    tree.result.secret.fill(0)
+  })
+
   it('nsec sign-as-is keeps the key\'s own npub (bunker mode)', async () => {
     const { result, mode } = await resolveRestore({ kind: 'nsec', nsec: NSEC, derive: false })
     expect(mode).toBe('bunker')

@@ -46,6 +46,9 @@ export interface MasterInfo {
   label: string
   /** Absent on persona entries — they have no wire mode of their own. */
   mode?: number
+  /** 0 for a raw identity, 1 for the frozen nsec-tree derivation. Absent on
+   * older firmware and persona rows. */
+  derivation_version?: number
   npub: string
   /** True for a derived persona entry; `slot` is then the OWNING master's slot,
    *  so persona rows must not be offered where a distinct slot is required. */

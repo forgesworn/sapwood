@@ -2333,18 +2333,22 @@ export async function removeIdentity(slot: number): Promise<void> {
 
 /**
  * Ask a USB-connected device to RESTORE an existing identity: the owner re-keys
- * their 12-word phrase on the device's own screen via the button, the device
- * validates the BIP-39 checksum and stores it. The phrase is entered on the
+ * their typed recovery words (or explicitly selected legacy BIP-39 words) on
+ * the device's own screen, the device validates the type, checksum, and public
+ * fingerprint, then stores it. The words are entered on the
  * device and never travels over the cable — we only learn the resulting npub
  * (from the ACK). The timeout is deliberately long: a careful one-button entry
- * of twelve words can take several minutes, and the device never times out.
+ * of a long sequence can take several minutes, and the device never times out.
  */
-export async function restoreIdentity(label = 'default'): Promise<string> {
+export async function restoreIdentity(
+  label = 'default',
+  words: 12 | 15 | 18 | 19 | 21 | 22 | 24 | 25 | 28 | 31 = 19,
+): Promise<string> {
   if (device.mode !== 'serial') throw new Error('Restoring an identity needs a USB connection')
   const resp = await serialTransport.sendAndReceive(
-    buildRestoreIdentity(label),
+    buildRestoreIdentity(label, words),
     [FrameType.ACK, FrameType.NACK],
-    900_000, // up to 15 min — the owner is hand-entering 12 words on the device
+    1_800_000, // up to 30 min — the owner may be hand-entering 31 words
   )
   if (resp.type !== FrameType.ACK) {
     throw new Error('Restore was cancelled on the device, or the phrase did not check out. You can try again.')

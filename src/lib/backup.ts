@@ -31,6 +31,8 @@ export interface BackupMaster {
   slot: number
   label: string
   mode: number
+  /** Absent in historical backup files; new firmware exports 0 (raw) or 1. */
+  derivation_version?: number
   /** Hex x-only public key (64 chars); how a master is matched on restore. */
   pubkey: string
   connection_slots: ConnectSlot[]

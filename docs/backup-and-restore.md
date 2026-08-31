@@ -1,9 +1,13 @@
 # Backup and restore
 
+> **Untested alpha:** the typed Recovery Words v1 paths on this page pass the
+> automated suites but have not completed the physical Heartwood write-down,
+> wipe, and restore matrix. Use test keys only and retain an independent backup.
+
 A Heartwood signer keeps its secrets on the device, where no interface can read
 them back out. That is the security model, not a gap. It also means backups have
 to be made at the right moment, and there is more than one thing worth backing
-up. This page is the map. The 24-word key backup has its [own page](key-backup.md)
+up. This page is the map. Typed recovery words have their [own page](key-backup.md)
 for the detail.
 
 There are up to **three** separate secrets in play, each backed up and restored a
@@ -11,8 +15,8 @@ different way:
 
 | Secret | What it is | Back it up by | Restore it by | Without it |
 |--------|-----------|---------------|---------------|------------|
-| **Identity key** (created on the device) | the 12-word phrase the device shows when you create an identity | writing down the 12 words shown on the device's own screen | typing the 12 words back on the device, or pasting them in the guided restore | that identity, and its npub, cannot be recreated |
-| **Identity key** (imported) | a 24-word [key backup](key-backup.md) of an `nsec`/`ncryptsec` you brought in | choosing **Back up this key as 24 words** while importing | pasting the 24 words (marked as a key backup), or the original `nsec`/`ncryptsec` | if you skipped it, re-import the key from wherever it came from |
+| **Identity key** (created on the device) | 19 or 31 typed words shown when you create an identity | writing down the complete sequence shown on the device | typing 19/31 words back on the device, or pasting them in the guided restore | that identity, and its npub, cannot be recreated |
+| **Identity key** (imported) | 31 typed [recovery words](key-backup.md) for an `nsec`/`ncryptsec` you brought in | choosing **Make typed recovery words first** while importing | pasting or typing the complete words; their embedded type restores the same derivation | if you skipped it, re-import the key from wherever it came from |
 | **Operator key** | this browser's authority to manage the signer over WiFi | writing down its 12-word recovery phrase (Home nudge, or Identity › Operator key) | pasting the phrase into Identity › Operator key › **Restore key** | you cannot manage the signer remotely until you rotate the operator over USB |
 
 Two more things round it out, covered below: **derived (named) identities**, which
@@ -28,23 +32,24 @@ key came from.
 ### Created on the device
 
 When you choose **Create a fresh identity**, the device generates its own seed and
-shows a **12-word recovery phrase on its own screen**. The phrase never appears in
-the browser. Write those 12 words down, in order, and keep them offline. They are
+shows **19 typed words** for a 128-bit payload, or **31 typed words** for a
+256-bit payload, on its own screen. The words never appear in the browser.
+Write the complete sequence down in order and keep it offline. They are
 the only backup of that identity.
 
 To restore: connect over USB, choose **Restore a key I already have**, then
-**Type the words on the device**, and re-enter the 12 words on the device itself
-(most private, the words never touch the browser). You can also paste them in the
-guided flow, left marked as a recovery phrase.
+**Type the words on the device**, choose 19 or 31 typed words, and enter them on
+the device itself (most private, the words never touch the browser). You can
+also paste them; their derivation is selected automatically. A typed mnemonic
+backup that requires a separate BIP-39 passphrase must use the paste or offline
+CLI path, because the signer buttons cannot enter an arbitrary passphrase.
 
 ### Imported into the device
 
 When you bring in an existing key (an `nsec1…`, or a password-encrypted
-`ncryptsec1…`), Sapwood offers to write it out as **24 words** that restore the
-identical npub. This is the one to reach for when the key started life somewhere
-else. It has a dedicated page: **[The 24-word key backup](key-backup.md)** covers
-what the words are, how they differ from a seed phrase, and all three ways to
-restore them.
+`ncryptsec1…`), Sapwood offers to write it out as **31 typed words** that embed
+whether the exact npub or an nsec-tree-derived identity must return. It has a
+dedicated page: **[Typed recovery words for an imported key](key-backup.md)**.
 
 The offer only appears while you are importing. Once a key is on the signer it can
 never be read back out, so if you skip the backup the only way to make one later is
@@ -137,8 +142,8 @@ At the command line: `sapwood backup export` writes the encrypted file, and
 
 | You want to… | Go to |
 |--------------|-------|
-| See the 12 words for a **created** identity | the device's own screen, at creation |
-| Make a **24-word backup** of a key you are importing | the "Check the address" step, while importing |
+| See the 19/31 typed words for a **created** identity | the device's own screen, at creation |
+| Make typed words for a key you are importing | the "Check the address" step, while importing |
 | See or copy the **operator** recovery phrase | Home backup card, or Identity › Operator key › Reveal |
 | Back up **connected apps** | Device › Backup and restore › Export a backup |
 | **Restore an identity** | Home › Restore a key I already have |

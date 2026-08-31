@@ -65,7 +65,7 @@ COMMANDS
   apps revoke <slot>          Revoke a connected app's slot
   logs                        Stream the device log (Ctrl-C to stop)
   firmware update <file.bin>  Update firmware over USB (button approval)
-  key backup                  Make a 24-word backup of an nsec/ncryptsec (offline)
+  key backup                  Make typed recovery words for an nsec/ncryptsec (offline)
   operator new                Mint an operator (management) key: phrase, pubkey, secret
   operator restore            Recover the operator key from a phrase (offline)
   backup export               Save the signer's app pairings to an encrypted file
