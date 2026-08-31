@@ -20,6 +20,11 @@
     type ProvisionMode,
   } from '../lib/provision.js'
   import { buildSetBridgeSecret, FrameType } from '../lib/frame.js'
+  import {
+    createMnemonicRecoveryWords,
+    inspectRecoveryWords,
+    resolveRecoveryWords,
+  } from '../lib/recovery-words.js'
   import { transport as serialTransport } from '../lib/serial.js'
   import { generateBridgeSecret, bridgeArtifacts, type BridgeArtifacts } from '../lib/bridge-setup.js'
   import { copyText } from '../lib/clipboard.js'
@@ -82,15 +87,19 @@
   // --- Provision (offline, in-browser) -----------------------------------
   let source = $state<'create' | 'import'>('create')
   let mnemonic = $state('')
+  let recoveryWords = $state('')
   let written = $state(false)
   let importText = $state('')
+  let importPassphrase = $state('')
+  const importRecoveryInfo = $derived(inspectRecoveryWords(importText))
   let provisioning = $state(false)
   let provisionMsg = $state('')
   let npub = $state('')
   let bridgeSecret = $state('') // generated here, set on the device + shown in step 3
 
-  function newPhrase() {
+  async function newPhrase() {
     mnemonic = generateMnemonic(128)
+    recoveryWords = await createMnemonicRecoveryWords(mnemonic, '')
     written = false
     npub = ''
     provisionMsg = ''
@@ -102,6 +111,13 @@
       return { secret: r.secret, mode: 'tree-mnemonic', npub: r.npub }
     }
     const t = importText.trim()
+    if (importRecoveryInfo) {
+      const recovered = await resolveRecoveryWords(
+        t,
+        importRecoveryInfo.passphraseRequired ? importPassphrase : '',
+      )
+      return { secret: recovered.result.secret, mode: recovered.mode, npub: recovered.result.npub }
+    }
     if (t.startsWith('nsec1')) {
       // deriveFromNsec copies the bytes into its result, so the decoded nsec
       // can (and must) be wiped straight after — same pattern as restore.ts.
@@ -158,7 +174,9 @@
       // copy held in component state so it does not linger for the page's
       // lifetime. (The derived bytes are zeroized in the finally below.)
       mnemonic = ''
+      recoveryWords = ''
       importText = ''
+      importPassphrase = ''
       written = false
       step = 'bridge'
     } catch (e) {
@@ -256,16 +274,24 @@
       </div>
 
       {#if source === 'create'}
-        <p class="lede">Generate a recovery phrase. <strong>Write it down on paper</strong>. It is the
-          only backup of this signer's key.</p>
-        <button class="btn btn-secondary" onclick={newPhrase}>{mnemonic ? 'Regenerate' : 'Generate phrase'}</button>
+        <p class="lede">Generate typed ForgeSworn recovery words. <strong>Write down the complete
+          sequence on paper</strong>. It carries the derivation type and a fingerprint so future
+          ForgeSworn tools restore the same key automatically.</p>
+        <button class="btn btn-secondary" onclick={newPhrase}>{recoveryWords ? 'Regenerate' : 'Generate recovery words'}</button>
         {#if mnemonic}
-          <pre class="phrase">{mnemonic}</pre>
-          <label class="check"><input type="checkbox" bind:checked={written} /> I've written it down safely.</label>
+          <pre class="phrase">{recoveryWords}</pre>
+          <label class="check"><input type="checkbox" bind:checked={written} /> I've written down every word safely.</label>
         {/if}
       {:else}
-        <p class="lede">Paste an existing <code>nsec1…</code> or a 12/24-word recovery phrase.</p>
-        <textarea bind:value={importText} rows="3" placeholder="nsec1… or twelve word recovery phrase" spellcheck="false"></textarea>
+        <p class="lede">Paste ForgeSworn recovery words, an existing <code>nsec1…</code>, or an
+          explicit legacy 12/24-word BIP-39 phrase.</p>
+        <textarea bind:value={importText} rows="3" placeholder="Complete recovery words or nsec1…" spellcheck="false"></textarea>
+        {#if importRecoveryInfo?.kind === 'nsec-tree-mnemonic-v1' && importRecoveryInfo.passphraseRequired}
+          <label class="field">
+            <span class="field-label">Recovery passphrase</span>
+            <input type="password" class="field-input" bind:value={importPassphrase} autocomplete="off" />
+          </label>
+        {/if}
       {/if}
 
       {#if provisionMsg}<p class="hint">{provisionMsg}</p>{/if}

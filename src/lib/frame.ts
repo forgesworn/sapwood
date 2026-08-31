@@ -223,16 +223,21 @@ export function buildGenerateIdentity(label: string, words: 12 | 24 = 12): Uint8
 
 /**
  * Build a RESTORE_IDENTITY frame (0x58). The device drives an on-screen,
- * one-button picker for the owner to re-enter an EXISTING 12-word recovery
- * phrase — the phrase is typed on the device, never here, and never sent over
+ * picker for the owner to re-enter typed ForgeSworn recovery words
+ * (19/22/25/28/31), or an explicitly selected legacy BIP-39 phrase
+ * (12/15/18/21/24). Words are entered
+ * on the device, never here, and never sent over
  * the cable. The ACK carries only the resulting public npub. Payload:
- * [label_len][label].
+ * [label_len][label][word_count].
  */
-export function buildRestoreIdentity(label: string): Uint8Array {
+export type RecoveryWordCount = 12 | 15 | 18 | 19 | 21 | 22 | 24 | 25 | 28 | 31
+
+export function buildRestoreIdentity(label: string, words: RecoveryWordCount = 19): Uint8Array {
   const labelBytes = new TextEncoder().encode(label.slice(0, 32))
-  const payload = new Uint8Array(1 + labelBytes.length)
+  const payload = new Uint8Array(1 + labelBytes.length + 1)
   payload[0] = labelBytes.length
   payload.set(labelBytes, 1)
+  payload[1 + labelBytes.length] = words
   return buildFrame(FrameType.RESTORE_IDENTITY, payload)
 }
 

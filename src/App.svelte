@@ -119,6 +119,11 @@
     {/if}
   </header>
 
+  <div class="alpha-banner" role="alert">
+    <strong>ALPHA · RECOVERY WORDS V1 IS NOT HARDWARE TESTED</strong>
+    <span>Use test keys only, keep an independent backup, and do not rely on this recovery flow for funds or an irreplaceable identity.</span>
+  </div>
+
   {#if device.awaitingButton}
     <div class="pairing-banner" role="status" aria-live="polite">
       <span class="pairing-dot"></span>
@@ -300,6 +305,24 @@
     gap: 1rem;
     flex-wrap: wrap;
   }
+
+  .alpha-banner {
+    display: grid;
+    gap: 0.35rem;
+    margin: -0.75rem 0 1.25rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--amber, #d9a441);
+    border-radius: 6px;
+    background: #221a08;
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .alpha-banner strong {
+    color: var(--amber, #d9a441);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+  }
+  .alpha-banner span { font-size: 0.82rem; }
 
   .handoff-connect {
     display: flex;

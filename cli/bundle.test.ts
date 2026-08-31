@@ -45,7 +45,7 @@ describe('sapwood bundle', () => {
   it('prints the package version', async () => {
     const r = await sapwood('--version')
     expect(r.code).toBe(0)
-    expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/)
   })
 
   it('help with no command at all', async () => {
@@ -90,13 +90,13 @@ describe('sapwood bundle', () => {
     expect(r.stderr).toContain('usage: sapwood key backup')
   })
 
-  it('makes a 24-word key backup from an nsec on stdin, no device', () => {
+  it('makes typed recovery words from an nsec on stdin, no device', () => {
     const secret = new Uint8Array(32)
     secret[31] = 1
     const nsec = nip19.nsecEncode(secret)
     const r = sapwoodStdin(`${nsec}\n`, 'key', 'backup')
     expect(r.code).toBe(0)
-    expect(r.stdout).toContain('24-word key backup')
+    expect(r.stdout).toContain('ForgeSworn recovery words v1')
     expect(r.stdout).toContain('diesel')
   })
 
@@ -107,8 +107,8 @@ describe('sapwood bundle', () => {
     const r = sapwoodStdin(`${nsec}\n`, 'key', 'backup', '--json')
     expect(r.code).toBe(0)
     const parsed = JSON.parse(r.stdout) as { words: string[] }
-    expect(parsed.words).toHaveLength(24)
-    expect(parsed.words[23]).toBe('diesel')
+    expect(parsed.words).toHaveLength(31)
+    expect(parsed.words[30]).toBe('diesel')
   })
 
   it('fails clearly when no key is piped in', () => {

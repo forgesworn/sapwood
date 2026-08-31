@@ -6,6 +6,7 @@ import { crc32 } from './crc32.js'
 import {
   buildDeriveIdentity,
   buildGenerateIdentity,
+  buildRestoreIdentity,
   buildPolicyListRequest,
   buildPolicyRevoke,
   buildPolicyUpdate,
@@ -171,6 +172,17 @@ describe('policy management frames', () => {
     frame = parseFrame(buildGenerateIdentity('deep vault', 24))
     expect(frame.payload[10 + 1]).toBe(24)
     expect(frame.payload.length).toBe(1 + 10 + 1)
+  })
+
+  it('roundtrips RESTORE_IDENTITY with typed and legacy word counts', () => {
+    let frame = parseFrame(buildRestoreIdentity('vault'))
+    expect(frame.type).toBe(FrameType.RESTORE_IDENTITY)
+    expect(frame.payload[6]).toBe(19)
+
+    frame = parseFrame(buildRestoreIdentity('vault', 31))
+    expect(frame.payload[6]).toBe(31)
+    frame = parseFrame(buildRestoreIdentity('vault', 12))
+    expect(frame.payload[6]).toBe(12)
   })
 
   it('roundtrips FACTORY_RESET', () => {

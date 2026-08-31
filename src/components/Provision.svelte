@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity, relayProvisionIdentity, generateIdentity } from '../lib/device.svelte.js'
+  import { device, serialTransport, refreshMasters, serialDeriveIdentity, relayDeriveIdentity, relayProvisionIdentity, generateIdentity, getFirmwareVersion } from '../lib/device.svelte.js'
   import { FrameType } from '../lib/frame.js'
   import {
     deriveFromMnemonic,
     deriveNamedFromMnemonic,
     deriveNamedFromNsec,
+    deriveChild,
     deriveFromNsec,
     useRawNsec,
     decodeNsec,
@@ -14,11 +15,17 @@
     zeroize,
     type ProvisionMode,
   } from '../lib/provision.js'
-  import { isKeyBackupCandidate, keyToWords, wordsToKey, decryptNcryptsec } from '../lib/restore.js'
+  import { isKeyBackupCandidate, wordsToKey, decryptNcryptsec } from '../lib/restore.js'
+  import {
+    createNsecRecoveryWords,
+    inspectRecoveryWords,
+    resolveRecoveryWords,
+  } from '../lib/recovery-words.js'
   import { rememberDevice } from '../lib/known-devices.js'
   import { identityKey } from '../lib/identity-key.js'
   import { nip19 } from 'nostr-tools'
   import PasswordReveal from './PasswordReveal.svelte'
+  import { compareVersions } from '../lib/version.js'
 
   // The just-provisioned wifi device, if any — only set when this device was
   // flashed in wifi mode (lastRelays present); drives the network-reachable note.
@@ -64,6 +71,7 @@
   let showPassphrase = $state(false)
   let showSecret = $state(false)
   const isNcryptsec = $derived(secret.trim().startsWith('ncryptsec1'))
+  const typedRecovery = $derived(inspectRecoveryWords(secret))
 
   // Named-identity source. The signer already holds the master's tree root, so
   // by default IT derives the child (frame 0x60 over USB, mgmt derive_identity
@@ -125,19 +133,19 @@
   const MODE_INFO: Record<ModeChoice, { title: string; body: string; address: string; addressKind: 'same' | 'new' }> = {
     'generate-device': {
       title: 'Fresh key — the device generates it',
-      body: 'The signer makes a brand-new key itself: nothing is typed into this browser and no secret ever crosses the cable. It first offers a quick button game — your tap timing is mixed into the key’s randomness (hold the button to skip). The 12-word recovery phrase then appears on the signer’s screen: write it down on paper.',
+      body: 'The signer makes a brand-new key itself: nothing is typed into this browser and no secret ever crosses the cable. It first offers a quick button game — your tap timing is mixed into the key’s randomness (hold the button to skip). Typed ForgeSworn recovery words then appear on the signer’s screen: write down the complete sequence.',
       address: 'A new address, generated inside the signer.',
       addressKind: 'new',
     },
     'tree-mnemonic': {
-      title: 'Recovery phrase (12 or 24 words)',
-      body: 'Build the signer from a BIP-39 recovery phrase. The device makes a tree of keys from it, so one phrase can run several named accounts. Generate a fresh phrase on the Home setup flow, or paste an existing one here. An optional passphrase adds a secret 25th word.',
+      title: 'Recovery words',
+      body: 'ForgeSworn recovery words carry their derivation type and fingerprint, so Sapwood restores them automatically. Bare 12 or 24-word BIP-39 phrases remain available as an explicit legacy import. An optional passphrase can protect a mnemonic tree.',
       address: 'A new address, derived from the phrase.',
       addressKind: 'new',
     },
     'bunker': {
       title: 'Existing nsec — sign as-is',
-      body: 'Use an nsec you already have directly. The device signs AS that exact identity: no derivation. Pick this if you want this signer to BE your existing key. A 24-word key backup made by Sapwood pastes here too.',
+      body: 'Use an nsec you already have directly. The device signs AS that exact identity: no derivation. Pick this if you want this signer to BE your existing key. Typed recovery words select this mode automatically.',
       address: 'The SAME npub as your nsec.',
       addressKind: 'same',
     },
@@ -175,19 +183,37 @@
 
     try {
       let result
-      if (mode === 'tree-mnemonic') {
+      if (typedRecovery && mode !== 'named-child') {
+        const recovered = await resolveRecoveryWords(
+          secret,
+          typedRecovery.passphraseRequired ? passphrase : '',
+        )
+        result = recovered.result
+        mode = recovered.mode
+      } else if (mode === 'tree-mnemonic') {
         result = await deriveFromMnemonic(secret, passphrase)
       } else if (mode === 'named-child') {
         // The label IS the derivation name: one field, one concept. Trim it so
         // the name that derives the key is exactly the label sent to the device.
         label = label.trim()
         const trimmedSecret = secret.trim()
-        if (trimmedSecret.startsWith('nsec1') || trimmedSecret.startsWith('ncryptsec1')) {
+        if (typedRecovery) {
+          const recovered = await resolveRecoveryWords(
+            secret,
+            typedRecovery.passphraseRequired ? passphrase : '',
+          )
+          try {
+            result = recovered.mode === 'bunker'
+              ? deriveNamedFromNsec(recovered.result.secret, label)
+              : deriveChild(recovered.result.secret, label)
+          } finally {
+            zeroize(recovered.result.secret)
+          }
+        } else if (trimmedSecret.startsWith('nsec1') || trimmedSecret.startsWith('ncryptsec1')) {
           // Master made from an nsec (sign-as-is or tree): same root nsec-tree
           // fromNsec() builds, so the named child matches the CLI's. Words are
-          // always read as a recovery phrase here; a 24-word key backup must be
-          // pasted as its nsec, since valid 24 words are indistinguishable
-          // from a real phrase.
+          // Bare legacy words are still ambiguous here; typed ForgeSworn words
+          // have already taken the branch above and carry their own meaning.
           const nsecBytes = nsecOrNcryptBytes(trimmedSecret)
           try {
             result = deriveNamedFromNsec(nsecBytes, label)
@@ -223,8 +249,9 @@
     }
   }
 
-  /** Phrase length for on-device generation: 12 words (128-bit) or 24 (256-bit). */
+  /** Payload strength for on-device generation; the typed header adds 7 words. */
   let genWords = $state<12 | 24>(12)
+  const generatedRecoveryWords = $derived(genWords === 12 ? 19 : 31)
 
   /** Ask the signer to generate a fresh master itself (entropy game first). */
   async function handleGenerateOnDevice() {
@@ -232,11 +259,16 @@
     message = ''
     npubPreview = ''
     try {
+      const firmware = await getFirmwareVersion()
+      const comparison = compareVersions(firmware?.version ?? '', '0.18.0-alpha.1')
+      if (comparison === null || comparison < 0) {
+        throw new Error('Typed recovery generation needs the untested Heartwood 0.18.0 alpha or newer. Use a test signer and update it first.')
+      }
       label = label.trim() || 'default'
       const npub = await generateIdentity(label, genWords)
       npubPreview = npub
       status = 'done'
-      message = `Identity '${label}' generated on the signer. The 12-word recovery phrase is on its screen — write it down on paper and confirm there.`
+      message = `Identity '${label}' generated on the signer. Its typed recovery words are on the screen — write down the complete sequence and confirm there.`
       rememberProvisioned(npub, label)
     } catch (e) {
       status = 'error'
@@ -246,16 +278,16 @@
 
   let pendingSecret: Uint8Array | null = null
 
-  // Optional 24-word backup of a pasted nsec, offered while confirming.
+  // Optional typed backup of a pasted nsec, offered while confirming.
   let backupWords = $state('')
   let showBackup = $state(false)
 
-  /** Write the entered nsec/ncryptsec out as 24 words, computed only when asked for. */
+  /** Write the entered nsec/ncryptsec as typed recovery words when asked. */
   function toggleBackupWords() {
     if (!showBackup && !backupWords) {
       try {
         const bytes = nsecOrNcryptBytes(secret.trim())
-        try { backupWords = keyToWords(bytes) } finally { zeroize(bytes) }
+        try { backupWords = createNsecRecoveryWords(bytes, mode === 'tree-nsec') } finally { zeroize(bytes) }
       } catch { return }
     }
     showBackup = !showBackup
@@ -386,16 +418,17 @@
         {/if}
       </p>
       <div class="uri-box confirm-npub"><code class="mono">{npubPreview}</code></div>
-      {#if (mode === 'bunker' || mode === 'tree-nsec') && !isKeyBackupCandidate(secret)}
+      {#if (mode === 'bunker' || mode === 'tree-nsec') && !isKeyBackupCandidate(secret) && !typedRecovery
+        && (secret.trim().startsWith('nsec1') || secret.trim().startsWith('ncryptsec1'))}
         <div class="backup">
           <button class="backup-toggle" onclick={toggleBackupWords}>
-            {showBackup ? 'Hide the backup words' : 'Back up this nsec as 24 words first'}
+            {showBackup ? 'Hide the recovery words' : 'Make typed recovery words first'}
           </button>
           {#if showBackup}
             <p class="backup-note">
-              These 24 words are the nsec itself, unencrypted. Anyone who has them controls the
-              identity. To restore, paste them where an nsec goes, or mark them as a key backup
-              in the guided flow. See
+              These words contain the nsec, its recovery type, and a public fingerprint. They are
+              unencrypted: anyone who has them controls the identity. Paste the complete sequence
+              to restore the same derivation automatically. See
               <a href="https://github.com/forgesworn/sapwood/blob/main/docs/backup-and-restore.md"
                 target="_blank" rel="noopener">the backup and restore guide</a>.
             </p>
@@ -425,7 +458,7 @@
           {#if device.mode === 'serial'}
             <option value="generate-device">Fresh key: the device generates it (plays the entropy game)</option>
           {/if}
-          <option value="tree-mnemonic">Recovery phrase (12/24 words)</option>
+          <option value="tree-mnemonic">Recovery words (typed, or legacy BIP-39)</option>
           <option value="named-child">Name: derive a named identity from your master</option>
           <option value="bunker">Existing nsec: sign as-is (keeps your npub)</option>
           <option value="tree-nsec">Existing nsec: derive a new key (new npub)</option>
@@ -528,11 +561,11 @@
            is that the browser never sees a secret, so only the Name applies. -->
       {#if (mode === 'tree-mnemonic' || mode === 'named-child') && !onSigner}
         <label class="field">
-          <span class="field-label">{mode === 'named-child' ? 'Recovery phrase, nsec or ncryptsec' : 'Mnemonic'}</span>
+          <span class="field-label">{mode === 'named-child' ? 'Recovery words, nsec or ncryptsec' : 'Recovery words'}</span>
           <textarea
             class="field-input"
             bind:value={secret}
-            placeholder={mode === 'named-child' ? '12 or 24 words, nsec1… or ncryptsec1…' : '12 or 24 words'}
+            placeholder={mode === 'named-child' ? 'Complete recovery words, nsec1… or ncryptsec1…' : 'Complete recovery words'}
             rows="3"
             disabled={status === 'deriving' || status === 'sending'}
             autocomplete="off"
@@ -547,7 +580,7 @@
               <PasswordReveal bind:shown={showPassphrase} disabled={status === 'deriving' || status === 'sending'} />
             </div>
           </label>
-        {:else}
+        {:else if !typedRecovery || typedRecovery.kind === 'nsec-tree-mnemonic-v1'}
           <label class="field">
             <span class="field-label">{mode === 'named-child' ? 'Passphrase (phrase input only)' : 'Passphrase'}</span>
             <div class="pw-wrap">
@@ -564,7 +597,7 @@
               type={showSecret ? 'text' : 'password'}
               class="field-input"
               bind:value={secret}
-              placeholder="nsec1…, ncryptsec1… or a 24-word key backup"
+              placeholder="nsec1…, ncryptsec1… or complete recovery words"
               disabled={status === 'deriving' || status === 'sending'}
               autocomplete="off"
             />
@@ -590,7 +623,7 @@
             onclick={() => (genWords = 12)}
             disabled={status === 'sending'}
           >
-            <span class="source-title">12 words — 128-bit</span>
+            <span class="source-title">19 typed words — 128-bit payload</span>
             <span class="source-desc">Standard strength, quicker to write down.</span>
           </button>
           <button
@@ -599,7 +632,7 @@
             onclick={() => (genWords = 24)}
             disabled={status === 'sending'}
           >
-            <span class="source-title">24 words — 256-bit</span>
+            <span class="source-title">31 typed words — 256-bit payload</span>
             <span class="source-desc">Maximum strength, twice as much to copy by hand.</span>
           </button>
         </div>
@@ -615,7 +648,7 @@
                 randomness; play ~a minute. <strong>Hold the button</strong> at any point to
                 skip and use the chip's generator alone.</li>
               <li><strong>Working…</strong> — the key is created inside the signer.</li>
-              <li><strong>Write down the {genWords} words</strong>, one per screen: tap for the
+              <li><strong>Write down all {generatedRecoveryWords} words</strong>, one per screen: tap for the
                 next, hold on the final screen to confirm. This is the only time they appear.</li>
             </ol>
           </div>
