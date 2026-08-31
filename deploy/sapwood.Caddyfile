@@ -1,5 +1,5 @@
 # sapwood.forgesworn.dev — the Flasher + admin SPA, served as static files from
-# /opt/sapwood on the shared "routing" box (95.217.39.110).
+# /opt/sapwood on the shared `stall` routing host (62.238.98.53).
 #
 # Install: copy to /etc/caddy/conf.d/ (imported by the main Caddyfile), validate,
 # reload. This block is fully self-contained and touches no other tenant.

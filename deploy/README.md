@@ -12,29 +12,30 @@ which only works in a secure context. Caddy issues the cert automatically.
 
 ## Box
 
-Shared multi-tenant box `routing` (`95.217.39.110`, Debian 12) — also runs
+Shared multi-tenant host `stall` (`62.238.98.53`, Debian 12) — also runs
 Phoenixd (Lightning) and trotters routing. **Every change here is additive: never
 touch another tenant's dir, unit, or Caddy vhost.** Caddy is systemd and imports
-`/etc/caddy/conf.d/*.Caddyfile`. Access: `ssh -i ~/.ssh/id_rsa_thecryptodonkey deploy@95.217.39.110`.
+`/etc/caddy/conf.d/*.Caddyfile`. Access: `ssh stall` (the local SSH config pins
+the host, deploy user, and identity).
 
 ## One-time setup (by hand)
 
-DNS is already in place: `sapwood.forgesworn.dev` → A `95.217.39.110`, grey-cloud
+DNS is already in place: `sapwood.forgesworn.dev` → A `62.238.98.53`, grey-cloud
 (DNS-only) so Caddy can issue Let's Encrypt.
 
 ```bash
-KEY=~/.ssh/id_rsa_thecryptodonkey
+KEY=~/.ssh/id_ed25519
 # 1. Static root
-ssh -i "$KEY" deploy@95.217.39.110 'mkdir -p /opt/sapwood'
+ssh -i "$KEY" deploy@62.238.98.53 'mkdir -p /opt/sapwood'
 # 2. Caddy vhost (validate against the FULL config before reloading — a bad
 #    block must never take Caddy down for the other tenants)
-scp -i "$KEY" deploy/sapwood.Caddyfile deploy@95.217.39.110:/tmp/sapwood.Caddyfile
-ssh -i "$KEY" deploy@95.217.39.110 '
+scp -i "$KEY" deploy/sapwood.Caddyfile deploy@62.238.98.53:/tmp/sapwood.Caddyfile
+ssh -i "$KEY" deploy@62.238.98.53 '
   sudo cp /tmp/sapwood.Caddyfile /etc/caddy/conf.d/sapwood.Caddyfile &&
   sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile &&
   sudo systemctl reload caddy'
 # 3. First content push (or let CI do it)
-rsync -avz --delete -e "ssh -i $KEY" dist/ deploy@95.217.39.110:/opt/sapwood/
+rsync -avz --delete -e "ssh -i $KEY" dist/ deploy@62.238.98.53:/opt/sapwood/
 # 4. Smoke
 curl -sS -o /dev/null -w '%{http_code}\n' https://sapwood.forgesworn.dev/
 ```
@@ -70,7 +71,7 @@ over reusing a personal key. Until the secret is set, the workflow no-ops.
 ```bash
 # Generate a dedicated deploy key, authorise it on the box, store it as the secret:
 ssh-keygen -t ed25519 -f /tmp/sapwood_deploy -N "" -C "sapwood-ci"
-ssh -i ~/.ssh/id_rsa_thecryptodonkey deploy@95.217.39.110 \
+ssh stall \
   "echo '$(cat /tmp/sapwood_deploy.pub)' >> ~/.ssh/authorized_keys"
 gh secret set HETZNER_SSH_KEY < /tmp/sapwood_deploy   # in the sapwood repo
 rm /tmp/sapwood_deploy /tmp/sapwood_deploy.pub
@@ -80,6 +81,6 @@ rm /tmp/sapwood_deploy /tmp/sapwood_deploy.pub
 
 ```bash
 npm run build
-rsync -avz --delete -e "ssh -i ~/.ssh/id_rsa_thecryptodonkey" \
-  dist/ deploy@95.217.39.110:/opt/sapwood/
+rsync -avz --delete -e "ssh -i ~/.ssh/id_ed25519" \
+  dist/ deploy@62.238.98.53:/opt/sapwood/
 ```
