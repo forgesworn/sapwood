@@ -153,13 +153,11 @@ export class SerialTransport {
     }
   }
 
-  /** Disconnect from the serial port. Always resets state — even if close()
-   *  throws (e.g. a stream still locked) — so a fresh connect can recover. */
-  async disconnect(): Promise<void> {
-    // Reject the active round trip and every queued caller immediately. Merely
-    // resetting a promise chain would leave queued operations alive, allowing
-    // them to write to a later connection after this disconnect completes.
-    this.cancelRequests(new Error('Disconnected'))
+  /** Tear down one serial session and reject everything that still belongs to
+   *  it. `error` distinguishes an ordinary disconnect from a protocol timeout,
+   *  where the late reply makes this no-request-ID stream unsafe to reuse. */
+  private async closeSession(error: Error): Promise<void> {
+    this.cancelRequests(error)
     this.running = false
     try {
       if (this.reader) {
@@ -172,9 +170,19 @@ export class SerialTransport {
     } finally {
       this.reader = null
       this.port = null
+      this.stream.reset()
       this.writeChain = Promise.resolve()
       this.emit({ kind: 'disconnected' })
     }
+  }
+
+  /** Disconnect from the serial port. Always resets state — even if close()
+   *  throws (e.g. a stream still locked) — so a fresh connect can recover. */
+  async disconnect(): Promise<void> {
+    // Reject the active round trip and every queued caller immediately. Merely
+    // resetting a promise chain would leave queued operations alive, allowing
+    // them to write to a later connection after this disconnect completes.
+    await this.closeSession(new Error('Disconnected'))
   }
 
   /** Send raw bytes to the ESP32. Serialised so writes never overlap (a second
@@ -290,7 +298,21 @@ export class SerialTransport {
       }
 
       const timeout = setTimeout(() => {
-        finish({ error: new Error("No response from the device. If you just flashed it, press the RESET button on the board so it starts the new firmware, then reconnect.") })
+        if (settled) return
+
+        // Frames have no request IDs and most operations answer with the same
+        // ACK/NACK types. Once this response is overdue, a late ACK cannot be
+        // distinguished from the next queued operation's ACK. Claim the active
+        // request before the asynchronous teardown, reject all queued work, and
+        // require a fresh connection before another frame can be written.
+        settled = true
+        unsub()
+        request.cancel = undefined
+        if (this.activeRequest === request) this.activeRequest = null
+
+        const timeoutError = new Error("No response from the device. The serial session was closed so a late reply cannot be mistaken for another operation. Reconnect before trying again.")
+        const queuedError = new Error('Serial session lost after a device timeout. Reconnect before trying again.')
+        void this.closeSession(queuedError).then(() => reject(timeoutError))
       }, request.timeoutMs)
 
       unsub = this.on((event) => {

@@ -75,6 +75,7 @@ export type TransportEvent =
 export class NodeSerialTransport {
   private listeners: Array<(e: TransportEvent) => void> = []
   private closed = false
+  private closePromise: Promise<void> | null = null
   // Round trips are serialised: frames carry no request id, so overlapping
   // requests could each claim the other's response.
   private chain: Promise<unknown> = Promise.resolve()
@@ -171,7 +172,16 @@ export class NodeSerialTransport {
         else reject(result.error)
       }
       const timer = setTimeout(() => {
-        finish({ error: new Error('No response from the device. Check it is running Heartwood firmware and not held by another program.') })
+        if (settled) return
+
+        // The protocol has no request IDs. A response arriving after this
+        // timeout could otherwise satisfy the next queued command when both
+        // expect a generic ACK/NACK. Close the port before rejecting so the
+        // promise chain cannot advance on the ambiguous session.
+        settled = true
+        unsub()
+        const error = new Error('No response from the device. The serial session was closed so a late reply cannot be mistaken for another operation.')
+        void this.close().then(() => reject(error))
       }, timeoutMs)
       unsub = this.on((event) => {
         if (event.kind === 'frame' && expectedTypes.includes(event.frame.type)) {
@@ -187,7 +197,11 @@ export class NodeSerialTransport {
   }
 
   async close(): Promise<void> {
+    if (this.closePromise) return this.closePromise
+    if (this.closed) return
     this.closed = true
-    await new Promise<void>((resolve) => this.port.close(() => resolve()))
+    this.stream.reset()
+    this.closePromise = new Promise<void>((resolve) => this.port.close(() => resolve()))
+    await this.closePromise
   }
 }

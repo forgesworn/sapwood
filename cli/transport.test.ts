@@ -11,6 +11,7 @@ type Handler = (arg?: unknown) => void
 function fakePort() {
   const handlers = new Map<string, Handler[]>()
   const writes: Uint8Array[] = []
+  let closes = 0
   const port: PortLike = {
     write(data, cb) {
       writes.push(new Uint8Array(data))
@@ -20,6 +21,7 @@ function fakePort() {
       cb(null)
     },
     close(cb) {
+      closes++
       emit('close')
       cb(null)
     },
@@ -35,6 +37,7 @@ function fakePort() {
   return {
     port,
     writes,
+    get closes() { return closes },
     /** Deliver device bytes on the next tick, as serialport would. */
     receive(bytes: Uint8Array) {
       setTimeout(() => emit('data', Buffer.from(bytes)), 0)
@@ -69,7 +72,22 @@ describe('NodeSerialTransport', () => {
     const t = NodeSerialTransport.wrap(f.port)
     await expect(
       t.sendAndReceive(buildFrame(FrameType.PROVISION_LIST), [FrameType.PROVISION_LIST_RESPONSE], 40),
-    ).rejects.toThrow(/No response/)
+    ).rejects.toThrow(/session was closed/i)
+    expect(f.closes).toBe(1)
+  })
+
+  it('does not send queued work after a timeout poisons the session', async () => {
+    const f = fakePort()
+    const t = NodeSerialTransport.wrap(f.port)
+    const first = t.sendAndReceive(buildFrame(FrameType.SET_PIN), [FrameType.ACK], 40)
+    const second = t.sendAndReceive(buildFrame(FrameType.FACTORY_RESET), [FrameType.ACK], 1_000)
+
+    const firstRejection = expect(first).rejects.toThrow(/session was closed/i)
+    const secondRejection = expect(second).rejects.toThrow(/disconnected/i)
+    await Promise.all([firstRejection, secondRejection])
+
+    expect(f.writes).toHaveLength(1)
+    expect(f.closes).toBe(1)
   })
 
   it('serialises round trips so a shared response type cannot be stolen', async () => {

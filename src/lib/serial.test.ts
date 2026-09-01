@@ -15,6 +15,7 @@ function makeFakePort(opts: { writeDelayMs?: number; hang?: boolean } = {}) {
   let locked = false
   const writes: Uint8Array[] = []
   let aborted = false
+  let closed = false
   let rejectPending: ((e: unknown) => void) | null = null
   const writable = {
     getWriter() {
@@ -42,7 +43,15 @@ function makeFakePort(opts: { writeDelayMs?: number; hang?: boolean } = {}) {
       }
     },
   }
-  return { port: { writable } as unknown as SerialPort, writes, get aborted() { return aborted } }
+  return {
+    port: {
+      writable,
+      async close() { closed = true },
+    } as unknown as SerialPort,
+    writes,
+    get aborted() { return aborted },
+    get closed() { return closed },
+  }
 }
 
 function transportWith(port: SerialPort): SerialTransport {
@@ -260,16 +269,24 @@ describe('request/response serialisation', () => {
     await expect(second).resolves.toMatchObject({ type: FrameType.ACK })
   })
 
-  it('continues with the next request after the active request times out', async () => {
+  it('closes the ambiguous session and does not write queued work after a timeout', async () => {
     const fake = makeFakePort()
     const t = transportWith(fake.port)
     const first = t.sendAndReceive(new Uint8Array([1]), [FrameType.ACK], 20)
     const second = t.sendAndReceive(new Uint8Array([2]), [FrameType.ACK], 1_000)
 
-    await expect(first).rejects.toThrow(/No response/)
-    await vi.waitFor(() => expect(fake.writes.map((write) => write[0])).toEqual([1, 2]))
+    const firstRejection = expect(first).rejects.toThrow(/session was closed/i)
+    const secondRejection = expect(second).rejects.toThrow(/session lost/i)
+    await Promise.all([firstRejection, secondRejection])
+
+    expect(fake.writes.map((write) => write[0])).toEqual([1])
+    expect(fake.closed).toBe(true)
+    expect(t.connected).toBe(false)
+
+    // A late generic ACK from the timed-out operation has no active request
+    // to satisfy, and the next operation was never sent on the poisoned link.
     emitFrame(t, FrameType.ACK)
-    await expect(second).resolves.toMatchObject({ type: FrameType.ACK })
+    expect(fake.writes.map((write) => write[0])).toEqual([1])
   })
 
   it('disconnect rejects the active and queued requests without writing queued work later', async () => {
