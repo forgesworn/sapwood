@@ -43,7 +43,7 @@
     "@types/node": "^26.4.1",
     "@types/w3c-web-serial": "^1.0.8",
     "@types/ws": "^8.18.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
     "svelte": "^5.57.0",
