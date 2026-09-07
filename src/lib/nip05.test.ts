@@ -5,7 +5,7 @@ const PK = 'ab'.repeat(32)
 
 describe('isValidNip05Name', () => {
   it('accepts letters, digits, dash, underscore, dot', () => {
-    expect(isValidNip05Name('darren')).toBe(true)
+    expect(isValidNip05Name('rowan')).toBe(true)
     expect(isValidNip05Name('d.arren-42_x')).toBe(true)
     expect(isValidNip05Name('_')).toBe(true)
   })
@@ -32,10 +32,10 @@ describe('isHexPubkey', () => {
 
 describe('buildNostrJson', () => {
   it('builds names and nip46 maps', () => {
-    const json = buildNostrJson('Darren', PK, ['wss://relay.trotters.cc'])
+    const json = buildNostrJson('Rowan', PK, ['wss://relay.example.test'])
     const doc = JSON.parse(json)
-    expect(doc.names).toEqual({ darren: PK })
-    expect(doc.nip46).toEqual({ [PK]: ['wss://relay.trotters.cc'] })
+    expect(doc.names).toEqual({ rowan: PK })
+    expect(doc.nip46).toEqual({ [PK]: ['wss://relay.example.test'] })
   })
 
   it('keeps only wss relays and trims whitespace', () => {
@@ -56,11 +56,11 @@ describe('buildNostrJson', () => {
 
 describe('nip05Identifier', () => {
   it('joins name and bare domain', () => {
-    expect(nip05Identifier('Darren', 'trotters.cc')).toBe('darren@trotters.cc')
+    expect(nip05Identifier('Rowan', 'example.test')).toBe('rowan@example.test')
   })
 
   it('strips scheme and path from the domain', () => {
-    expect(nip05Identifier('d', 'https://trotters.cc/about')).toBe('d@trotters.cc')
+    expect(nip05Identifier('d', 'https://example.test/about')).toBe('d@example.test')
   })
 
   it('collapses the root name to just the domain', () => {
