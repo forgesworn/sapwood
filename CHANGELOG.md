@@ -3,6 +3,27 @@
 All notable changes to Sapwood are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are [SemVer](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Unlocking a locked signer no longer takes two goes.** Over USB, Sapwood
+  waited 35 s for the unlock ACK, but the signer only answers once every sealed
+  identity is unsealed — measured at 73.8 s for three (heartwood-esp32 #118).
+  The first attempt timed out, the serial session was closed on that timeout,
+  and the second attempt existed only to hear "already unlocked". The wait is
+  now sized per sealed identity, Sapwood asks which identities are sealed
+  before sending the key (an already-unsealed signer answers instantly instead
+  of paying the KDF again), and the banner says how long to expect.
+- **Locked WiFi signers are now unlockable from a fresh dial.** The "Signer
+  is locked" banner only appeared if Sapwood had been connected when the
+  signer rebooted; dialling a signer that was already locked left `mode` at
+  'none' and the announcement was heard but never shown. The failed dial now
+  remembers its target so the banner, the stored vault key and the delivery
+  all work, and after delivery Sapwood keeps dialling for up to five minutes
+  while the signer unseals and rejoins its relays, instead of promising a
+  recovery that never came.
+
 ## 0.15.0 — 2026-08-14
 
 Works through a field tester's full feedback batch, paired with Heartwood

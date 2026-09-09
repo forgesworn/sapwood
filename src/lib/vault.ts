@@ -24,7 +24,7 @@ import { finalizeEvent } from 'nostr-tools/pure'
 import { getConversationKey, encrypt } from 'nostr-tools/nip44'
 import { hexToBytes } from '@noble/hashes/utils.js'
 import { SimplePool } from 'nostr-tools/pool'
-import { FrameType, buildVaultSet, buildVaultUnlock } from './frame.js'
+import { FrameType, buildProvisionList, buildVaultSet, buildVaultUnlock } from './frame.js'
 import type { SerialTransport } from './serial.js'
 
 /** Relay kind a locked signer announces on (ephemeral; relays never store it). */
@@ -119,7 +119,47 @@ function nackReason(payload: Uint8Array, fallback: string): string {
 // The signer gives the operator 30 seconds to confirm on the OLED; the frame
 // round trip must outlast a person reading and reaching for the button.
 const VAULT_SET_TIMEOUT_MS = 90_000
-const VAULT_UNLOCK_TIMEOUT_MS = 35_000
+
+// The signer only ACKs VAULT_UNLOCK once every sealed identity is unsealed,
+// and the unseal is a deliberately slow PBKDF2 per identity: measured at
+// 73.8 s for three masters on a Heltec V4 (heartwood-esp32 #118), so ~25 s
+// each. The old 35 s budget expired on the first attempt for anything beyond
+// one identity, the serial session was torn down on that timeout, and the
+// operator had to reconnect and unlock a second time just to hear "already
+// unlocked". Budget per identity, with headroom for a slower board.
+const VAULT_UNLOCK_BASE_MS = 60_000
+const VAULT_UNLOCK_PER_SLOT_MS = 40_000
+// The locked USB loop answers PROVISION_LIST straight away (public rows only).
+const LOCKED_SLOTS_TIMEOUT_MS = 10_000
+
+/** How long to wait for VAULT_UNLOCK's ACK given how many identities are sealed. */
+export function vaultUnlockTimeoutMs(lockedSlots: number | null): number {
+  const slots = Math.max(1, Math.min(16, lockedSlots ?? 3))
+  return VAULT_UNLOCK_BASE_MS + VAULT_UNLOCK_PER_SLOT_MS * slots
+}
+
+/**
+ * Ask the signer which identities are still sealed. The locked USB loop serves
+ * PROVISION_LIST with a `locked` flag per master, so this tells us whether an
+ * unlock is needed at all before spending a minute of KDF finding out. Returns
+ * the count, or null when the signer does not say (NACK, older firmware, an
+ * unparseable list) — callers then unlock blind as before.
+ */
+export async function serialVaultLockedSlots(transport: SerialTransport): Promise<number | null> {
+  const resp = await transport.sendAndReceive(
+    buildProvisionList(),
+    [FrameType.PROVISION_LIST_RESPONSE, FrameType.NACK],
+    LOCKED_SLOTS_TIMEOUT_MS,
+  )
+  if (resp.type !== FrameType.PROVISION_LIST_RESPONSE) return null
+  try {
+    const rows: unknown = JSON.parse(new TextDecoder().decode(resp.payload))
+    if (!Array.isArray(rows)) return null
+    return rows.filter((row) => !!row && typeof row === 'object' && (row as { locked?: unknown }).locked === true).length
+  } catch {
+    return null
+  }
+}
 
 /**
  * Enable encrypted-at-rest (`keyHex`) or return to plaintext storage (`null`).
@@ -151,18 +191,20 @@ export async function serialVaultSet(
  * Unlock a locked signer over USB with its vault key. The caller must have
  * authenticated the bridge session first. Resolves on ACK; throws with a
  * friendly message on NACK ("wrong vault key" / "already unlocked" /
- * "bridge auth required").
+ * "bridge auth required"). `lockedSlots` (from serialVaultLockedSlots) sizes
+ * the wait; null waits long enough for a typical three-identity signer.
  */
 export async function serialVaultUnlock(
   transport: SerialTransport,
   keyHex: string,
+  lockedSlots: number | null = null,
 ): Promise<void> {
   const normalised = normaliseVaultKeyHex(keyHex)
   if (!normalised) throw new Error('The vault key must be 64 hexadecimal characters (32 bytes).')
   const resp = await transport.sendAndReceive(
     buildVaultUnlock(hexToBytes(normalised)),
     [FrameType.ACK, FrameType.NACK],
-    VAULT_UNLOCK_TIMEOUT_MS,
+    vaultUnlockTimeoutMs(lockedSlots),
   )
   if (resp.type === FrameType.ACK) return
   const reason = nackReason(resp.payload, 'The signer refused the vault key.')

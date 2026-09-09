@@ -11,9 +11,13 @@
   //   not that the owner did.
   import {
     device, serialTransport, ensureBridgeAuth, refreshMasters, sendVaultKeyOverRelay,
+    vaultRelayDevicePub,
   } from '../lib/device.svelte.js'
   import { npubToHex } from '../lib/known-devices.js'
-  import { loadVaultKey, storeVaultKey, normaliseVaultKeyHex, serialVaultUnlock } from '../lib/vault.js'
+  import {
+    loadVaultKey, storeVaultKey, normaliseVaultKeyHex, serialVaultUnlock, serialVaultLockedSlots,
+    vaultUnlockTimeoutMs,
+  } from '../lib/vault.js'
   import PasswordReveal from './PasswordReveal.svelte'
 
   // Announcements re-publish about every 60s while locked; older than this
@@ -27,8 +31,13 @@
   })
 
   const usbLocked = $derived(device.mode === 'serial' && device.masters.some((m) => m.locked === true))
+  // Over WiFi the signer may be one we are connected to (it rebooted under us)
+  // or one we dialled and could not reach because it was already locked — a
+  // locked signer never completes the handshake, so `mode` never becomes
+  // 'relay' for it and `vaultRelayTarget` is the only record of who it is.
+  const relayContext = $derived(device.mode === 'relay' || !!device.vaultRelayTarget)
   const relayAsking = $derived(
-    device.mode === 'relay'
+    relayContext
     && !!device.vaultUnlockRequest
     && now - device.vaultUnlockRequest.lastSeen < ANNOUNCE_STALE_MS,
   )
@@ -36,9 +45,13 @@
   // The identity the vault key is stored against: the signer's master pubkey
   // (first non-persona row over USB; the management address over WiFi).
   const deviceKey = $derived(
-    device.mode === 'relay'
-      ? device.relayDevicePub || null
+    relayContext
+      ? vaultRelayDevicePub() || null
       : npubToHex(device.masters.find((m) => !m.persona)?.npub ?? ''),
+  )
+
+  const reconnectElapsed = $derived(
+    device.vaultReconnect ? Math.max(0, Math.round((now - device.vaultReconnect.startedAt) / 1000)) : 0,
   )
 
   let storedKey = $state<string | null>(null)
@@ -49,6 +62,15 @@
   let busy = $state(false)
   let status = $state<string | null>(null)
   let sent = $state(false)
+  // A new session (the post-unlock reconnect landing, or the operator dialling
+  // afresh) retires the "sent" note: the signer is answering again.
+  let sentGeneration = $state<number | null>(null)
+  $effect(() => {
+    if (sentGeneration !== null && device.connectionGeneration !== sentGeneration) {
+      sent = false
+      sentGeneration = null
+    }
+  })
 
   // A fresh announcement (new one-time pubkey) resets any stale "sent" note;
   // the same one re-publishing does not.
@@ -65,16 +87,32 @@
     return normaliseVaultKeyHex(pasteValue)
   }
 
-  /** Unlock over USB: SESSION_AUTH (pairing hold if first time) then VAULT_UNLOCK. */
+  /**
+   * Unlock over USB: SESSION_AUTH (pairing hold if first time), then ask which
+   * identities are still sealed, then VAULT_UNLOCK sized to that count. The
+   * ask matters twice over: a signer that already unsealed (a first attempt
+   * whose ACK we missed) answers in a blink instead of paying the whole KDF to
+   * say "already unlocked", and the count sets a wait long enough that the
+   * first attempt is the only one.
+   */
   async function unlockUsb(keyHex: string, remember: boolean) {
     if (!deviceKey) { status = 'The signer did not name an identity to unlock.'; return }
     busy = true
     status = null
     try {
       await ensureBridgeAuth()
-      device.awaitingButton = 'Unlocking — the signer unseals each identity with a slow key derivation on purpose; a few seconds per identity is normal.'
+      let lockedSlots: number | null = null
+      try { lockedSlots = await serialVaultLockedSlots(serialTransport) } catch { /* unlock blind */ }
+      if (lockedSlots === 0) {
+        status = 'The signer is already unlocked.'
+        try { await refreshMasters() } catch { /* the list reply will update the banner */ }
+        return
+      }
+      const seconds = Math.round(vaultUnlockTimeoutMs(lockedSlots) / 1000)
+      const count = lockedSlots === null ? 'each identity' : `${lockedSlots} ${lockedSlots === 1 ? 'identity' : 'identities'}`
+      device.awaitingButton = `Unlocking — the signer unseals ${count} with a slow key derivation on purpose, about 25 seconds each. This waits up to ${seconds} seconds; leave the cable in.`
       try {
-        await serialVaultUnlock(serialTransport, keyHex)
+        await serialVaultUnlock(serialTransport, keyHex, lockedSlots)
       } finally {
         device.awaitingButton = null
       }
@@ -96,7 +134,7 @@
   async function unlockRelay(keyHex: string | undefined, remember: boolean) {
     busy = true
     status = null
-    device.awaitingButton = 'Sending the vault key — the signer unseals each identity with a slow key derivation on purpose; give it a few seconds per identity.'
+    device.awaitingButton = 'Sending the vault key — the signer unseals each identity with a slow key derivation on purpose, about 25 seconds each, then rejoins its relays.'
     try {
       await sendVaultKeyOverRelay(keyHex)
       if (remember && keyHex && deviceKey) {
@@ -105,6 +143,7 @@
       }
       pasteValue = ''
       sent = true
+      sentGeneration = device.connectionGeneration
     } catch (e) {
       status = e instanceof Error ? e.message : 'Could not deliver the vault key.'
     } finally {
@@ -195,11 +234,24 @@
     {/if}
     {#if status}<p class="hint-sm vault-status">{status}</p>{/if}
   </section>
-{:else if sent && device.mode === 'relay'}
+{:else if device.vaultReconnect}
   <section class="card card--live vault-banner" role="status">
     <p class="hint no-gap">
-      Vault key sent. The signer should unlock within a few seconds; this screen recovers
-      on its own once it does.
+      Vault key sent. Waiting for the signer to unseal and rejoin its relays — about 25 seconds an
+      identity, then ~20 seconds to reconnect. Dialling it again every 10 seconds
+      (attempt {device.vaultReconnect.attempt}, {reconnectElapsed}s so far).
+    </p>
+  </section>
+{:else if sent && relayContext}
+  <section class="card card--live vault-banner" role="status">
+    <p class="hint no-gap">
+      {#if device.connected}
+        Vault key sent. The signer should unlock within a minute or so; this screen recovers
+        on its own once it does.
+      {:else}
+        Vault key sent. The signer did not come back within five minutes. If its screen
+        says it is unlocked, retry the connection; if it still says locked, unlock it again.
+      {/if}
     </p>
   </section>
 {/if}

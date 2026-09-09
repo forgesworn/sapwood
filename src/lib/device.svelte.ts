@@ -256,6 +256,14 @@ export const device = $state({
    *  delivery target. Re-announced roughly every 60s while locked, so
    *  `lastSeen` going stale means the signer unlocked (or went quiet). */
   vaultUnlockRequest: null as { unlockPub: string; lastSeen: number } | null,
+  /** Relay: the signer we tried to reach and could not, because it is locked.
+   *  A locked signer never completes the management handshake, so `mode`
+   *  stays 'none' and nothing else remembers who we were dialling; the unlock
+   *  banner and the post-delivery reconnect both need it. */
+  vaultRelayTarget: null as { pubHex: string; relays: string[]; label?: string } | null,
+  /** Relay: after a vault-key delivery, the automatic reconnect that waits for
+   *  the signer to unseal and rejoin its relays. `attempt` counts dials. */
+  vaultReconnect: null as { attempt: number; startedAt: number } | null,
   /** Exact state read from the attached signer; never contains a password. */
   usbNetworkState: null as UsbNetworkState | null,
   usbNetworkSupport: 'unknown' as 'unknown' | 'supported' | 'unsupported',
@@ -846,31 +854,86 @@ function startVaultWatcher(relays: string[], operatorPubHex: string | string[]):
  */
 export async function sendVaultKeyOverRelay(keyHex?: string): Promise<void> {
   const request = device.vaultUnlockRequest
-  if (device.mode !== 'relay' || !request) {
+  const target = device.vaultRelayTarget
+  if ((device.mode !== 'relay' && !target) || !request) {
     throw new Error('The signer is not asking for its vault key right now.')
   }
-  const key = keyHex ?? (device.relayDevicePub ? loadVaultKey(device.relayDevicePub) : null)
+  const key = keyHex ?? loadVaultKey(vaultRelayDevicePub())
   if (!key) {
     throw new Error('This browser does not hold the vault key for this signer. Paste your escrowed copy.')
   }
   const operator = getOperatorCandidates().find((o) => o.pubHex === device.operatorPub)
     ?? getOperatorCandidates()[0]
   if (!operator) throw new Error('No operator key is available in this browser.')
+  const relays = device.mode === 'relay' ? device.relays : (target?.relays ?? [])
   if (vaultWatcher) {
     await vaultWatcher.publishDelivery(operator.skHex, request.unlockPub, key)
   } else {
     // The watcher failed to start (relay trouble): fall back to a one-shot pool.
     const pool = new SimplePool()
     try {
-      await publishVaultDelivery(pool, device.relays, operator.skHex, request.unlockPub, key)
+      await publishVaultDelivery(pool, relays, operator.skHex, request.unlockPub, key)
     } finally {
       try { pool.destroy() } catch { /* ignore */ }
     }
   }
   device.vaultUnlockRequest = null
-  // The signer unwraps and resumes within seconds; refresh so status/clients
-  // recover without waiting for the next poll tick.
-  void relayRefresh()
+  if (relayTransport) {
+    // Still connected from before the reboot: refresh so status/clients
+    // recover without waiting for the next poll tick.
+    void relayRefresh()
+  } else if (target) {
+    // Never got a session (the signer was locked when we dialled): the unseal
+    // takes ~25 s an identity and the WiFi rejoin another ~20 s, so keep
+    // dialling until it answers rather than leaving the operator to guess.
+    void reconnectAfterVaultUnlock(target)
+  }
+}
+
+/** The pubkey a relay signer's vault key is stored against, connected or not. */
+export function vaultRelayDevicePub(): string {
+  return device.relayDevicePub || device.vaultRelayTarget?.pubHex || ''
+}
+
+const VAULT_RECONNECT_WINDOW_MS = 300_000
+const VAULT_RECONNECT_PAUSE_MS = 10_000
+let vaultReconnectRun = 0
+
+/**
+ * After a relay vault-key delivery, dial the signer until it comes back,
+ * gives up, or something else takes over the connection. Stops on: a live
+ * session (success), a FRESH lock announcement (the key did not unlock it —
+ * the banner returns and the operator retries), the operator disconnecting or
+ * dialling elsewhere, or the window running out.
+ */
+async function reconnectAfterVaultUnlock(
+  target: { pubHex: string; relays: string[]; label?: string },
+): Promise<void> {
+  const run = ++vaultReconnectRun
+  const startedAt = Date.now()
+  device.vaultReconnect = { attempt: 0, startedAt }
+  const current = () => vaultReconnectRun === run && device.vaultReconnect !== null
+  try {
+    while (current() && Date.now() - startedAt < VAULT_RECONNECT_WINDOW_MS) {
+      if (device.connected) return
+      if (device.vaultUnlockRequest && device.vaultUnlockRequest.lastSeen > startedAt) return
+      device.vaultReconnect = { attempt: device.vaultReconnect!.attempt + 1, startedAt }
+      try {
+        await connectRelay(target.pubHex, target.relays, target.label)
+        return
+      } catch { /* still unsealing or rejoining — dial again after a pause */ }
+      if (!current()) return
+      await new Promise((resolve) => setTimeout(resolve, VAULT_RECONNECT_PAUSE_MS))
+    }
+  } finally {
+    if (vaultReconnectRun === run) device.vaultReconnect = null
+  }
+}
+
+/** Abandon the post-unlock reconnect (the operator dialled elsewhere or left). */
+export function cancelVaultReconnect(): void {
+  vaultReconnectRun += 1
+  device.vaultReconnect = null
 }
 
 /**
@@ -909,7 +972,10 @@ export async function connectRelay(
     const pubs = getOperatorCandidates()
       .filter((o) => !requiredOperatorPubHex || o.pubHex === requiredOperatorPubHex.toLowerCase())
       .map((o) => o.pubHex)
-    if (pubs.length) startVaultWatcher(recoveryRelays, pubs)
+    if (pubs.length) {
+      startVaultWatcher(recoveryRelays, pubs)
+      device.vaultRelayTarget = { pubHex: devicePubHex, relays, label }
+    }
     throw error
   }
   const { transport: t, status } = selected
@@ -924,6 +990,8 @@ export async function connectRelay(
   device.mode = 'relay'
   device.relayDevicePub = t.devicePub
   device.operatorPub = t.operatorPub
+  device.vaultRelayTarget = null
+  device.vaultReconnect = null
   device.portInfo = `${npubShort(devicePubHex)} · ${relaySummary(recoveryRelays)}`
   device.error = null
   device.masters = []
@@ -1503,6 +1571,8 @@ export async function refreshRelayAudit(): Promise<void> {
 export async function disconnect() {
   device.connectionGeneration += 1
   stopVaultWatcher()
+  cancelVaultReconnect()
+  device.vaultRelayTarget = null
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   device.slotUris = {} // session-only links; don't carry them to the next signer
   device.wifiJoinError = null

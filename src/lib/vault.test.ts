@@ -17,9 +17,11 @@ import {
   normaliseVaultKeyHex,
   parseVaultAnnouncement,
   removeVaultKey,
+  serialVaultLockedSlots,
   serialVaultSet,
   serialVaultUnlock,
   storeVaultKey,
+  vaultUnlockTimeoutMs,
 } from './vault.js'
 import type { Frame } from './frame.js'
 
@@ -146,7 +148,57 @@ describe('serialVaultSet', () => {
   })
 })
 
+describe('vaultUnlockTimeoutMs', () => {
+  it('budgets per sealed identity — three masters measured at 73.8 s must fit', () => {
+    expect(vaultUnlockTimeoutMs(3)).toBeGreaterThan(74_000 * 1.5)
+    expect(vaultUnlockTimeoutMs(1)).toBeGreaterThan(25_000 * 2)
+    expect(vaultUnlockTimeoutMs(3)).toBeGreaterThan(vaultUnlockTimeoutMs(1))
+  })
+
+  it('assumes a typical signer when the count is unknown, and clamps', () => {
+    expect(vaultUnlockTimeoutMs(null)).toBe(vaultUnlockTimeoutMs(3))
+    expect(vaultUnlockTimeoutMs(0)).toBe(vaultUnlockTimeoutMs(1))
+    expect(vaultUnlockTimeoutMs(999)).toBe(vaultUnlockTimeoutMs(16))
+  })
+})
+
+describe('serialVaultLockedSlots', () => {
+  function list(rows: unknown): Frame {
+    return { type: FrameType.PROVISION_LIST_RESPONSE, payload: new TextEncoder().encode(JSON.stringify(rows)) }
+  }
+
+  it('asks PROVISION_LIST and counts locked masters', async () => {
+    const { transport, calls } = fakeTransport(list([
+      { slot: 0, label: 'a', npub: 'x', locked: true },
+      { slot: 1, label: 'b', npub: 'y' },
+      { slot: 2, label: 'c', npub: 'z', locked: true },
+    ]))
+    await expect(serialVaultLockedSlots(transport as never)).resolves.toBe(2)
+    expect(parseFrame(calls[0]!.frame).type).toBe(FrameType.PROVISION_LIST)
+    expect(calls[0]!.types).toEqual([FrameType.PROVISION_LIST_RESPONSE, FrameType.NACK])
+  })
+
+  it('reports zero for a signer that already unsealed', async () => {
+    const { transport } = fakeTransport(list([{ slot: 0, label: 'a', npub: 'x' }]))
+    await expect(serialVaultLockedSlots(transport as never)).resolves.toBe(0)
+  })
+
+  it('returns null when the signer does not say (NACK or garbage)', async () => {
+    await expect(serialVaultLockedSlots(fakeTransport(nack('nope')).transport as never)).resolves.toBeNull()
+    const garbage: Frame = { type: FrameType.PROVISION_LIST_RESPONSE, payload: new TextEncoder().encode('{') }
+    await expect(serialVaultLockedSlots(fakeTransport(garbage).transport as never)).resolves.toBeNull()
+  })
+})
+
 describe('serialVaultUnlock', () => {
+  it('waits long enough for the sealed identities it was told about', async () => {
+    const { transport, calls } = fakeTransport(ack())
+    await serialVaultUnlock(transport as never, KEY, 3)
+    expect(calls[0]!.timeout).toBe(vaultUnlockTimeoutMs(3))
+    await serialVaultUnlock(transport as never, KEY)
+    expect(calls[1]!.timeout).toBe(vaultUnlockTimeoutMs(null))
+  })
+
   it('sends VAULT_UNLOCK (0x63) with the 32-byte key', async () => {
     const { transport, calls } = fakeTransport(ack())
     await serialVaultUnlock(transport as never, KEY)
