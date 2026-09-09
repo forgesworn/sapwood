@@ -23,6 +23,14 @@ All notable changes to Sapwood are recorded here. Format loosely follows
   all work, and after delivery Sapwood keeps dialling for up to five minutes
   while the signer unseals and rejoins its relays, instead of promising a
   recovery that never came.
+- **The relay reconnect no longer quits mid-unseal.** A locked board
+  re-announces every 60 seconds and relays forward those ephemerals for a few
+  seconds more, so one arriving just after the vault key was delivered looked
+  like a failed unlock and abandoned the reconnect while the board was still
+  unsealing (seen on hardware: the device reached two of three identities
+  unlocked before Sapwood gave up). The reconnect now silences the watcher for
+  the unseal budget, stops each failed probe from re-arming it, and treats an
+  announcement as a real "still locked" signal only past that budget.
 
 ## 0.15.0 — 2026-08-14
 

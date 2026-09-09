@@ -112,7 +112,7 @@ import {
   mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning,
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
-  ensureSapwoodPairing, serialRemovePersona,
+  ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
 } from './device.svelte.js'
 import { FrameType } from './frame.js'
 import { generateOperatorMnemonic, getOrCreateOperator, pubHexFromSecret } from './op-mgmt.js'
@@ -2226,5 +2226,30 @@ describe('Sapwood manager pairing', () => {
     await expect(serialRemovePersona(nip19.npubEncode('ba'.repeat(32))))
       .rejects.toThrow('unknown persona')
     expect(nip46Mock.removePersona).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe('vaultReconnectShouldAbort (post-delivery reconnect)', () => {
+  const started = 1_000_000
+  const grace = 120_000
+
+  it('ignores an announcement within the unseal budget — the board is still working', () => {
+    // The regression: a locked board re-announces every 60s and relays forward
+    // the ephemeral for seconds more, so one landing just after delivery used
+    // to abort the reconnect while the board unsealed. It must not.
+    expect(vaultReconnectShouldAbort(started + 1_000, started, grace)).toBe(false)
+    expect(vaultReconnectShouldAbort(started + 60_000, started, grace)).toBe(false)
+    expect(vaultReconnectShouldAbort(started + grace, started, grace)).toBe(false)
+  })
+
+  it('aborts on an announcement stamped past the budget — genuinely still locked', () => {
+    expect(vaultReconnectShouldAbort(started + grace + 1, started, grace)).toBe(true)
+    expect(vaultReconnectShouldAbort(started + 200_000, started, grace)).toBe(true)
+  })
+
+  it('never aborts when no announcement has been seen', () => {
+    expect(vaultReconnectShouldAbort(null, started, grace)).toBe(false)
+    expect(vaultReconnectShouldAbort(undefined, started, grace)).toBe(false)
   })
 })

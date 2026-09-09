@@ -897,14 +897,41 @@ export function vaultRelayDevicePub(): string {
 
 const VAULT_RECONNECT_WINDOW_MS = 300_000
 const VAULT_RECONNECT_PAUSE_MS = 10_000
+// How long to give the board to unseal and rejoin before a persisting "locked"
+// announcement is read as a real failure rather than the board still working.
+// The unseal is ~25s per sealed identity (three ≈ 74s measured) plus ~20s to
+// rejoin WiFi and its relays; this sits above that with margin.
+const VAULT_UNSEAL_GRACE_MS = 120_000
 let vaultReconnectRun = 0
 
 /**
- * After a relay vault-key delivery, dial the signer until it comes back,
- * gives up, or something else takes over the connection. Stops on: a live
- * session (success), a FRESH lock announcement (the key did not unlock it —
- * the banner returns and the operator retries), the operator disconnecting or
- * dialling elsewhere, or the window running out.
+ * During a post-delivery reconnect, decide whether a locked-boot announcement
+ * means the unlock genuinely failed, rather than the board still unsealing. The
+ * board re-announces every 60s while locked and relays forward those ephemerals
+ * for seconds more, so an announcement within the unseal budget is expected
+ * noise; only one stamped past the budget is a real "still locked" signal.
+ * Exported for tests — this is the exact judgement the old loop got wrong.
+ */
+export function vaultReconnectShouldAbort(
+  announcementLastSeen: number | null | undefined,
+  startedAt: number,
+  graceMs: number = VAULT_UNSEAL_GRACE_MS,
+): boolean {
+  return typeof announcementLastSeen === 'number' && announcementLastSeen > startedAt + graceMs
+}
+
+/**
+ * After a relay vault-key delivery, dial the signer until it comes back, gives
+ * up, or something else takes over.
+ *
+ * The subtlety is that a locked board re-announces on kind 24135 every 60s and
+ * relays forward those ephemerals for a few seconds more, so an announcement
+ * arriving just after delivery is the board still unsealing, not a delivery
+ * that failed. Acting on it (the previous behaviour) flipped the UI back to the
+ * ask banner and abandoned a working unlock mid-unseal. So this silences the
+ * watcher for the unseal budget and dials on regardless; only past the budget,
+ * with a session still not forming, does it re-arm the watcher and let a
+ * genuinely-still-locked signer bring the ask banner back.
  */
 async function reconnectAfterVaultUnlock(
   target: { pubHex: string; relays: string[]; label?: string },
@@ -912,17 +939,27 @@ async function reconnectAfterVaultUnlock(
   const run = ++vaultReconnectRun
   const startedAt = Date.now()
   device.vaultReconnect = { attempt: 0, startedAt }
+  stopVaultWatcher() // clears vaultUnlockRequest; no strays abort the unseal
   const current = () => vaultReconnectRun === run && device.vaultReconnect !== null
+  let rearmed = false
   try {
     while (current() && Date.now() - startedAt < VAULT_RECONNECT_WINDOW_MS) {
       if (device.connected) return
-      if (device.vaultUnlockRequest && device.vaultUnlockRequest.lastSeen > startedAt) return
       device.vaultReconnect = { attempt: device.vaultReconnect!.attempt + 1, startedAt }
       try {
-        await connectRelay(target.pubHex, target.relays, target.label)
+        await connectRelay(target.pubHex, target.relays, target.label, undefined, undefined, undefined, { surfaceLockedSigner: false })
         return
       } catch { /* still unsealing or rejoining — dial again after a pause */ }
       if (!current()) return
+      // Past the unseal budget without a session: re-arm the watcher once, so a
+      // real, sustained "locked" announcement (a wrong key, a lost delivery)
+      // can surface the ask banner, and honour one stamped beyond the budget.
+      if (!rearmed && Date.now() - startedAt > VAULT_UNSEAL_GRACE_MS) {
+        rearmed = true
+        const pubs = getOperatorCandidates().map((o) => o.pubHex)
+        if (pubs.length) startVaultWatcher(target.relays, pubs)
+      }
+      if (vaultReconnectShouldAbort(device.vaultUnlockRequest?.lastSeen, startedAt)) return
       await new Promise((resolve) => setTimeout(resolve, VAULT_RECONNECT_PAUSE_MS))
     }
   } finally {
@@ -948,6 +985,7 @@ export async function connectRelay(
   requiredOperatorPubHex?: string,
   signal?: AbortSignal,
   onProgress?: (stage: RelayConnectProgress) => void,
+  opts: { surfaceLockedSigner?: boolean } = {},
 ) {
   resetIdMetaSync() // a reconnect should retry the identity-card push, not stay given-up
   // A killed/reloaded mobile tab may have left an activated handoff whose
@@ -969,12 +1007,17 @@ export async function connectRelay(
     // connect timeout is exactly what a vault-locked device looks like. Start
     // the announcement watcher even though the handshake failed, so the
     // "Signer is locked" banner appears instead of a bare connect error.
-    const pubs = getOperatorCandidates()
-      .filter((o) => !requiredOperatorPubHex || o.pubHex === requiredOperatorPubHex.toLowerCase())
-      .map((o) => o.pubHex)
-    if (pubs.length) {
-      startVaultWatcher(recoveryRelays, pubs)
-      device.vaultRelayTarget = { pubHex: devicePubHex, relays, label }
+    // The post-delivery reconnect manages the watcher itself and must not have
+    // each of its failed probes re-arm it — a re-armed watcher catches the
+    // board's still-in-flight "locked" announcement and abandons a good unlock.
+    if (opts.surfaceLockedSigner !== false) {
+      const pubs = getOperatorCandidates()
+        .filter((o) => !requiredOperatorPubHex || o.pubHex === requiredOperatorPubHex.toLowerCase())
+        .map((o) => o.pubHex)
+      if (pubs.length) {
+        startVaultWatcher(recoveryRelays, pubs)
+        device.vaultRelayTarget = { pubHex: devicePubHex, relays, label }
+      }
     }
     throw error
   }
