@@ -12,6 +12,7 @@ export const COMMON_KINDS: KindInfo[] = [
   // Identity -- high risk
   { kind: 0,     label: 'Profile',      risk: 'high',   category: 'identity' },
   { kind: 3,     label: 'Contacts',     risk: 'high',   category: 'identity' },
+  { kind: 20460, label: 'KithMoot Device Credential', risk: 'high', category: 'identity' },
   { kind: 10002, label: 'Relay List',   risk: 'high',   category: 'relay' },
 
   // Social -- medium risk
@@ -68,7 +69,7 @@ const ALL_LABELS: Record<number, string> = {
   10013: 'Private Relay List', 10019: 'Nutzap Mint Recommendation',
   10030: 'Emoji List', 10050: 'DM Relays', 13194: 'Wallet Info',
   17375: 'Cashu Wallet', 22242: 'Relay Auth', 23194: 'Wallet Request',
-  23195: 'Wallet Response', 24133: 'NIP-46', 27117: 'Gated Deposit Auth',
+  20460: 'KithMoot Device Credential', 23195: 'Wallet Response', 24133: 'NIP-46', 27117: 'Gated Deposit Auth',
   27235: 'HTTP Auth',
   30000: 'Follow Sets', 30001: 'Bookmarks', 30002: 'Relay Sets',
   30003: 'Bookmark Sets', 30007: 'Kind Mute Sets',

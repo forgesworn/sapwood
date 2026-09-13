@@ -45,10 +45,10 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
   {
     id: 'messaging',
     label: 'Messages only',
-    description: 'Direct messages only. Good for a chat app.',
+    description: 'Direct messages and KithMoot private rooms. Good for a chat app.',
     // Legacy NIP-04 plus signed NIP-17 seals/gift wraps. Kinds 14/15 are
     // deliberately absent: NIP-17 message rumors are unsigned.
-    kinds: [4, 13, 1059],
+    kinds: [4, 13, 1059, 20460],
     methods: [...CONNECT_METHODS, 'sign_event'],
   },
   {

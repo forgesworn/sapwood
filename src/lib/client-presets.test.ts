@@ -42,8 +42,8 @@ describe('resolveKinds', () => {
     expect(kinds).not.toContain(3) // contacts
   })
 
-  it('messaging covers signed DM envelopes but not unsigned NIP-17 rumors', () => {
-    expect(resolveKinds('messaging')).toEqual([4, 13, 1059])
+  it('messaging covers signed DM envelopes and private-room device credentials but not unsigned NIP-17 rumors', () => {
+    expect(resolveKinds('messaging')).toEqual([4, 13, 1059, 20460])
   })
 
   it('custom uses the supplied kinds, de-duplicated and sorted', () => {
