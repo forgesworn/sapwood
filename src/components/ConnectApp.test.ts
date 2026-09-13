@@ -73,7 +73,7 @@ describe('ConnectApp — happy path', () => {
     await screen.findByText('Connection ready')
     expect(mockCreate).toHaveBeenCalledWith('chat app', {
       allowed_methods: ['get_public_key', 'nip44_encrypt', 'nip44_decrypt', 'nip04_encrypt', 'nip04_decrypt', 'sign_event'],
-      allowed_kinds: [4, 13, 1059],
+      allowed_kinds: [4, 13, 1059, 20460],
       auto_approve: true,
     }, undefined)
   })

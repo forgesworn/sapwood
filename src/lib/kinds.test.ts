@@ -4,6 +4,7 @@ import { COMMON_KINDS, kindLabel, kindInfo, riskColour } from './kinds.js'
 describe('kindLabel', () => {
   it('names a known kind with its number', () => {
     expect(kindLabel(1)).toBe('Note (1)')
+    expect(kindLabel(20460)).toBe('KithMoot Device Credential (20460)')
     expect(kindLabel(24133)).toBe('NIP-46 (24133)')
   })
 
@@ -20,6 +21,9 @@ describe('kindLabel', () => {
 describe('kindInfo', () => {
   it('returns the entry for a common kind', () => {
     expect(kindInfo(1)).toMatchObject({ kind: 1, label: 'Note', risk: 'medium', category: 'social' })
+    expect(kindInfo(20460)).toMatchObject({
+      kind: 20460, label: 'KithMoot Device Credential', risk: 'high', category: 'identity',
+    })
   })
 
   it('returns undefined for a kind outside COMMON_KINDS', () => {
