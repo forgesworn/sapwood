@@ -68,7 +68,7 @@ function beginError(status: number | undefined): string {
     case OtaStatus.ERR_SIZE:
       return "That firmware is too big for the device's update slot."
     case OtaStatus.ERR_WRITE:
-      return "The device couldn't prepare its update slot. Try again."
+      return "The device couldn't prepare an update slot. If it has only one firmware slot it can't install over the air; otherwise, try again."
     case OtaStatus.ERR_SIG:
       return "The device couldn't confirm this firmware is a genuine release, so it refused it. Update using the official firmware bundled with this app."
     default:

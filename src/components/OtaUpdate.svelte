@@ -9,7 +9,7 @@
   // show "running vX → update to vY" and update in one click — no .bin hunting.
   import { onMount } from 'svelte'
   import { device, serialTransport, httpTransport, getFirmwareVersion, disconnect } from '../lib/device.svelte.js'
-  import { streamOta } from '../lib/ota.js'
+  import { streamOta, OtaError, OtaStatus } from '../lib/ota.js'
   import { isUpgrade, compareVersions } from '../lib/version.js'
   import { BOARDS, flashAppOnly } from '../lib/flasher'
 
@@ -35,6 +35,12 @@
   let status = $state<'idle' | 'waiting' | 'uploading' | 'verifying' | 'done' | 'error'>('idle')
   let message = $state('')
   let showAdvanced = $state(false)
+  // Set when an over-the-air update fails to prepare a slot. On a board with a
+  // single firmware slot (an early V4 on the legacy table) OTA can never install:
+  // ESP-IDF proposes the running slot and the device refuses. The USB app-only
+  // update is its in-place route, and flashAppOnly checks the partition table
+  // before writing, so offering it here is safe on any board.
+  let suggestUsb = $state(false)
 
   let available = $state<Manifest | null>(null)
   let usbInfo = $state<{ version: string; board: string } | null>(null)
@@ -105,6 +111,7 @@
 
   async function runUpdate(data: Uint8Array, signature?: Uint8Array) {
     progress = 0
+    suggestUsb = false
     try {
       if (device.mode === 'http') {
         // The bridge call blocks through approval AND upload, so the status
@@ -140,18 +147,22 @@
     } catch (e) {
       status = 'error'
       message = e instanceof Error ? e.message : 'The update could not be completed.'
+      suggestUsb =
+        e instanceof OtaError && e.status === OtaStatus.ERR_WRITE && BOARDS.some((b) => b.id === boardKey)
     }
   }
 
   /**
-   * App-only USB re-flash for boards without an OTA slot (T-Display, C6):
-   * writes just the firmware region, so identity, keys and network settings
-   * stay on the device. Frees the console's serial connection first —
+   * App-only USB re-flash for boards with a single firmware slot (T-Display,
+   * C6, and an early V4 on the legacy single-slot table): writes just the
+   * firmware region, so identity, keys and network settings stay on the device.
+   * flashAppOnly reads the partition table first and refuses a two-slot board. Frees the console's serial connection first —
    * esptool needs the port exclusively.
    */
   async function quickUsbUpdate() {
     const board = BOARDS.find((b) => b.id === boardKey)
     if (!board || busy) return
+    suggestUsb = false
     try {
       status = 'waiting'
       message = 'Pick the signer in the browser port chooser…'
@@ -283,6 +294,11 @@
       <button class="btn btn-primary" disabled={busy} onclick={updateToLatest}>
         {busy ? 'Updating…' : `Update to v${latest} →`}
       </button>
+      <p class="hint-sm">
+        Board with only one firmware slot, such as an early V4? It can't install over the air.
+        <button class="btn btn-link btn-sm" disabled={busy} onclick={quickUsbUpdate}>Update over USB instead</button>
+        — Sapwood reads the board's partition table first and writes nothing to a board with two slots.
+      </p>
     {:else if latest && boardMeta && !otaCapable}
       <p class="hint">
         This board has no over-the-air update slot, so it updates over USB. The quick update
@@ -338,6 +354,14 @@
         class:success-text={status === 'done'}
         class:hint-sm={status !== 'error' && status !== 'done'}
       >{message}</p>
+    {/if}
+    {#if suggestUsb && status === 'error'}
+      <p class="hint">
+        If this board has only one firmware slot, over-the-air updates can't install on it. Update over
+        USB instead: it rewrites only the firmware, keeps your identity and settings, and checks the
+        partition table before writing anything.
+      </p>
+      <button class="btn btn-primary" disabled={busy} onclick={quickUsbUpdate}>Update over USB instead →</button>
     {/if}
     {#if updateConfirmed}
       <p class="status-msg success-text">Confirmed: the signer itself reports v{usbInfo?.version}.</p>

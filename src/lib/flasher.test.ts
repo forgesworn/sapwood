@@ -11,6 +11,10 @@ import {
   flashDevice,
   flashAppOnly,
   flashTetheredImage,
+  parsePartitionTable,
+  planAppOnlyWrite,
+  PARTITION_TABLE_OFFSET,
+  PARTITION_TABLE_SIZE,
   defaultBackend,
   BOARDS,
   TETHERED_BOARDS,
@@ -51,6 +55,55 @@ function manifestForSha(boardId: string, sha256: string) {
   }
 }
 
+type Row = [label: string, type: number, subtype: number, offset: number, size: number]
+
+/** Encode an ESP-IDF binary partition table (erased flash after the rows). */
+function table(rows: Row[]): Uint8Array {
+  const out = new Uint8Array(PARTITION_TABLE_SIZE).fill(0xff)
+  const view = new DataView(out.buffer)
+  rows.forEach(([label, type, subtype, offset, size], i) => {
+    const o = i * 32
+    out.set([0xaa, 0x50, type, subtype], o)
+    view.setUint32(o + 4, offset, true)
+    view.setUint32(o + 8, size, true)
+    out.fill(0, o + 12, o + 32)
+    out.set(new TextEncoder().encode(label), o + 12)
+  })
+  return out
+}
+
+// Mirrors heartwood-esp32/firmware/partitions-4mb.csv (T-Display, C6).
+const FACTORY_4MB = table([
+  ['nvs', 1, 0x02, 0x9000, 0x6000],
+  ['phy_init', 1, 0x01, 0xf000, 0x1000],
+  ['factory', 0, 0x00, 0x10000, 0x300000],
+  ['config', 1, 0x40, 0x310000, 0x4000],
+])
+// Mirrors firmware/partitions.csv — the fleet V3/V4 A/B layout.
+const V4_TWO_SLOT = table([
+  ['nvs', 1, 0x02, 0x9000, 0x4000],
+  ['otadata', 1, 0x00, 0xd000, 0x2000],
+  ['phy_init', 1, 0x01, 0xf000, 0x1000],
+  ['ota_0', 0, 0x10, 0x10000, 0x200000],
+  ['ota_1', 0, 0x11, 0x210000, 0x200000],
+  ['config', 1, 0x40, 0x410000, 0x4000],
+])
+// The real table read off the one-off legacy V4 (2026-09-13): 5 rows, then the
+// ESP-IDF MD5 row (0xEB 0xEB) and erased flash. Not synthesised — this is what
+// gen_esp32part produced, flags field and all.
+const V4_LEGACY_BIGAPP_REAL = (() => {
+  const hex =
+    'aa50010200900000006000006e76730000000000000000000000000000000000' +
+    'aa50010100f00000001000007068795f696e6974000000000000000000000000' +
+    'aa50001000000100000040006f74615f30000000000000000000000000000000' +
+    'aa5001400000410000400000636f6e6669670000000000000000000000000000' +
+    'aa50010000404100002000006f74616461746100000000000000000000000000' +
+    'ebebffffffffffffffffffffffffffff747e37eb8fb17ce12b1a9c719a817d23'
+  const out = new Uint8Array(PARTITION_TABLE_SIZE).fill(0xff)
+  out.set(Uint8Array.from(hex.match(/../g)!.map((h) => parseInt(h, 16))))
+  return out
+})()
+
 interface Harness {
   backend: FlasherBackend
   session: FlashSession
@@ -67,6 +120,8 @@ function makeHarness(opts: {
   hasWebSerial?: boolean
   detectChip?: () => Promise<string>
   writeFlash?: FlashSession['writeFlash']
+  /** What reading the partition table returns. Defaults to the 4 MB factory layout. */
+  partitionTable?: Uint8Array
   hardReset?: () => Promise<void>
   close?: () => Promise<void>
   onWrite?: (report: ReportProgress) => void | Promise<void>
@@ -74,7 +129,7 @@ function makeHarness(opts: {
   const fetched: string[] = []
   let wrote: FlashRegion[] | null = null
   const calls: Record<string, number> = {
-    requestPort: 0, openSession: 0, detectChip: 0, eraseFlash: 0, writeFlash: 0, hardReset: 0, close: 0,
+    requestPort: 0, openSession: 0, detectChip: 0, eraseFlash: 0, writeFlash: 0, readFlash: 0, hardReset: 0, close: 0,
   }
   const onWrite = opts.onWrite ?? (() => {})
 
@@ -90,6 +145,11 @@ function makeHarness(opts: {
           wrote = regions
           await onWrite(report)
         }),
+    readFlash: vi.fn(async (address: number, size: number) => {
+      calls.readFlash++
+      expect([address, size]).toEqual([PARTITION_TABLE_OFFSET, PARTITION_TABLE_SIZE])
+      return opts.partitionTable ?? FACTORY_4MB
+    }),
     hardReset: vi.fn(opts.hardReset ?? (async () => { calls.hardReset++ })),
     close: vi.fn(opts.close ?? (async () => { calls.close++ })),
   }
@@ -428,6 +488,104 @@ describe('flashAppOnly — quick USB update for non-OTA boards', () => {
   it('requires Web Serial', async () => {
     const h = makeHarness({ hasWebSerial: false })
     await expect(flashAppOnly(tdisplay, {}, h.backend)).rejects.toThrow(/Web Serial unavailable/)
+  })
+
+  const v4 = BOARDS.find((b) => b.id === 'heltec-v4')!
+
+  it('updates a V4 on the single-slot legacy table in place — the board OTA can never install on', async () => {
+    const h = makeHarness({ partitionTable: V4_LEGACY_BIGAPP_REAL })
+    await flashAppOnly(v4, {}, h.backend)
+    expect(h.wrote()!.map((r) => r.address)).toEqual([0x10000])
+    expect(h.calls.eraseFlash).toBe(0)
+    expect(h.calls.hardReset).toBe(1)
+  })
+
+  it('reads the partition table before writing anything', async () => {
+    const order: string[] = []
+    const h = makeHarness({ partitionTable: V4_LEGACY_BIGAPP_REAL, writeFlash: async () => { order.push('write') } })
+    ;(h.session.readFlash as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      order.push('read-table')
+      return V4_LEGACY_BIGAPP_REAL
+    })
+    await flashAppOnly(v4, {}, h.backend)
+    expect(order).toEqual(['read-table', 'write'])
+  })
+
+  it('refuses a two-slot V4, writes nothing, and boots the board back', async () => {
+    const h = makeHarness({ partitionTable: V4_TWO_SLOT })
+    await expect(flashAppOnly(v4, {}, h.backend)).rejects.toThrow(/two firmware slots/)
+    expect(h.calls.writeFlash).toBe(0)
+    expect(h.calls.eraseFlash).toBe(0)
+    // detectChip left it in download mode: it must be reset, not left looking dead.
+    expect(h.calls.hardReset).toBe(1)
+    expect(h.calls.close).toBe(1)
+  })
+
+  it('refuses when the table cannot be read', async () => {
+    const h = makeHarness({ partitionTable: new Uint8Array(PARTITION_TABLE_SIZE).fill(0xff) })
+    await expect(flashAppOnly(v4, {}, h.backend)).rejects.toThrow(/partition table/)
+    expect(h.calls.writeFlash).toBe(0)
+    expect(h.calls.hardReset).toBe(1)
+  })
+})
+
+describe('parsePartitionTable', () => {
+  it('decodes the real legacy V4 table and stops at the MD5 row', () => {
+    expect(parsePartitionTable(V4_LEGACY_BIGAPP_REAL)).toEqual([
+      { type: 1, subtype: 0x02, offset: 0x9000, size: 0x6000, label: 'nvs' },
+      { type: 1, subtype: 0x01, offset: 0xf000, size: 0x1000, label: 'phy_init' },
+      { type: 0, subtype: 0x10, offset: 0x10000, size: 0x400000, label: 'ota_0' },
+      { type: 1, subtype: 0x40, offset: 0x410000, size: 0x4000, label: 'config' },
+      { type: 1, subtype: 0x00, offset: 0x414000, size: 0x2000, label: 'otadata' },
+    ])
+  })
+
+  it('reads erased flash as no table at all', () => {
+    expect(parsePartitionTable(new Uint8Array(PARTITION_TABLE_SIZE).fill(0xff))).toEqual([])
+  })
+})
+
+describe('planAppOnlyWrite', () => {
+  const beta8 = 2_078_928 // app-heltec-v4.bin, v0.18.0-beta.8
+
+  it('allows the one-slot layouts', () => {
+    expect(planAppOnlyWrite(parsePartitionTable(FACTORY_4MB), beta8).ok).toBe(true)
+    expect(planAppOnlyWrite(parsePartitionTable(V4_LEGACY_BIGAPP_REAL), beta8).ok).toBe(true)
+  })
+
+  it('refuses the A/B layout and says to use OTA', () => {
+    const plan = planAppOnlyWrite(parsePartitionTable(V4_TWO_SLOT), beta8)
+    expect(plan.ok).toBe(false)
+    expect(!plan.ok && plan.reason).toMatch(/two firmware slots.*over the air/)
+  })
+
+  it('refuses an image larger than the slot', () => {
+    const plan = planAppOnlyWrite(parsePartitionTable(FACTORY_4MB), 0x300001)
+    expect(!plan.ok && plan.reason).toMatch(/doesn't fit/)
+  })
+
+  it('refuses a slot that does not start at 0x10000', () => {
+    const t = table([['nvs', 1, 0x02, 0x9000, 0x6000], ['factory', 0, 0x00, 0x20000, 0x300000]])
+    expect(planAppOnlyWrite(parsePartitionTable(t), 1000).ok).toBe(false)
+  })
+
+  it('refuses a write that would reach a data partition', () => {
+    // A (malformed) table whose data partition sits inside the app range.
+    const t = table([
+      ['nvs', 1, 0x02, 0x9000, 0x6000],
+      ['factory', 0, 0x00, 0x10000, 0x300000],
+      ['config', 1, 0x40, 0x20000, 0x4000],
+    ])
+    const plan = planAppOnlyWrite(parsePartitionTable(t), 0x20000)
+    expect(!plan.ok && plan.reason).toMatch(/overlap the "config" partition/)
+  })
+
+  it('never lets the write reach NVS on any shipped V4 layout', () => {
+    for (const t of [V4_LEGACY_BIGAPP_REAL, FACTORY_4MB]) {
+      const entries = parsePartitionTable(t)
+      const nvs = entries.find((e) => e.label === 'nvs')!
+      expect(nvs.offset + nvs.size).toBeLessThanOrEqual(0x10000)
+    }
   })
 })
 

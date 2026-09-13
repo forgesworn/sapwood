@@ -29,6 +29,29 @@ export async function installFakeFlasher(page: Page): Promise<void> {
         ) => {
           for (let i = 0; i < regions.length; i++) report(i, 100, 100)
         },
+        // flashAppOnly reads the partition table before writing and refuses
+        // unless there is exactly one firmware slot at 0x10000. Answer with a
+        // single-slot 4 MB factory layout (nvs, phy_init, factory, config) so
+        // the quick USB update flow can run end to end.
+        readFlash: async (_address: number, size: number) => {
+          const out = new Uint8Array(size).fill(0xff)
+          const view = new DataView(out.buffer)
+          const rows: Array<[string, number, number, number, number]> = [
+            ['nvs', 1, 0x02, 0x9000, 0x6000],
+            ['phy_init', 1, 0x01, 0xf000, 0x1000],
+            ['factory', 0, 0x00, 0x10000, 0x300000],
+            ['config', 1, 0x40, 0x310000, 0x4000],
+          ]
+          rows.forEach(([label, type, subtype, offset, len], i) => {
+            const o = i * 32
+            out.set([0xaa, 0x50, type, subtype], o)
+            view.setUint32(o + 4, offset, true)
+            view.setUint32(o + 8, len, true)
+            out.fill(0, o + 12, o + 32)
+            out.set(new TextEncoder().encode(label), o + 12)
+          })
+          return out
+        },
         hardReset: async () => {},
         close: async () => {},
       }),

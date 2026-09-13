@@ -117,6 +117,8 @@ export interface FlashSession {
   eraseFlash(): Promise<void>
   /** Write all regions, reporting progress per esptool's callback. */
   writeFlash(regions: FlashRegion[], reportProgress: ReportProgress): Promise<void>
+  /** Read `size` bytes of flash from `address`. Read-only. */
+  readFlash(address: number, size: number): Promise<Uint8Array>
   /** Hard-reset into the freshly flashed firmware. Best-effort on S3 native USB. */
   hardReset(): Promise<void>
   /** Release the serial port. Always called, even on error. */
@@ -281,6 +283,7 @@ export const defaultBackend: FlasherBackend = {
           reportProgress,
         })
       },
+      readFlash: (address, size) => esploader.readFlash(address, size),
       hardReset: async () => { await esploader.after('hard_reset') },
       close: async () => {
         // Release the control lines before closing. esptool-js's hard_reset
@@ -443,12 +446,109 @@ export async function flashDevice(
   }
 }
 
+/** Where ESP-IDF keeps the partition table, and how much of it to read. */
+export const PARTITION_TABLE_OFFSET = 0x8000
+export const PARTITION_TABLE_SIZE = 0xc00
+/** The app-only write lands here — the one firmware slot on a single-slot table. */
+export const APP_OFFSET = 0x10000
+
+/** One row of an ESP-IDF partition table, as read off the chip. */
+export interface PartitionEntry {
+  /** 0x00 app, 0x01 data. */
+  type: number
+  subtype: number
+  offset: number
+  size: number
+  label: string
+}
+
 /**
- * Quick firmware update over USB for boards without an OTA slot: writes ONLY
- * the app region at 0x10000. Bootloader, partition table, NVS (master seeds)
- * and the config partition are all untouched, so the device keeps its
+ * Decode an ESP-IDF binary partition table: 32-byte entries starting 0xAA 0x50,
+ * little-endian offset and size, a 16-byte NUL-padded label. Stops at the first
+ * non-entry (0xEB 0xEB is the MD5 row, 0xFF 0xFF is erased flash), so a blank or
+ * unreadable table yields an empty list rather than garbage.
+ */
+export function parsePartitionTable(bytes: Uint8Array): PartitionEntry[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const decoder = new TextDecoder()
+  const entries: PartitionEntry[] = []
+  for (let i = 0; i + 32 <= bytes.length; i += 32) {
+    if (bytes[i] !== 0xaa || bytes[i + 1] !== 0x50) break
+    const rawLabel = decoder.decode(bytes.subarray(i + 12, i + 28))
+    const nul = rawLabel.indexOf('\0')
+    entries.push({
+      type: bytes[i + 2],
+      subtype: bytes[i + 3],
+      offset: view.getUint32(i + 4, true),
+      size: view.getUint32(i + 8, true),
+      label: nul === -1 ? rawLabel : rawLabel.slice(0, nul),
+    })
+  }
+  return entries
+}
+
+export type AppOnlyPlan = { ok: true; slot: PartitionEntry } | { ok: false; reason: string }
+
+/**
+ * Decide, from the table actually on the chip, whether writing `imageSize` bytes
+ * at 0x10000 replaces the board's firmware and nothing else.
+ *
+ * Only a table with exactly ONE app partition, starting at 0x10000, qualifies:
+ * the T-Display/C6 factory layout, and a V4 on the single-slot legacy table.
+ * A two-slot (A/B OTA) board is refused — it may be booting from the other slot,
+ * so a USB write at 0x10000 could change nothing or leave it on a stale image;
+ * those boards update over the air. The image must fit the slot, and no data
+ * partition (NVS holds the master seeds) may overlap the write.
+ */
+export function planAppOnlyWrite(entries: PartitionEntry[], imageSize: number): AppOnlyPlan {
+  if (entries.length === 0) {
+    return { ok: false, reason: "Couldn't read this board's partition table, so nothing was written. Reconnect and try again." }
+  }
+  const apps = entries.filter((e) => e.type === 0x00)
+  if (apps.length === 0) {
+    return { ok: false, reason: "This board's partition table has no firmware slot, so nothing was written." }
+  }
+  if (apps.length > 1) {
+    return {
+      ok: false,
+      reason:
+        "This board has two firmware slots, so it updates over the air — use the normal update. A USB write could land in the slot it isn't running from, so nothing was written.",
+    }
+  }
+  const slot = apps[0]
+  if (slot.offset !== APP_OFFSET) {
+    return {
+      ok: false,
+      reason: `This board's firmware slot starts at 0x${slot.offset.toString(16)}, not 0x10000, so nothing was written.`,
+    }
+  }
+  if (imageSize <= 0 || imageSize > slot.size) {
+    return { ok: false, reason: "That firmware doesn't fit this board's firmware slot, so nothing was written." }
+  }
+  const end = APP_OFFSET + imageSize
+  const clash = entries.find((e) => e.type !== 0x00 && e.offset < end && e.offset + e.size > APP_OFFSET)
+  if (clash) {
+    return {
+      ok: false,
+      reason: `Writing the firmware would overlap the "${clash.label}" partition, so nothing was written.`,
+    }
+  }
+  return { ok: true, slot }
+}
+
+/**
+ * Quick firmware update over USB for boards with a single firmware slot: writes
+ * ONLY the app region at 0x10000. Bootloader, partition table, NVS (master
+ * seeds) and the config partition are all untouched, so the device keeps its
  * identity and network settings — no wizard, no re-entering Wi-Fi. The app
  * image passes the same signed-manifest gate as a full flash.
+ *
+ * Before writing, it reads the partition table off the chip and refuses unless
+ * that table has exactly one firmware slot at 0x10000 (`planAppOnlyWrite`). That
+ * is what makes it safe to offer on a board the manifest calls OTA-capable: a V4
+ * on the single-slot legacy table can never install over the air (ESP-IDF's
+ * next-slot lookup wraps to the running slot, and `esp_ota_begin` refuses), and
+ * this is its only in-place update. A two-slot V4 is refused and pointed at OTA.
  */
 export async function flashAppOnly(
   board: BoardSpec,
@@ -483,7 +583,23 @@ export async function flashAppOnly(
   try {
     const chip = await session.detectChip()
     log(`Connected: ${chip}`)
-    await session.writeFlash([{ address: 0x10000, data: appData }], (_fileIndex, written, total) => {
+    const plan = planAppOnlyWrite(
+      parsePartitionTable(await session.readFlash(PARTITION_TABLE_OFFSET, PARTITION_TABLE_SIZE)),
+      appData.length,
+    )
+    if (!plan.ok) {
+      // detectChip left the board in download mode. Boot it back into the
+      // firmware it already has before refusing, or it sits in the loader and
+      // looks dead until someone presses RESET.
+      try {
+        await session.hardReset()
+      } catch {
+        // Best-effort, as below.
+      }
+      throw new Error(plan.reason)
+    }
+    log(`Partition table checked: one firmware slot at 0x10000 (${Math.round(plan.slot.size / 1024)} KiB); NVS and settings sit outside the write.`)
+    await session.writeFlash([{ address: APP_OFFSET, data: appData }], (_fileIndex, written, total) => {
       h.onProgress?.(total > 0 ? Math.round((written / total) * 100) : 0, 'firmware')
     })
     log('Update written — resetting…')
