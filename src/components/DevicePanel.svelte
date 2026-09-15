@@ -18,6 +18,9 @@
     normaliseVaultKeyHex, serialVaultSet,
   } from '../lib/vault.js'
   import { checkForUpdate, type UpdateCheck } from '../lib/update-check.js'
+  import {
+    PAIRING_BACKUP_EVENT, pairingBackupStatus, type PairingBackupStatus,
+  } from '../lib/pairing-backup.js'
   import Connectivity from './Connectivity.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import Backup from './Backup.svelte'
@@ -26,6 +29,30 @@
 
   const overUsb = $derived(device.mode === 'serial')
   const overBridge = $derived(device.mode === 'http')
+
+  // The encrypted pairing backup covers every master held by the signer, not
+  // only the selected slot. This scope carries public identifiers only; it is
+  // used solely as a localStorage key for the non-secret freshness marker.
+  const pairingBackupScope = $derived(device.masters
+    .filter((master) => !master.persona)
+    .map((master) => master.npub.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join('|'))
+  let pairingBackup = $state<PairingBackupStatus>({
+    needsBackup: false, lastExportAt: null, lastMutationAt: null,
+  })
+  $effect(() => {
+    const refresh = () => { pairingBackup = pairingBackupStatus(pairingBackupScope) }
+    refresh()
+    if (typeof window === 'undefined') return
+    window.addEventListener(PAIRING_BACKUP_EVENT, refresh)
+    return () => window.removeEventListener(PAIRING_BACKUP_EVENT, refresh)
+  })
+
+  function backupTime(at: number): string {
+    return new Date(at).toLocaleString()
+  }
 
   function modeLabel(): string {
     if (device.mode === 'serial') return 'USB cable'
@@ -376,6 +403,20 @@
     >
       Firmware v{updateInfo.latest} is available (running v{updateInfo.running}) — update below ↓
     </button>
+  {/if}
+
+  {#if pairingBackup.needsBackup}
+    <section class="card pairing-backup-warning" aria-live="polite">
+      <h2 class="section-title">Pairing backup required</h2>
+      <p class="hint">
+        {#if pairingBackup.lastExportAt}
+          App pairings changed after this browser's recorded encrypted backup ({backupTime(pairingBackup.lastExportAt)}).
+        {:else}
+          App pairings changed and this browser has not recorded a completed encrypted pairing backup.
+        {/if}
+        A reset or reflash would make the affected apps pair again. {#if overUsb}Export a fresh backup below and keep its passphrase separately.{:else}Connect this signer by USB to export a fresh backup; the signer will ask for a physical button confirmation.{/if}
+      </p>
+    </section>
   {/if}
 
   <!-- Connection -->
@@ -773,6 +814,8 @@
     padding: 0.7rem 1rem; font-family: inherit; font-size: 0.9rem;
   }
   .update-banner:hover { border-color: var(--green); }
+  .pairing-backup-warning { border-color: var(--amber); background: #1a1508; }
+  .pairing-backup-warning .section-title { color: var(--amber); }
 
   .sub-title { font-size: 0.9rem; font-weight: 600; color: var(--text); margin: 1.1rem 0 0.4rem; }
   .sub-title:first-of-type { margin-top: 0; }

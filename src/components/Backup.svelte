@@ -11,6 +11,9 @@
     exportBackup, importBackup, matchBackup, encryptBackup, decryptBackup, parseBackupEnvelope,
     type BackupPayload, type BackupEnvelope, type MasterMatch, type DeviceMaster,
   } from '../lib/backup.js'
+  import {
+    markPairingBackupExported, pairingBackupStatus, type PairingBackupStatus,
+  } from '../lib/pairing-backup.js'
 
   // The provisioned masters, as backup match targets. Personas share their
   // owner's slot table, so they are excluded.
@@ -20,6 +23,16 @@
       .map((m) => ({ pubkeyHex: npubToHex(m.npub) ?? '', label: m.label }))
       .filter((m) => m.pubkeyHex.length > 0),
   )
+  const backupScope = $derived(device.masters
+    .filter((master) => !master.persona)
+    .map((master) => master.npub.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join('|'))
+  let backupStatus = $state<PairingBackupStatus>({
+    needsBackup: false, lastExportAt: null, lastMutationAt: null,
+  })
+  $effect(() => { backupStatus = pairingBackupStatus(backupScope) })
 
   function triggerDownload(name: string, text: string) {
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
@@ -53,6 +66,10 @@
       const envelope = encryptBackup(payload, exportPass)
       const slots = payload.masters.reduce((total, m) => total + m.connection_slots.length, 0)
       triggerDownload(`heartwood-backup-${payload.device_id.slice(0, 8) || 'signer'}.json`, JSON.stringify(envelope, null, 2))
+      // A browser download is only marked after the encrypted envelope has
+      // been built. The signer export itself was button-confirmed above.
+      markPairingBackupExported(backupScope)
+      backupStatus = pairingBackupStatus(backupScope)
       exportMsg = `Saved ${payload.masters.length} identities and ${slots} app slots. Keep the file and its passphrase together, and safe.`
       exportPass = ''
       exportPass2 = ''
@@ -132,6 +149,15 @@
     Without a backup, every connected app has to pair again. The signer asks you to confirm on its
     button for both the export and the restore.
   </p>
+  {#if backupStatus.needsBackup}
+    <p class="backup-warning" role="status">
+      {#if backupStatus.lastExportAt}
+        App pairings changed after this browser's last recorded backup. Export a fresh encrypted backup now.
+      {:else}
+        App pairings changed and this browser has not recorded an encrypted pairing backup. Export one now: without it, a reset means every app must pair again.
+      {/if}
+    </p>
+  {/if}
 
   <!-- Export -->
   <div class="card sub">
@@ -208,6 +234,7 @@
   .fields .field-input { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
   .field-input.file { padding: 0.35rem; color: var(--text-dim); }
   .sub .btn { align-self: flex-start; }
+  .backup-warning { margin: 0; color: var(--amber); font-weight: 600; }
   .report {
     display: flex; flex-direction: column; gap: 0.25rem;
     background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem;

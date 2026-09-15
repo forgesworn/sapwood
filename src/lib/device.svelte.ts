@@ -45,6 +45,7 @@ import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
+import { markPairingBackupStale } from './pairing-backup.js'
 
 // --- Reactive state ---
 
@@ -1453,6 +1454,23 @@ async function relayCapabilities(): Promise<string[]> {
   }
 }
 
+// The backup exports all masters held by this signer in one encrypted envelope,
+// so its freshness marker is scoped to the complete non-secret identity set,
+// not merely the currently selected numeric slot.
+function pairingBackupScope(): string | null {
+  const identities = device.masters
+    .filter((master) => !master.persona)
+    .map((master) => master.npub.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+  return identities.length ? identities.join('|') : null
+}
+
+function notePairingBackupStale(): void {
+  const scope = pairingBackupScope()
+  if (scope) markPairingBackupStale(scope)
+}
+
 /**
  * Create a client over the relay with one exact, atomic policy. The versioned
  * method makes older firmware fail before mutation instead of ignoring fields.
@@ -1510,6 +1528,7 @@ export async function relayCreateClient(
     throw new Error('The signer did not confirm the exact app policy and slot credential, so the connection was not exposed.')
   }
   await relayRefresh()
+  notePairingBackupStale()
   const uri = String(res.bunker_uri ?? '')
   return {
     bunker_uri: identityHex && !identityOnDevice && uri
@@ -1558,6 +1577,7 @@ export async function relayApproveSigning(slotIndex: number, expectedFingerprint
     return rethrowAfterManagementConflict(error)
   }
   await relayRefresh()
+  notePairingBackupStale()
 }
 
 /** Revoke a client slot over the relay (operator-authorised). */
@@ -1573,6 +1593,7 @@ export async function relayRevokeClient(slotIndex: number, expectedFingerprint?:
     return rethrowAfterManagementConflict(error)
   }
   await relayRefresh()
+  notePairingBackupStale()
 }
 
 /** Update a client slot (label / kind perms / auto-approve) over the relay. */
@@ -1593,6 +1614,7 @@ export async function relayUpdateClient(
     return rethrowAfterManagementConflict(error)
   }
   await relayRefresh()
+  notePairingBackupStale()
 }
 
 /**
@@ -3214,6 +3236,7 @@ export async function serialCreateClient(
   const info = JSON.parse(new TextDecoder().decode(resp.payload)) as { slot_index: number; secret: string }
   const bunker_uri = await serialGetUri(info.slot_index).catch(() => '')
   await refreshSlots()
+  notePairingBackupStale()
   return { bunker_uri, secret: info.secret, signing_approved: false, slot_index: info.slot_index }
 }
 
@@ -3223,6 +3246,7 @@ export async function serialRevokeClient(slotIndex: number): Promise<void> {
   const resp = await serialTransport.sendAndReceive(buildConnSlotRevoke(device.selectedSlot, slotIndex), [FrameType.CONNSLOT_REVOKE_RESP, FrameType.NACK], SERIAL_RTT_MS)
   if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) throw new Error('Revoke rejected')
   await refreshSlots()
+  notePairingBackupStale()
 }
 
 /** Update a client slot (label / kinds / auto-approve) over USB. Button-confirmed on device. */
@@ -3231,6 +3255,7 @@ export async function serialUpdateClient(slotIndex: number, changes: { label?: s
   const resp = await serialTransport.sendAndReceive(buildConnSlotUpdate(device.selectedSlot, { slot_index: slotIndex, ...changes }), [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK], 35_000)
   if (resp.type !== FrameType.CONNSLOT_UPDATE_RESP) throw new Error('Update denied on the device')
   await refreshSlots()
+  notePairingBackupStale()
 }
 
 /** Fetch the bunker URI for a slot over USB (relays from the last wifi flash). */
@@ -3555,6 +3580,7 @@ export async function mgmtNostrconnect(params: {
     throw new Error('The signer did not confirm the app’s exact requested permissions and slot credential, so pairing was revoked.')
   }
   await relayRefresh()
+  notePairingBackupStale()
   return {
     slot_index: slotIndex,
     joined_relay: Boolean(res.joined_relay ?? false),
