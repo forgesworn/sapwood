@@ -47,7 +47,7 @@ for (const path of ['/#/', '/#/flash']) {
   })
 }
 
-test('no horizontal overflow on the connected Home; app actions stay inside their card', async ({ page }) => {
+test('no horizontal overflow on the connected Home; app actions stay inside their card', async ({ page }, testInfo) => {
   await enableAdminTestSeam(page)
   await page.goto('/#/')
   await fakeConnect(page)
@@ -62,6 +62,15 @@ test('no horizontal overflow on the connected Home; app actions stay inside thei
   const copyBox = (await copy.boundingBox())!
   expect(copyBox.x).toBeGreaterThanOrEqual(cardBox.x)
   expect(copyBox.x + copyBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1)
+
+  await card.getByRole('button', { name: 'Reconnect app' }).click()
+  const recovery = card.getByRole('region')
+  await expect(recovery).toBeVisible()
+  await expect(recovery).toContainText('hold its button to approve the new device')
+  expect(await overflow(page)).toBeLessThanOrEqual(1)
+  await recovery.screenshot({ path: testInfo.outputPath('reconnect-mobile.png') })
+  await recovery.getByRole('button', { name: 'Close reconnect instructions' }).click()
+  await expect(recovery).toHaveCount(0)
 })
 
 test('no horizontal overflow on any cockpit tab; bottom nav is docked and finger-sized', async ({ page }) => {

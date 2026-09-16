@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, fireEvent, screen, within } from '@testing-library/svelte'
+import { render, fireEvent, screen, within, waitFor } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
 import Home from './Home.svelte'
-import { device, refreshSlots, mgmtApproveSigning, mgmtClientUri, mgmtRevokeClient } from '../lib/device.svelte.js'
+import { device, refreshSlots, mgmtApproveSigning, mgmtClientUri, mgmtRevokeClient, mgmtUpdateClient } from '../lib/device.svelte.js'
 import { setDeviceLabel } from '../lib/known-devices.js'
 import { copyText } from '../lib/clipboard.js'
 
@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.mocked(mgmtApproveSigning).mockClear()
   vi.mocked(mgmtClientUri).mockClear()
   vi.mocked(mgmtRevokeClient).mockClear()
+  vi.mocked(mgmtUpdateClient).mockClear()
   vi.mocked(copyText).mockClear()
 })
 
@@ -109,6 +110,58 @@ describe('Home', () => {
     await fireEvent.click(within(card).getByText('Copy link'))
     expect(vi.mocked(mgmtClientUri)).toHaveBeenCalledWith(4, FINGERPRINT)
     expect(vi.mocked(copyText)).toHaveBeenCalledWith('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
+  })
+
+  it('recovers an existing automatic connection without granting or revoking permissions', async () => {
+    ;(device as { slots: unknown[] }).slots = [{
+      slot_index: 4, label: 'Cambium', current_pubkey: 'c'.repeat(64), signing_approved: true,
+      allowed_methods: ['sign_event', 'nip44_decrypt'], allowed_kinds: [], auto_approve: true, secret_fingerprint: FINGERPRINT,
+    }]
+    render(Home)
+    const card = screen.getByText('Cambium').closest('.app-card') as HTMLElement
+    expect(within(card).getByText(/Saved permissions/)).toBeTruthy()
+    expect(mgmtClientUri).not.toHaveBeenCalled()
+    await fireEvent.click(within(card).getByText('Reconnect app'))
+    const recovery = screen.getByRole('region', { name: 'Reconnect Cambium' })
+    expect(within(recovery).getByText(/hold its button to approve the new device/)).toBeTruthy()
+    await waitFor(() => expect(within(recovery).getByRole('img', { name: 'Pairing QR code' })).toBeTruthy())
+    await fireEvent.click(within(recovery).getByText('Copy pairing link'))
+    expect(mgmtClientUri).toHaveBeenCalledWith(4, FINGERPRINT)
+    expect(copyText).toHaveBeenCalledWith('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
+    expect(mgmtUpdateClient).not.toHaveBeenCalled()
+    expect(mgmtApproveSigning).not.toHaveBeenCalled()
+    expect(mgmtRevokeClient).not.toHaveBeenCalled()
+    await fireEvent.click(within(recovery).getByText('Close reconnect instructions'))
+    expect(screen.queryByRole('img', { name: 'Pairing QR code' })).toBeNull()
+  })
+
+  it('does not offer a recovery QR when the existing link has no relay', async () => {
+    ;(device as { slots: unknown[] }).slots = [{
+      slot_index: 4, label: 'Cambium', current_pubkey: 'c'.repeat(64), signing_approved: true,
+      allowed_kinds: [], auto_approve: true, secret_fingerprint: FINGERPRINT,
+    }]
+    vi.mocked(mgmtClientUri).mockResolvedValueOnce('bunker://abc?secret=secret')
+    render(Home)
+    await fireEvent.click(screen.getByText('Reconnect app'))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('no relay'))
+    expect(screen.queryByRole('img', { name: 'Pairing QR code' })).toBeNull()
+    expect(screen.queryByText('Copy pairing link')).toBeNull()
+  })
+
+  it('does not reveal a pairing link returned after recovery is closed', async () => {
+    ;(device as { slots: unknown[] }).slots = [{
+      slot_index: 4, label: 'Cambium', current_pubkey: 'c'.repeat(64), signing_approved: true,
+      allowed_kinds: [], auto_approve: true, secret_fingerprint: FINGERPRINT,
+    }]
+    let resolve!: (uri: string) => void
+    vi.mocked(mgmtClientUri).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    render(Home)
+    await fireEvent.click(screen.getByText('Reconnect app'))
+    await fireEvent.click(screen.getByText('Close reconnect instructions'))
+    resolve('bunker://abc?relay=wss%3A%2F%2Fr&secret=secret')
+    await Promise.resolve()
+    expect(screen.queryByRole('region', { name: 'Reconnect Cambium' })).toBeNull()
+    expect(copyText).not.toHaveBeenCalled()
   })
 
   it('renames the signer and persists it', async () => {
