@@ -24,6 +24,7 @@
   import PhoneHandoff from './PhoneHandoff.svelte'
   import VaultUnlock from './VaultUnlock.svelte'
   import KindPermissions from './KindPermissions.svelte'
+  import ReconnectApp from './ReconnectApp.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
   import type { ConnectSlot } from '../lib/types.js'
   import { identityKey } from '../lib/identity-key.js'
@@ -58,6 +59,7 @@
   let nameInput = $state('')
   let busySlot = $state<number | null>(null)
   let updatingSlot = $state<number | null>(null)
+  let reconnectSlot = $state<number | null>(null)
 
   // Re-read the saved label whenever the connected device changes.
   $effect(() => {
@@ -519,15 +521,21 @@
                 {:else if !slot.signing_approved}
                   Connected, but not allowed to sign yet.
                 {:else if slot.auto_approve}
-                  Signs and reads for you without asking.
+                  Automatically approves permitted requests from registered devices.
                 {:else}
                   Prompts on the signer for each action. Can't read messages until set to automatic.
                 {/if}
               </span>
+              {#if slot.current_pubkey}
+                <span class="app-state">Saved permissions; this does not confirm the app is connected now.</span>
+              {/if}
             </div>
             <div class="app-actions">
               <button class="btn btn-secondary btn-sm" onclick={() => copyAppLink(slot)}>
                 {copiedSlot === slot.slot_index ? 'Link copied ✓' : 'Copy link'}
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick={() => { reconnectSlot = reconnectSlot === slot.slot_index ? null : slot.slot_index }}>
+                Reconnect app
               </button>
               {#if slot.current_pubkey && !slot.signing_approved && canApprove && !slot.strict_permissions}
                 <button class="btn btn-secondary btn-sm allow" disabled={busySlot === slot.slot_index} onclick={() => approve(slot)}>
@@ -553,6 +561,11 @@
               />
             </div>
           </div>
+          {#if reconnectSlot === slot.slot_index}
+            {#key slot.secret_fingerprint}
+              <ReconnectApp {slot} onclose={() => { reconnectSlot = null }} />
+            {/key}
+          {/if}
           {#if canManageInline}
             <!-- What this app may sign, right here — no trip to Advanced. -->
             <KindPermissions
