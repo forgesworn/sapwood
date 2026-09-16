@@ -63,7 +63,7 @@
   .reconnect { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
   h4 { margin: 0 0 0.75rem; }
   p, li { line-height: 1.55; }
-  ol { padding-left: 1.4rem; }
+  ol { padding-left: 2rem; }
   li + li { margin-top: 0.5rem; }
   .qr { width: 196px; max-width: 100%; box-sizing: border-box; padding: 12px; background: white; border-radius: 6px; margin: 1rem 0; }
   .qr :global(svg) { display: block; width: 100%; height: auto; }
