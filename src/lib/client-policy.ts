@@ -10,7 +10,26 @@ export const CONNECT_METHODS = [
 
 export const SIGNING_METHODS = ['sign_event', ...CONNECT_METHODS] as const
 
-const SUPPORTED = new Set<string>(SIGNING_METHODS)
+/** Reads back the identity list (every persona's npub on the addressed
+ * master). Firmware's EXACT_POLICY_METHODS gates it like any other
+ * policy-controlled method: a legacy slot earns it after a one-time
+ * "LIST IDS FOR <app>?" button press, a strict/exact-policy slot must have
+ * it named explicitly. Kept out of `SIGNING_METHODS`/`CONNECT_METHODS` (it
+ * is not offered in the ordinary preset flow) but IS supported, so it
+ * survives `exactClientPolicy` filtering and is never mistaken for policy
+ * drift on a slot that has earned it. */
+export const IDENTITY_METHODS = ['heartwood_list_identities'] as const
+
+/** Plain-English label and risk level for methods an operator may see
+ * granted on a slot outside the ordinary signing/connect vocabulary. */
+export const METHOD_INFO: Record<string, { label: string; risk: 'low' | 'medium' | 'high' }> = {
+  heartwood_list_identities: {
+    label: 'List every identity on this signer',
+    risk: 'medium',
+  },
+}
+
+const SUPPORTED = new Set<string>([...SIGNING_METHODS, ...IDENTITY_METHODS])
 
 /** Build a canonical full-policy payload. `sign_event` is the only method for
  * which an empty kind list means "all"; without it the list is always cleared. */
@@ -41,9 +60,12 @@ export function fullClientPolicy(allowSigning = true): ExactClientPolicy {
 }
 
 /** Methods Sapwood's own manager pairing needs for persona management over
- * the USB NIP-46 path. The heartwood_* extensions are deliberately NOT added
- * to SUPPORTED: they must never appear in the app-facing permissions UI, and
- * `exactClientPolicy` must keep filtering them out of ordinary app slots.
+ * the USB NIP-46 path. The persona-management heartwood_* extensions here are
+ * deliberately NOT added to SUPPORTED: they must never appear in the
+ * app-facing permissions UI, and `exactClientPolicy` must keep filtering them
+ * out of ordinary app slots. `heartwood_list_identities` is the one heartwood_*
+ * method that IS in SUPPORTED (see `IDENTITY_METHODS`): an ordinary app slot
+ * can legitimately hold it, earned via button or granted explicitly.
  * `nip44_decrypt` is the ratified exception (family-bunker §11.3.0): the
  * recovery wizard asks the signer to decrypt the relay enrolment manifest so
  * the natural-person key never leaves the device. */

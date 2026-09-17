@@ -59,4 +59,31 @@ describe('exact client policy', () => {
       auto_approve: true,
     })).toBe(false)
   })
+
+  it('keeps heartwood_list_identities through exactClientPolicy instead of silently stripping it', () => {
+    expect(exactClientPolicy(['sign_event', 'heartwood_list_identities']).allowed_methods)
+      .toEqual(expect.arrayContaining(['heartwood_list_identities']))
+  })
+
+  it('preserves a legacy slot that earned heartwood_list_identities via the button, and does not flag it as drift', () => {
+    const slot = {
+      slot_index: 3,
+      label: 'legacy app',
+      secret: '',
+      current_pubkey: null,
+      allowed_methods: ['get_public_key', 'sign_event', 'heartwood_list_identities'],
+      allowed_kinds: [],
+      auto_approve: true,
+      signing_approved: true,
+    }
+    const expected = exactPolicyFromSlot(slot)
+    expect(expected.allowed_methods).toContain('heartwood_list_identities')
+    // The device echoes the slot's own allowed_methods back on a write; that
+    // must compare equal, i.e. not read as policy drift.
+    expect(policiesEqual(expected, {
+      allowed_methods: slot.allowed_methods,
+      allowed_kinds: slot.allowed_kinds,
+      auto_approve: slot.auto_approve,
+    })).toBe(true)
+  })
 })
