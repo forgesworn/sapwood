@@ -18,6 +18,7 @@
   import { copyText } from '../lib/clipboard.js'
   import { bunkerHasRelay } from '../lib/bunker.js'
   import { exactPolicyFromSlot, fullClientPolicy } from '../lib/client-policy.js'
+  import { nip19 } from 'nostr-tools'
 
   const overBridge = $derived(device.mode === 'http')
   const overUsb = $derived(device.mode === 'serial')
@@ -230,6 +231,33 @@
       ...(slot.current_pubkey ? [slot.current_pubkey] : []),
       ...(slot.authorized_pubkeys ?? []),
     ]).size
+  }
+
+  // Read-only display of the identities this slot has been physically
+  // approved to act as (heartwood_list_identities / identity-scope). No
+  // revoke UI, no new frame calls — `slot.approved_identities` (relay path,
+  // already split) or `slot.ids` (USB/backup path, 16-hex-char tags
+  // concatenated with no separator) are whatever the device/backup handed us.
+  function identityTags(slot: ConnectSlot): string[] {
+    if (slot.approved_identities?.length) return slot.approved_identities
+    const raw = slot.ids ?? ''
+    const tags: string[] = []
+    for (let i = 0; i + 16 <= raw.length; i += 16) tags.push(raw.slice(i, i + 16))
+    return tags
+  }
+
+  // Match a tag (first 8 bytes of an x-only pubkey, as lower hex) to a known
+  // persona/master's npub; falls back to the raw tag if nothing matches.
+  function identityTagLabel(tag: string): string {
+    for (const m of device.masters) {
+      try {
+        const decoded = nip19.decode(m.npub)
+        if (decoded.type === 'npub' && (decoded.data as string).toLowerCase().startsWith(tag.toLowerCase())) {
+          return m.label || m.npub.slice(0, 12)
+        }
+      } catch { /* unparsable npub — skip */ }
+    }
+    return tag
   }
 
   function timeAgo(iso: string): string {
@@ -469,6 +497,10 @@
             updating={updatingSlot === slot.slot_index}
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />
+
+          {#if identityTags(slot).length > 0}
+            <p class="hint-sm identity-approved">Approved identities: {identityTags(slot).length} ({identityTags(slot).map(identityTagLabel).join(', ')})</p>
+          {/if}
         </div>
       {/each}
     </section>
