@@ -235,7 +235,7 @@
 
   // Read-only display of the identities this slot has been physically
   // approved to act as (heartwood_list_identities / identity-scope). No
-  // revoke UI, no new frame calls — `slot.approved_identities` (relay path,
+  // revoke UI, no new frame calls: `slot.approved_identities` (relay path,
   // already split) or `slot.ids` (USB/backup path, 16-hex-char tags
   // concatenated with no separator) are whatever the device/backup handed us.
   function identityTags(slot: ConnectSlot): string[] {
@@ -255,7 +255,7 @@
         if (decoded.type === 'npub' && (decoded.data as string).toLowerCase().startsWith(tag.toLowerCase())) {
           return m.label || m.npub.slice(0, 12)
         }
-      } catch { /* unparsable npub — skip */ }
+      } catch { /* unparsable npub: skip */ }
     }
     return tag
   }
