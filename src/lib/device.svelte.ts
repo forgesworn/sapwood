@@ -1198,6 +1198,9 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         && SLOT_FINGERPRINT_RE.test(c.secret_fingerprint.toLowerCase())
         ? c.secret_fingerprint.toLowerCase()
         : undefined,
+      approved_identities: Array.isArray(c.approved_identities)
+        ? c.approved_identities.filter((tag): tag is string => typeof tag === 'string')
+        : [],
     }))
     // Assign only on real change so the periodic refresh doesn't make the
     // Apps list (and everything below it) re-render under the user.

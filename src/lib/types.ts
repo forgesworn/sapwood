@@ -19,6 +19,18 @@ export interface ConnectSlot {
    * binds every index-sensitive request to it so a compacted/reused numeric slot
    * cannot be edited or reissued from a stale phone screen. */
   secret_fingerprint?: string
+  /** Identities physically approved for this pairing: 16-hex-char tags
+   * concatenated with no separator (raw wire field, USB/backup paths).
+   * Absent or empty on older firmware and on slots nothing has approved yet. */
+  ids?: string
+  /** True once any client key has ever bound to this slot (raw wire field,
+   * USB/backup paths). A new holder of the credential clears approved
+   * identities even if the previous key has since been removed. */
+  wb?: boolean
+  /** Read-only: the same approved-identity tags as `ids`, pre-split into an
+   * array. Populated on the relay management (`list_clients`) path, which
+   * summarises the slot instead of sending its raw wire fields. */
+  approved_identities?: string[]
 }
 
 /** Complete automatic authority sent to Heartwood's versioned management API. */

@@ -164,4 +164,20 @@ describe('parseBackupPayload', () => {
   it('rejects a payload missing required fields', () => {
     expect(() => parseBackupPayload(enc.encode(JSON.stringify({ masters: [] })))).toThrow(/expected fields/)
   })
+
+  it('preserves the identity-scope fields (ids, wb) of a slot untouched', () => {
+    const scoped: ConnectSlot = { ...slot(2, 'identity-scoped app'), ids: 'aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb', wb: true }
+    const withScope: BackupPayload = {
+      ...PAYLOAD,
+      masters: [{ ...PAYLOAD.masters[0]!, connection_slots: [scoped] }],
+    }
+
+    const parsed = parseBackupPayload(enc.encode(JSON.stringify(withScope)))
+    expect(parsed.masters[0]!.connection_slots[0]!.ids).toBe('aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb')
+    expect(parsed.masters[0]!.connection_slots[0]!.wb).toBe(true)
+
+    const envelope = encryptBackup(parsed, 'pw', LIGHT)
+    const back = decryptBackup(envelope, 'pw')
+    expect(back).toEqual(withScope)
+  })
 })
