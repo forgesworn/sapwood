@@ -18,6 +18,10 @@
   import {
     getOperatorMnemonic, getOrCreateOperator, isOperatorBackedUp, markOperatorBackedUp,
   } from '../lib/op-mgmt.js'
+  import {
+    PAIRING_BACKUP_EVENT, pairingBackupStatus, pairingBackupRelativeTime,
+    type PairingBackupStatus,
+  } from '../lib/pairing-backup.js'
   import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
   import ConnectApp from './ConnectApp.svelte'
   import FirstIdentity from './FirstIdentity.svelte'
@@ -143,6 +147,37 @@
     markOperatorBackedUp()
     backupDone = true
   }
+
+  // --- Pairing backup freshness ---
+  // A quiet "Last backup: …" line always shows on the signer card (never
+  // buried in Advanced › Device › Backup), plus a dismissible nudge once app
+  // pairings have changed since the last confirmed export. "Later" hides the
+  // nudge for this session only -- it reappears next visit until an export is
+  // taken, and never blocks anything.
+  const pairingBackupScope = $derived(device.masters
+    .filter((m) => !m.persona)
+    .map((m) => m.npub.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join('|'))
+  let pairingBackup = $state<PairingBackupStatus>({
+    needsBackup: false, lastExportAt: null, lastMutationAt: null, lastExportSlotCount: null,
+  })
+  let pairingBackupSnoozed = $state(false)
+  $effect(() => { pairingBackupScope; pairingBackupSnoozed = false })
+  $effect(() => {
+    const refresh = () => { pairingBackup = pairingBackupStatus(pairingBackupScope) }
+    refresh()
+    if (typeof window === 'undefined') return
+    window.addEventListener(PAIRING_BACKUP_EVENT, refresh)
+    return () => window.removeEventListener(PAIRING_BACKUP_EVENT, refresh)
+  })
+  const pairingBackupLine = $derived(
+    pairingBackup.lastExportAt ? `Last backup: ${pairingBackupRelativeTime(pairingBackup.lastExportAt)}` : 'Last backup: never',
+  )
+  const showPairingBackupNudge = $derived(
+    hasIdentity && pairingBackup.needsBackup && !pairingBackupSnoozed,
+  )
 
   // --- Firmware nudge ---
   // Over USB we can ask the board what it runs and compare with the firmware
@@ -416,6 +451,7 @@
         <p class="signer-addr"><span class="addr-tag">address</span>{address}</p>
         <p class="signer-hint">This is your signer's public address, safe to share.</p>
       {/if}
+      <p class="signer-backup" class:signer-backup-warn={!pairingBackup.lastExportAt}>{pairingBackupLine}</p>
       <div class="signer-foot">
         <span class="signer-conn">Connected over {transportLabel}</span>
         <button class="btn btn-danger btn-sm" onclick={() => disconnect()}>Disconnect</button>
@@ -457,6 +493,28 @@
         {/if}
         <button class="btn btn-primary" onclick={confirmBackedUp}>I've written it down</button>
       {/if}
+    </section>
+  {/if}
+
+  <!-- Nudge to export an encrypted pairing backup after app pairings changed --
+       non-modal, dismissible, never blocks the flow. The export itself only
+       runs from Advanced › Device (button-confirmed on the signer), so this
+       is a pointer there, not an auto-run. -->
+  {#if showPairingBackupNudge}
+    <section class="card card--warn backup" role="status">
+      <div class="backup-head">
+        <h3 class="backup-title">Back up your app pairings</h3>
+        <button class="btn-link backup-later" onclick={() => (pairingBackupSnoozed = true)}>Later</button>
+      </div>
+      <p class="hint">
+        {#if pairingBackup.lastExportAt}
+          App pairings changed after this browser's last recorded backup ({pairingBackupRelativeTime(pairingBackup.lastExportAt)}).
+        {:else}
+          App pairings changed and this browser has never recorded a completed encrypted backup.
+        {/if}
+        Without a fresh export, a factory reset or reflash means every connected app has to pair again.
+      </p>
+      <button class="btn btn-warn" onclick={() => onadvanced?.('device')}>Export a backup now →</button>
     </section>
   {/if}
 
@@ -681,6 +739,8 @@
     padding: 0.05rem 0.35rem; margin-right: 0.5rem; vertical-align: middle;
   }
   .signer-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.3rem 0 0; }
+  .signer-backup { font-size: 0.75rem; color: var(--text-dim); margin: 0.35rem 0 0; }
+  .signer-backup-warn { color: var(--amber); font-weight: 600; }
   .signer-foot {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem;
     margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid #0e2c1f;
