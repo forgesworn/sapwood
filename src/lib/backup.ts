@@ -38,6 +38,20 @@ export interface BackupMaster {
   connection_slots: ConnectSlot[]
 }
 
+/** A non-spendable record of one note held when the backup was exported.
+ * `secret_hash` is a SHA-256 commitment, not a bearer preimage. It makes a
+ * loss legible but cannot restore or redeem the note. */
+export interface NoteBackupInventory {
+  id: string
+  secret_hash: string
+  state: 'pending' | 'confirmed' | 'spent'
+  amount_msat: number
+  host: string
+  key_index: number | null
+  created_at: number
+  updated_at: number
+}
+
 /** The plaintext backup payload (mirrors heartwood_common's BackupPayload).
  *  Contains the bridge secret in the clear — only ever hold it in memory or
  *  inside a {@link BackupEnvelope}. */
@@ -46,6 +60,8 @@ export interface BackupPayload {
   device_id: string
   masters: BackupMaster[]
   bridge_secret: string
+  /** Optional because backups made by older firmware had no note inventory. */
+  note_inventory?: NoteBackupInventory[]
 }
 
 /** Argon2id cost parameters recorded in (and read back from) the envelope. */
@@ -124,12 +140,39 @@ function randomBytes(length: number): Uint8Array {
 function isBackupPayload(value: unknown): value is BackupPayload {
   if (!value || typeof value !== 'object') return false
   const p = value as Record<string, unknown>
+  const inventory = p.note_inventory
   return (
     typeof p.created_at === 'number' &&
     typeof p.device_id === 'string' &&
     typeof p.bridge_secret === 'string' &&
-    Array.isArray(p.masters)
+    Array.isArray(p.masters) &&
+    (inventory === undefined || isNoteInventory(inventory))
   )
+}
+
+function isNoteInventory(value: unknown): value is NoteBackupInventory[] {
+  if (!Array.isArray(value) || value.length > 16) return false
+  return value.every((entry) => {
+    if (!entry || typeof entry !== 'object') return false
+    const note = entry as Record<string, unknown>
+    return typeof note.id === 'string'
+      && /^[0-9a-f]{8}$/.test(note.id)
+      && typeof note.secret_hash === 'string'
+      && /^[0-9a-f]{64}$/.test(note.secret_hash)
+      && (note.state === 'pending' || note.state === 'confirmed' || note.state === 'spent')
+      && typeof note.amount_msat === 'number'
+      && Number.isSafeInteger(note.amount_msat)
+      && note.amount_msat >= 0
+      && typeof note.host === 'string'
+      && note.host.length <= 64
+      && (note.key_index === null || (typeof note.key_index === 'number' && Number.isSafeInteger(note.key_index) && note.key_index >= 0))
+      && typeof note.created_at === 'number'
+      && Number.isSafeInteger(note.created_at)
+      && note.created_at >= 0
+      && typeof note.updated_at === 'number'
+      && Number.isSafeInteger(note.updated_at)
+      && note.updated_at >= 0
+  })
 }
 
 /** Parse and shape-check a backup payload from raw JSON bytes. */

@@ -41,6 +41,16 @@ const PAYLOAD: BackupPayload = {
   created_at: 0,
   device_id: 'dd'.repeat(32),
   bridge_secret: 'ee'.repeat(32),
+  note_inventory: [{
+    id: 'a1b2c3d4',
+    secret_hash: '11'.repeat(32),
+    state: 'confirmed',
+    amount_msat: 21_000,
+    host: 'mint.example/w',
+    key_index: null,
+    created_at: 100,
+    updated_at: 100,
+  }],
   masters: [
     { slot: 0, label: 'Personal', mode: 1, pubkey: 'aa'.repeat(32), connection_slots: [slot(0, 'Bark'), slot(1, 'nostrudel')] },
     { slot: 1, label: 'Work', mode: 2, pubkey: 'bb'.repeat(32), connection_slots: [slot(0, 'Amethyst')] },
@@ -67,6 +77,8 @@ describe('exportBackup', () => {
     expect(payload.masters).toHaveLength(2)
     expect(payload.masters[0]!.connection_slots).toHaveLength(2)
     expect(payload.bridge_secret).toBe('ee'.repeat(32))
+    expect(payload.note_inventory).toHaveLength(1)
+    expect(payload.note_inventory![0]!.secret_hash).toBe('11'.repeat(32))
   })
 
   it('throws when the signer NACKs (button not pressed)', async () => {

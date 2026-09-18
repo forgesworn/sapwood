@@ -65,12 +65,13 @@
       const payload = await exportBackup(serialTransport)
       const envelope = encryptBackup(payload, exportPass)
       const slots = payload.masters.reduce((total, m) => total + m.connection_slots.length, 0)
+      const notes = payload.note_inventory?.length ?? 0
       triggerDownload(`heartwood-backup-${payload.device_id.slice(0, 8) || 'signer'}.json`, JSON.stringify(envelope, null, 2))
       // A browser download is only marked after the encrypted envelope has
       // been built. The signer export itself was button-confirmed above.
       markPairingBackupExported(backupScope, slots)
       backupStatus = pairingBackupStatus(backupScope)
-      exportMsg = `Saved ${payload.masters.length} identities and ${slots} app slots. Keep the file and its passphrase together, and safe.`
+      exportMsg = `Saved ${payload.masters.length} identities and ${slots} app slots${notes ? `, plus a non-spendable inventory of ${notes} note${notes === 1 ? '' : 's'}` : ''}. Keep the file and its passphrase together, and safe.`
       exportPass = ''
       exportPass2 = ''
     } catch (e) {
@@ -166,7 +167,8 @@
       The file holds your app secrets. It is encrypted with the passphrase you set here, so choose a
       strong one and store it separately. Losing the passphrase makes the backup unrecoverable.
       Bearer notes are <strong>not</strong> in this backup: a note restored onto two signers could be
-      spent twice, so notes live only on the signer that holds them.
+      spent twice. Newer signer firmware adds only a non-spendable note inventory (hash, mint, amount
+      and state) so a board loss is visible; it cannot restore or redeem a note.
     </p>
     <div class="fields">
       <input class="field-input" type="password" bind:value={exportPass} placeholder="Passphrase"
@@ -211,6 +213,12 @@
           </div>
         {/each}
       </div>
+      {#if preview.payload.note_inventory?.length}
+        <p class="hint-sm inventory-note">
+          This backup records {preview.payload.note_inventory.length} note{preview.payload.note_inventory.length === 1 ? '' : 's'} as loss inventory only.
+          Notes are not restored: the file has no bearer preimages and cannot redeem them.
+        </p>
+      {/if}
       {#if matchedSlots > 0}
         <button class="btn btn-primary" onclick={runImport} disabled={importing}>
           {importing ? 'Confirm on the signer…' : `Restore ${matchedSlots} app slot${matchedSlots === 1 ? '' : 's'}`}
@@ -235,6 +243,7 @@
   .field-input.file { padding: 0.35rem; color: var(--text-dim); }
   .sub .btn { align-self: flex-start; }
   .backup-warning { margin: 0; color: var(--amber); font-weight: 600; }
+  .inventory-note { margin: 0; color: var(--amber); }
   .report {
     display: flex; flex-direction: column; gap: 0.25rem;
     background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem;
