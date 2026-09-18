@@ -40,7 +40,7 @@
     .sort()
     .join('|'))
   let pairingBackup = $state<PairingBackupStatus>({
-    needsBackup: false, lastExportAt: null, lastMutationAt: null,
+    needsBackup: false, lastExportAt: null, lastMutationAt: null, lastExportSlotCount: null,
   })
   $effect(() => {
     const refresh = () => { pairingBackup = pairingBackupStatus(pairingBackupScope) }

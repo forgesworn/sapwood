@@ -30,7 +30,7 @@
     .sort()
     .join('|'))
   let backupStatus = $state<PairingBackupStatus>({
-    needsBackup: false, lastExportAt: null, lastMutationAt: null,
+    needsBackup: false, lastExportAt: null, lastMutationAt: null, lastExportSlotCount: null,
   })
   $effect(() => { backupStatus = pairingBackupStatus(backupScope) })
 
@@ -68,7 +68,7 @@
       triggerDownload(`heartwood-backup-${payload.device_id.slice(0, 8) || 'signer'}.json`, JSON.stringify(envelope, null, 2))
       // A browser download is only marked after the encrypted envelope has
       // been built. The signer export itself was button-confirmed above.
-      markPairingBackupExported(backupScope)
+      markPairingBackupExported(backupScope, slots)
       backupStatus = pairingBackupStatus(backupScope)
       exportMsg = `Saved ${payload.masters.length} identities and ${slots} app slots. Keep the file and its passphrase together, and safe.`
       exportPass = ''

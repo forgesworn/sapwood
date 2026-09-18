@@ -13,6 +13,8 @@ export interface PairingBackupStatus {
   lastExportAt: number | null
   /** Milliseconds since epoch, or null when no local mutation is known. */
   lastMutationAt: number | null
+  /** App slots included in the last confirmed export, or null when none is recorded. */
+  lastExportSlotCount: number | null
 }
 
 interface StoredStatus extends PairingBackupStatus {
@@ -33,7 +35,11 @@ function validTime(value: unknown): number | null {
 }
 
 function empty(): PairingBackupStatus {
-  return { needsBackup: false, lastExportAt: null, lastMutationAt: null }
+  return { needsBackup: false, lastExportAt: null, lastMutationAt: null, lastExportSlotCount: null }
+}
+
+function validCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
 function announce(): void {
@@ -52,6 +58,7 @@ export function pairingBackupStatus(scope: string): PairingBackupStatus {
       needsBackup: raw.needsBackup,
       lastExportAt: validTime(raw.lastExportAt),
       lastMutationAt: validTime(raw.lastMutationAt),
+      lastExportSlotCount: validCount(raw.lastExportSlotCount),
     }
   } catch {
     return empty()
@@ -74,8 +81,28 @@ export function markPairingBackupStale(scope: string): void {
   save(scope, { ...previous, needsBackup: true, lastMutationAt: Date.now() })
 }
 
-/** Record that this browser completed an encrypted, button-confirmed export. */
-export function markPairingBackupExported(scope: string): void {
+/**
+ * Record that this browser completed an encrypted, button-confirmed export.
+ * `slotCount` (app pairings included in that export) is display metadata
+ * only -- it plays no part in staleness, which is driven by
+ * {@link markPairingBackupStale} firing on every confirmed slot mutation.
+ */
+export function markPairingBackupExported(scope: string, slotCount?: number): void {
   const now = Date.now()
-  save(scope, { needsBackup: false, lastExportAt: now, lastMutationAt: null })
+  save(scope, {
+    needsBackup: false,
+    lastExportAt: now,
+    lastMutationAt: null,
+    lastExportSlotCount: validCount(slotCount) ?? null,
+  })
+}
+
+/** "3m ago", "2h ago", "5d ago" -- coarse on purpose, matches the app's other
+ *  relative-time readouts (see AppsPanel's timeAgo). */
+export function pairingBackupRelativeTime(at: number): string {
+  const ms = Date.now() - at
+  if (ms < 60_000) return 'just now'
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`
+  return `${Math.floor(ms / 86_400_000)}d ago`
 }
