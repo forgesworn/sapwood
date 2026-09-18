@@ -7,8 +7,10 @@
   // crypto live in lib/backup.ts; this component is the form around it.
   import { device, serialTransport, ensureBridgeAuth } from '../lib/device.svelte.js'
   import { npubToHex } from '../lib/known-devices.js'
+  import { copyText } from '../lib/clipboard.js'
   import {
     exportBackup, importBackup, matchBackup, encryptBackup, decryptBackup, parseBackupEnvelope,
+    inventoryReportFor, msatToSats,
     type BackupPayload, type BackupEnvelope, type MasterMatch, type DeviceMaster,
   } from '../lib/backup.js'
   import {
@@ -65,12 +67,13 @@
       const payload = await exportBackup(serialTransport)
       const envelope = encryptBackup(payload, exportPass)
       const slots = payload.masters.reduce((total, m) => total + m.connection_slots.length, 0)
+      const notes = payload.note_inventory?.length ?? 0
       triggerDownload(`heartwood-backup-${payload.device_id.slice(0, 8) || 'signer'}.json`, JSON.stringify(envelope, null, 2))
       // A browser download is only marked after the encrypted envelope has
       // been built. The signer export itself was button-confirmed above.
       markPairingBackupExported(backupScope, slots)
       backupStatus = pairingBackupStatus(backupScope)
-      exportMsg = `Saved ${payload.masters.length} identities and ${slots} app slots. Keep the file and its passphrase together, and safe.`
+      exportMsg = `Saved ${payload.masters.length} identities and ${slots} app slots${notes ? `, plus a non-spendable inventory of ${notes} note${notes === 1 ? '' : 's'}` : ''}. Keep the file and its passphrase together, and safe.`
       exportPass = ''
       exportPass2 = ''
     } catch (e) {
@@ -93,12 +96,32 @@
     preview ? preview.report.filter((r) => r.matched).reduce((total, r) => total + r.slots, 0) : 0,
   )
 
+  // --- Note inventory (display only: not a restore path) ---
+  const inventory = $derived(preview?.payload.note_inventory ?? [])
+  const inventoryReport = $derived(preview ? inventoryReportFor(preview.payload) : null)
+  const inventoryUnreadable = $derived(preview?.payload.note_inventory_unreadable ?? 0)
+  const inventoryTotalSats = $derived(inventory.reduce((total, n) => total + msatToSats(n.amount_msat), 0))
+
+  let copiedCommitment = $state<string | null>(null)
+
+  async function copyCommitment(id: string, commitment: string) {
+    if (await copyText(commitment)) {
+      copiedCommitment = id
+      setTimeout(() => { if (copiedCommitment === id) copiedCommitment = null }, 1800)
+    }
+  }
+
+  function truncateHex(hex: string): string {
+    return hex.slice(0, 8) + '…' + hex.slice(-8)
+  }
+
   function pickFile(e: Event) {
     importFile = (e.target as HTMLInputElement).files?.[0] ?? null
     envelope = null
     preview = null
     importMsg = null
     importErr = null
+    copiedCommitment = null
   }
 
   async function unlock() {
@@ -166,7 +189,8 @@
       The file holds your app secrets. It is encrypted with the passphrase you set here, so choose a
       strong one and store it separately. Losing the passphrase makes the backup unrecoverable.
       Bearer notes are <strong>not</strong> in this backup: a note restored onto two signers could be
-      spent twice, so notes live only on the signer that holds them.
+      spent twice. Newer signer firmware adds only a non-spendable note inventory (hash, mint, amount
+      and state) so a board loss is visible; it cannot restore or redeem a note.
     </p>
     <div class="fields">
       <input class="field-input" type="password" bind:value={exportPass} placeholder="Passphrase"
@@ -211,6 +235,53 @@
           </div>
         {/each}
       </div>
+      {#if inventoryReport && (inventory.length > 0 || inventoryUnreadable > 0)}
+        <div class="inventory">
+          <p class="hint-sm">
+            Notes held at export time, recorded below for legibility only. This is not a restore: the
+            file holds no bearer secrets for these notes and cannot spend or redeem them.
+          </p>
+          {#if inventoryUnreadable > 0}
+            <p class="hint-sm inventory-warning" role="status">
+              Incomplete: the signer could not read {inventoryUnreadable} note{inventoryUnreadable === 1 ? '' : 's'} at export
+              time, likely because it was locked. This list may be missing notes.
+            </p>
+          {/if}
+          {#if inventoryReport.dropped > 0}
+            <p class="hint-sm">
+              {inventoryReport.dropped} inventory entr{inventoryReport.dropped === 1 ? 'y' : 'ies'} in this file could not
+              be read and {inventoryReport.dropped === 1 ? 'was' : 'were'} dropped.
+            </p>
+          {/if}
+          {#if inventory.length > 0}
+            <div class="inventory-list">
+              {#each inventory as note (note.id)}
+                <div class="inventory-row">
+                  <span class="inventory-amount">{msatToSats(note.amount_msat).toLocaleString()} sats</span>
+                  <span class="inventory-host">{note.host}</span>
+                  <span class="inventory-state">{note.state}</span>
+                  {#if note.key_index !== null}<span class="inventory-tag">key note</span>{/if}
+                </div>
+              {/each}
+            </div>
+            <p class="hint-sm">
+              Total: {inventoryTotalSats.toLocaleString()} sats across {inventory.length} note{inventory.length === 1 ? '' : 's'}.
+            </p>
+            <details class="inventory-details">
+              <summary class="hint-sm">Technical detail</summary>
+              {#each inventory as note (note.id)}
+                <div class="inventory-tech-row">
+                  <span class="inventory-tech-label">commitment</span>
+                  <code class="inventory-tech-value">{truncateHex(note.commitment)}</code>
+                  <button class="btn btn-secondary btn-sm" onclick={() => copyCommitment(note.id, note.commitment)}>
+                    {copiedCommitment === note.id ? 'Copied ✓' : 'Copy'}
+                  </button>
+                </div>
+              {/each}
+            </details>
+          {/if}
+        </div>
+      {/if}
       {#if matchedSlots > 0}
         <button class="btn btn-primary" onclick={runImport} disabled={importing}>
           {importing ? 'Confirm on the signer…' : `Restore ${matchedSlots} app slot${matchedSlots === 1 ? '' : 's'}`}
@@ -235,6 +306,25 @@
   .field-input.file { padding: 0.35rem; color: var(--text-dim); }
   .sub .btn { align-self: flex-start; }
   .backup-warning { margin: 0; color: var(--amber); font-weight: 600; }
+  .inventory {
+    display: flex; flex-direction: column; gap: 0.4rem;
+    background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem;
+  }
+  .inventory-warning { margin: 0; color: var(--amber); font-weight: 600; }
+  .inventory-list { display: flex; flex-direction: column; gap: 0.3rem; }
+  .inventory-row { display: flex; align-items: baseline; gap: 0.6rem; font-size: 0.82rem; color: var(--text); flex-wrap: wrap; }
+  .inventory-amount { font-weight: 600; min-width: 5rem; }
+  .inventory-host { color: var(--text-muted); }
+  .inventory-state { color: var(--text-muted); font-size: 0.78rem; }
+  .inventory-tag {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--amber);
+    border: 1px solid var(--amber); border-radius: 3px; padding: 0.05rem 0.35rem;
+  }
+  .inventory-details { font-size: 0.8rem; color: var(--text-muted); }
+  .inventory-details summary { cursor: pointer; }
+  .inventory-tech-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; flex-wrap: wrap; }
+  .inventory-tech-label { color: var(--text-muted); min-width: 5.5rem; }
+  .inventory-tech-value { font-size: 0.78rem; }
   .report {
     display: flex; flex-direction: column; gap: 0.25rem;
     background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem;
