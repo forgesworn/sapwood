@@ -39,11 +39,13 @@ export interface BackupMaster {
 }
 
 /** A non-spendable record of one note held when the backup was exported.
- * `secret_hash` is a SHA-256 commitment, not a bearer preimage. It makes a
- * loss legible but cannot restore or redeem the note. */
+ * `commitment` is never a bearer secret: for an ordinary note (`key_index`
+ * null) it is `sha256(k1)`, the mint's own ledger key; for a key note
+ * (`key_index` a number) it is an x-only public key. Neither can restore or
+ * spend anything -- this is a loss record, not a recovery path. */
 export interface NoteBackupInventory {
   id: string
-  secret_hash: string
+  commitment: string
   state: 'pending' | 'confirmed' | 'spent'
   amount_msat: number
   host: string
@@ -60,8 +62,45 @@ export interface BackupPayload {
   device_id: string
   masters: BackupMaster[]
   bridge_secret: string
-  /** Optional because backups made by older firmware had no note inventory. */
+  /** Absent from historical backups and when leniently-parsed input had no
+   *  usable inventory (wrong type, oversized, or every entry malformed --
+   *  see {@link inventoryReportFor} for what was dropped). At most 16 entries. */
   note_inventory?: NoteBackupInventory[]
+  /** Notes the exporting board could not read (e.g. it was locked), so the
+   *  inventory above is known incomplete. Omitted when zero. */
+  note_inventory_unreadable?: number
+}
+
+/** What happened while leniently parsing a backup's note inventory: how many
+ *  entries survived, how many were malformed and dropped, how many the board
+ *  itself could not read, and whether the whole field was ignored (wrong type
+ *  or oversized). Use {@link inventoryReportFor} to read it back for a payload
+ *  returned by {@link parseBackupPayload} (or anything that routes through it,
+ *  such as {@link exportBackup} and {@link decryptBackup}). */
+export interface NoteInventoryReport {
+  entries: number
+  dropped: number
+  unreadable: number
+  ignored: boolean
+}
+
+// Keyed on the parsed payload object itself, not the wire data: this never
+// becomes an enumerable property of BackupPayload, so it is invisible to
+// JSON.stringify, spreads (e.g. the import filter) and toEqual comparisons.
+const inventoryReports = new WeakMap<BackupPayload, NoteInventoryReport>()
+
+const EMPTY_REPORT: NoteInventoryReport = { entries: 0, dropped: 0, unreadable: 0, ignored: false }
+
+/** The inventory outcome for a payload parsed by this module. Falls back to a
+ *  quiet "nothing to report" shape for a payload built by hand (e.g. in a
+ *  test) rather than parsed from JSON. */
+export function inventoryReportFor(payload: BackupPayload): NoteInventoryReport {
+  return inventoryReports.get(payload) ?? EMPTY_REPORT
+}
+
+/** msat to sats, integer maths only (floor -- a partial sat is not a sat). */
+export function msatToSats(amountMsat: number): number {
+  return Math.floor(amountMsat / 1000)
 }
 
 /** Argon2id cost parameters recorded in (and read back from) the envelope. */
@@ -136,46 +175,68 @@ function randomBytes(length: number): Uint8Array {
 }
 
 // --- payload parsing ---
+//
+// Masters and connection slots are the fields a restore actually needs, and
+// are validated exactly as strictly as before (shape-checked, nothing more).
+// The note inventory is cosmetic to a restore -- nobody needs it back to
+// recover their identities and app pairings -- so it is parsed leniently: a
+// malformed entry is dropped and counted rather than failing the payload, and
+// a wrong-typed or oversized note_inventory is ignored outright. A bad
+// inventory must never block a restore.
 
-function isBackupPayload(value: unknown): value is BackupPayload {
+const MAX_INVENTORY_ENTRIES = 16
+
+function isNoteEntry(value: unknown): value is NoteBackupInventory {
   if (!value || typeof value !== 'object') return false
-  const p = value as Record<string, unknown>
-  const inventory = p.note_inventory
-  return (
-    typeof p.created_at === 'number' &&
-    typeof p.device_id === 'string' &&
-    typeof p.bridge_secret === 'string' &&
-    Array.isArray(p.masters) &&
-    (inventory === undefined || isNoteInventory(inventory))
-  )
+  const note = value as Record<string, unknown>
+  return typeof note.id === 'string'
+    && /^[0-9a-f]{8}$/.test(note.id)
+    && typeof note.commitment === 'string'
+    && /^[0-9a-f]{64}$/.test(note.commitment)
+    && (note.state === 'pending' || note.state === 'confirmed' || note.state === 'spent')
+    && typeof note.amount_msat === 'number'
+    && Number.isSafeInteger(note.amount_msat)
+    && note.amount_msat >= 0
+    && typeof note.host === 'string'
+    && note.host.length <= 64
+    && (note.key_index === null || (typeof note.key_index === 'number' && Number.isSafeInteger(note.key_index) && note.key_index >= 0))
+    && typeof note.created_at === 'number'
+    && Number.isSafeInteger(note.created_at)
+    && note.created_at >= 0
+    && typeof note.updated_at === 'number'
+    && Number.isSafeInteger(note.updated_at)
+    && note.updated_at >= 0
 }
 
-function isNoteInventory(value: unknown): value is NoteBackupInventory[] {
-  if (!Array.isArray(value) || value.length > 16) return false
-  return value.every((entry) => {
-    if (!entry || typeof entry !== 'object') return false
-    const note = entry as Record<string, unknown>
-    return typeof note.id === 'string'
-      && /^[0-9a-f]{8}$/.test(note.id)
-      && typeof note.secret_hash === 'string'
-      && /^[0-9a-f]{64}$/.test(note.secret_hash)
-      && (note.state === 'pending' || note.state === 'confirmed' || note.state === 'spent')
-      && typeof note.amount_msat === 'number'
-      && Number.isSafeInteger(note.amount_msat)
-      && note.amount_msat >= 0
-      && typeof note.host === 'string'
-      && note.host.length <= 64
-      && (note.key_index === null || (typeof note.key_index === 'number' && Number.isSafeInteger(note.key_index) && note.key_index >= 0))
-      && typeof note.created_at === 'number'
-      && Number.isSafeInteger(note.created_at)
-      && note.created_at >= 0
-      && typeof note.updated_at === 'number'
-      && Number.isSafeInteger(note.updated_at)
-      && note.updated_at >= 0
-  })
+/** Lenient parse of the raw `note_inventory` field: keeps valid entries,
+ *  drops (and counts) malformed ones, and ignores the field outright if it is
+ *  not an array or has more than {@link MAX_INVENTORY_ENTRIES} entries. */
+function parseNoteInventory(raw: unknown): { entries: NoteBackupInventory[]; dropped: number; ignored: boolean } {
+  if (raw === undefined) return { entries: [], dropped: 0, ignored: false }
+  if (!Array.isArray(raw) || raw.length > MAX_INVENTORY_ENTRIES) {
+    return { entries: [], dropped: 0, ignored: true }
+  }
+  const entries: NoteBackupInventory[] = []
+  let dropped = 0
+  for (const item of raw) {
+    if (isNoteEntry(item)) entries.push(item)
+    else dropped++
+  }
+  return { entries, dropped, ignored: false }
 }
 
-/** Parse and shape-check a backup payload from raw JSON bytes. */
+/** Lenient parse of `note_inventory_unreadable`: anything other than a
+ *  non-negative integer is treated as unreported (0), never as a reason to
+ *  reject the payload. */
+function parseUnreadable(raw: unknown): number {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? raw : 0
+}
+
+/** Parse and shape-check a backup payload from raw JSON bytes. Masters and
+ *  slots must match the known shape or the whole payload is rejected; the
+ *  note inventory is parsed leniently (see above) and never blocks a
+ *  restore. Read {@link inventoryReportFor} on the result to see what the
+ *  inventory parse dropped, ignored or reported unreadable. */
 export function parseBackupPayload(bytes: Uint8Array): BackupPayload {
   let parsed: unknown
   try {
@@ -183,10 +244,41 @@ export function parseBackupPayload(bytes: Uint8Array): BackupPayload {
   } catch {
     throw new BackupError('The backup data is not valid JSON.')
   }
-  if (!isBackupPayload(parsed)) {
+  if (!parsed || typeof parsed !== 'object') {
     throw new BackupError('The backup data is missing expected fields.')
   }
-  return parsed
+  const p = parsed as Record<string, unknown>
+  if (
+    typeof p.created_at !== 'number'
+    || typeof p.device_id !== 'string'
+    || typeof p.bridge_secret !== 'string'
+    || !Array.isArray(p.masters)
+  ) {
+    throw new BackupError('The backup data is missing expected fields.')
+  }
+
+  const { entries, dropped, ignored } = parseNoteInventory(p.note_inventory)
+  const unreadable = parseUnreadable(p.note_inventory_unreadable)
+
+  const payload: BackupPayload = {
+    created_at: p.created_at,
+    device_id: p.device_id,
+    bridge_secret: p.bridge_secret,
+    masters: p.masters as BackupMaster[],
+  }
+  // Only set note_inventory when the field was usably shaped at all (an
+  // array within bounds), even if every entry in it was malformed -- that
+  // still tells the UI "an inventory was attempted, nothing survived it",
+  // which is different from an old backup that never had the field.
+  if (Array.isArray(p.note_inventory) && p.note_inventory.length <= MAX_INVENTORY_ENTRIES) {
+    payload.note_inventory = entries
+  }
+  if (unreadable > 0) {
+    payload.note_inventory_unreadable = unreadable
+  }
+
+  inventoryReports.set(payload, { entries: payload.note_inventory?.length ?? 0, dropped, unreadable, ignored })
+  return payload
 }
 
 // --- device round-trip ---
@@ -267,7 +359,12 @@ export async function importBackup(
   if (matched.length === 0) {
     throw new BackupError('None of the backup’s identities are on this signer. Re-provision them first, then import.')
   }
-  const filtered: BackupPayload = { ...payload, masters: matched }
+  // The device drops the note inventory on import anyway (it is exported by
+  // the board, not restored to it), and BACKUP_IMPORT_REQUEST has a 32 KB
+  // frame budget the inventory would eat into for nothing. Strip it here so
+  // masters and slots are the only thing sent.
+  const { note_inventory: _inventory, note_inventory_unreadable: _unreadable, ...withoutInventory } = payload
+  const filtered: BackupPayload = { ...withoutInventory, masters: matched }
   const resp = await t.sendAndReceive(
     buildBackupImportRequest(JSON.stringify(filtered)),
     [FrameType.BACKUP_IMPORT_RESPONSE, FrameType.NACK],
