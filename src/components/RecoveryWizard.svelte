@@ -9,7 +9,7 @@
   // walk through it.
   import { nip19 } from 'nostr-tools'
   import {
-    device, serialDerivePersona, serialRenamePersona, serialDeviceDecrypt,
+    device, serialDerivePersona, serialRenamePersona, serialDeviceDecrypt, serialVaultReadRequest,
   } from '../lib/device.svelte.js'
   import {
     DEFAULT_MANIFEST_RELAYS, NATURAL_PERSON_NAME,
@@ -17,6 +17,8 @@
     npubToHex, runEnrolment,
     type EnrolmentPlan, type EnrolmentRowResult,
   } from '../lib/recovery.js'
+  import { recoverVaultFamilyRoster } from '../lib/private-vault-recovery.js'
+  import { openVaultPayload, parseVaultEnvelope } from '@forgesworn/signet-contacts/wire'
   import { parseRelays, relayError } from '../lib/wizard.js'
 
   type Stage = 'intro' | 'natural-person' | 'fetch' | 'roster' | 'enrolling' | 'report'
@@ -61,13 +63,24 @@
     busy = true
     error = null
     try {
+      const vaultRoster = await recoverVaultFamilyRoster(relays, serialVaultReadRequest)
+      if (vaultRoster) {
+        plan = buildEnrolmentPlan(vaultRoster)
+        stage = 'roster'
+        return
+      }
       const event = await fetchDependantsManifest(relays, npHex)
       if (!event) {
         error = 'No family roster found for this identity on those relays. '
           + 'Check the words belong to the guardian who runs My Signet, and add the relay My Signet publishes to.'
         return
       }
-      const plaintext = await serialDeviceDecrypt(npHex, npHex, event.content)
+      const plaintext = parseVaultEnvelope(event.content)
+        ? await openVaultPayload(event.content, {
+          nip44Decrypt: (peer, ciphertext) => serialDeviceDecrypt(npHex, peer, ciphertext),
+        }, npHex)
+        : await serialDeviceDecrypt(npHex, npHex, event.content)
+      if (plaintext === null) throw new Error('Could not decrypt the legacy family roster.')
       plan = buildEnrolmentPlan(parseDependantsManifest(plaintext))
       stage = 'roster'
     } catch (e) {

@@ -14,6 +14,7 @@ import {
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
 import { policiesEqual, managerClientPolicy, MANAGER_METHODS } from './client-policy.js'
 import {
+  nip46UsbRequest,
   clientPubkeyHex as nip46UsbClientPubkeyHex,
   connectWithSecret as nip46UsbConnect,
   derivePersona as nip46UsbDerivePersona,
@@ -3721,4 +3722,19 @@ if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: bool
   ;(window as unknown as { __sapwoodClearError?: unknown }).__sapwoodClearError = () => {
     device.error = null
   }
+}
+
+/** Recovery-only raw-purpose access. Does not register a persona or export a key.
+ * Device identity approval is still required; only read methods are exposed.
+ */
+export async function serialVaultReadRequest(
+  method: 'get_public_key' | 'nip44_decrypt', params: string[],
+  context: { purpose: string; index: number },
+): Promise<string> {
+  if (!['get_public_key', 'nip44_decrypt'].includes(method) || context.purpose !== 'signet:vault:profiles' || !Number.isInteger(context.index)
+    || context.index < 0 || context.index > 0xffffffff) throw new Error('Invalid vault recovery context')
+  return withSapwoodPairing(async masterHex => {
+    await ensureManagerCeiling(masterHex)
+    return nip46UsbRequest(masterHex, method, params, 60_000, context)
+  })
 }

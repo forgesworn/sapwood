@@ -34,6 +34,7 @@ export interface Nip46Rpc {
   id: string
   method: string
   params: unknown[]
+  heartwood?: { purpose: string; index: number }
 }
 
 /** Load (or mint and persist) the Sapwood NIP-46 client secret. The key is
@@ -140,9 +141,10 @@ export async function nip46UsbRequest(
   method: string,
   params: unknown[],
   timeoutMs = 60_000,
+  context?: { purpose: string; index: number },
 ): Promise<string> {
   const sk = clientSecret()
-  const rpc: Nip46Rpc = { id: newRequestId(), method, params }
+  const rpc: Nip46Rpc = { id: newRequestId(), method, params, ...(context ? { heartwood: context } : {}) }
   const payload = buildEncryptedRequestPayload(
     targetPubkeyHex,
     sk,

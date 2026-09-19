@@ -72,3 +72,11 @@ describe('parseEnvelopeResponse', () => {
       .toThrow(/malformed response/)
   })
 })
+
+it('carries raw vault purpose context inside the encrypted request without persona registration', () => {
+  const rpc: Nip46Rpc = { id: 'vault-1', method: 'get_public_key', params: [],
+    heartwood: { purpose: 'signet:vault:profiles', index: 1 } }
+  const payload = buildEncryptedRequestPayload(devicePub, clientSk, rpc, 1755000000)
+  const plaintext = decrypt(new TextDecoder().decode(payload.subarray(72)), getConversationKey(deviceSk, clientPub))
+  expect(JSON.parse(plaintext)).toEqual(rpc)
+})
