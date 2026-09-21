@@ -1202,6 +1202,11 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
       approved_identities: Array.isArray(c.approved_identities)
         ? c.approved_identities.filter((tag): tag is string => typeof tag === 'string')
         : [],
+      bound_identity: typeof c.bound_identity === 'string' ? c.bound_identity : null,
+      escalate: Boolean(c.escalate),
+      petition_on_deny: Boolean(c.petition_on_deny),
+      audit_child_wrap: Boolean(c.audit_child_wrap),
+      guardian_notice_wrap: Boolean(c.guardian_notice_wrap),
     }))
     // Assign only on real change so the periodic refresh doesn't make the
     // Apps list (and everything below it) re-render under the user.
@@ -3668,6 +3673,11 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
       ids: source.ids ?? '',
       wb: source.wb ?? false,
       approved_identities: Array.isArray(source.approved_identities) ? [...source.approved_identities] : [],
+      bound_identity: source.bound_identity ?? null,
+      escalate: Boolean(source.escalate),
+      petition_on_deny: Boolean(source.petition_on_deny),
+      audit_child_wrap: Boolean(source.audit_child_wrap),
+      guardian_notice_wrap: Boolean(source.guardian_notice_wrap),
     }
 
     const blocked = kithmootUpgradeBlockedReason(snapshot)
@@ -3763,6 +3773,20 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
       const strict_permissions = rec.strict_permissions === undefined ? false : rec.strict_permissions
       if (typeof strict_permissions !== 'boolean') throw new Error('Malformed strict_permissions')
 
+      const bound_identity = rec.bound_identity === undefined || rec.bound_identity === null ? null : rec.bound_identity
+      if (bound_identity !== null && (typeof bound_identity !== 'string' || !is64Hex(bound_identity))) {
+        throw new Error('Malformed bound_identity')
+      }
+
+      const escalate = rec.escalate === undefined ? false : rec.escalate
+      if (typeof escalate !== 'boolean') throw new Error('Malformed escalate')
+      const petition_on_deny = rec.petition_on_deny === undefined ? false : rec.petition_on_deny
+      if (typeof petition_on_deny !== 'boolean') throw new Error('Malformed petition_on_deny')
+      const audit_child_wrap = rec.audit_child_wrap === undefined ? false : rec.audit_child_wrap
+      if (typeof audit_child_wrap !== 'boolean') throw new Error('Malformed audit_child_wrap')
+      const guardian_notice_wrap = rec.guardian_notice_wrap === undefined ? false : rec.guardian_notice_wrap
+      if (typeof guardian_notice_wrap !== 'boolean') throw new Error('Malformed guardian_notice_wrap')
+
       const ids = rec.ids === undefined ? '' : rec.ids
       if (typeof ids !== 'string') throw new Error('Malformed ids')
       const wb = rec.wb === undefined ? false : rec.wb
@@ -3799,6 +3823,11 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
         ids,
         wb,
         approved_identities,
+        bound_identity,
+        escalate,
+        petition_on_deny,
+        audit_child_wrap,
+        guardian_notice_wrap,
       }
     }
 

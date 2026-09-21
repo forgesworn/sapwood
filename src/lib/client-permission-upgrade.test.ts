@@ -170,6 +170,35 @@ describe('permissionSlotUnchanged', () => {
     const b = slot({ current_pubkey: 'bb'.repeat(32), authorized_pubkeys: ['aa'.repeat(32)] })
     expect(permissionSlotUnchanged(a, b)).toBe(true)
   })
+
+  it.each([
+    ['bound_identity', { bound_identity: 'ab'.repeat(32) }],
+    ['escalate', { escalate: true }],
+    ['petition_on_deny', { petition_on_deny: true }],
+    ['audit_child_wrap', { audit_child_wrap: true }],
+    ['guardian_notice_wrap', { guardian_notice_wrap: true }],
+  ] as const)('is false when %s differs', (_name, override) => {
+    expect(permissionSlotUnchanged(slot(), slot(override))).toBe(false)
+  })
+
+  it('treats absent and explicit-default binding/family flags as equivalent', () => {
+    const absent = slot()
+    const explicit = slot({
+      bound_identity: null,
+      escalate: false,
+      petition_on_deny: false,
+      audit_child_wrap: false,
+      guardian_notice_wrap: false,
+    })
+    expect(permissionSlotUnchanged(absent, explicit)).toBe(true)
+    expect(permissionSlotUnchanged(explicit, absent)).toBe(true)
+  })
+
+  it('compares bound_identity across different 64-hex bindings as unchanged-equal', () => {
+    const a = slot({ bound_identity: 'ab'.repeat(32) })
+    const b = slot({ bound_identity: 'ab'.repeat(32) })
+    expect(permissionSlotUnchanged(a, b)).toBe(true)
+  })
 })
 
 describe('kithmootPermissionChanges runtime shape guards', () => {

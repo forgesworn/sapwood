@@ -2191,6 +2191,12 @@ describe('identity card auto-sync on serial master list', () => {
     const before = kmSlot({
       allowed_methods: ['get_public_key', 'sign_event'],
       allowed_kinds: [1],
+      auto_approve: false,
+      bound_identity: KM_PERSONA,
+      escalate: true,
+      petition_on_deny: true,
+      audit_child_wrap: true,
+      guardian_notice_wrap: true,
     })
     const expectedChanges = kithmootPermissionChanges(before)
     const after = { ...before, ...expectedChanges }
@@ -2198,7 +2204,7 @@ describe('identity card auto-sync on serial master list', () => {
 
     await connectRelay(pubHex, ['wss://r.example'])
     try {
-      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      const review = kmReview(device.slots.find(s => s.slot_index === KM_SLOT_INDEX)!, { mode: 'relay', masterSlot: 0 })
       await mgmtApplyKithmootPermissions(review)
       const update = stub.updateCalls[0] as Record<string, unknown>
       // Manual flags + persona tags are never part of the mutation payload,
@@ -2209,6 +2215,8 @@ describe('identity card auto-sync on serial master list', () => {
       expect(update).not.toHaveProperty('current_pubkey')
       expect(update).not.toHaveProperty('label')
       expect(update).not.toHaveProperty('strict_permissions')
+      expect(Object.keys(update).sort()).toEqual(['allowed_kinds', 'allowed_methods', 'expected_secret_fingerprint', 'slot_index'])
+      expect(device.slots.find(s => s.slot_index === KM_SLOT_INDEX)).toMatchObject(after)
     } finally {
       await disconnect()
     }
@@ -2341,11 +2349,17 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
-  it('aborts without mutation when the fresh pre-read shows the slot changed', async () => {
+  it.each([
+    { allowed_kinds: [1, 30023, 99999] },
+    { bound_identity: 'ab'.repeat(32) },
+    { escalate: true },
+    { petition_on_deny: true },
+    { audit_child_wrap: true },
+    { guardian_notice_wrap: true },
+  ])('aborts before mutation when fresh policy or persona/family metadata changed: %j', async (changed) => {
     const { pubHex } = freshMaster()
     const reviewSlot = kmSlot({ allowed_kinds: [1, 30023] })
-    // Fresh read returns a differently-shaped slot: kinds changed under us.
-    const freshSlot = kmSlot({ allowed_kinds: [1, 30023, 99999] })
+    const freshSlot = kmSlot({ ...reviewSlot, ...changed })
     const stub = installRelayStub({
       pubHex,
       initial: reviewSlot,

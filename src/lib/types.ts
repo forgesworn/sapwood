@@ -31,6 +31,21 @@ export interface ConnectSlot {
    * array. Populated on the relay management (`list_clients`) path, which
    * summarises the slot instead of sending its raw wire fields. */
   approved_identities?: string[]
+  /** Relay/firmware client_summary binding: 64-hex identity currently bound to
+   * this slot, or null when nothing is bound. Absent on older firmware. */
+  bound_identity?: string | null
+  /** Relay/firmware client_summary escalation flag. Absent on older firmware
+   * and treated as false. */
+  escalate?: boolean
+  /** Relay/firmware client_summary petition-on-deny flag. Absent on older
+   * firmware and treated as false. */
+  petition_on_deny?: boolean
+  /** Relay/firmware client_summary audit-child-wrap flag. Absent on older
+   * firmware and treated as false. */
+  audit_child_wrap?: boolean
+  /** Relay/firmware client_summary guardian-notice-wrap flag. Absent on older
+   * firmware and treated as false. */
+  guardian_notice_wrap?: boolean
 }
 
 /** Complete automatic authority sent to Heartwood's versioned management API. */

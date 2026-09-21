@@ -155,5 +155,11 @@ export function permissionSlotUnchanged(
     return false
   }
 
+  if ((expected.bound_identity ?? null) !== (actual.bound_identity ?? null)) return false
+  if (Boolean(expected.escalate) !== Boolean(actual.escalate)) return false
+  if (Boolean(expected.petition_on_deny) !== Boolean(actual.petition_on_deny)) return false
+  if (Boolean(expected.audit_child_wrap) !== Boolean(actual.audit_child_wrap)) return false
+  if (Boolean(expected.guardian_notice_wrap) !== Boolean(actual.guardian_notice_wrap)) return false
+
   return true
 }
