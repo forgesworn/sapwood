@@ -11,7 +11,7 @@
 import { CONNECT_METHODS, SIGNING_METHODS, exactClientPolicy } from './client-policy.js'
 import type { ExactClientPolicy } from './types.js'
 
-export type PresetId = 'posting' | 'everything' | 'messaging' | 'custom'
+export type PresetId = 'posting' | 'everything' | 'messaging' | 'kithmoot-private' | 'custom'
 
 export interface PermissionPreset {
   id: PresetId
@@ -45,11 +45,19 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
   {
     id: 'messaging',
     label: 'Messages only',
-    description: 'Direct messages and KithMoot private rooms. Good for a chat app.',
+    description: 'Direct messages and room device credentials; encrypted account settings need the KithMoot profile. Good for a chat app.',
     // Legacy NIP-04 plus signed NIP-17 seals/gift wraps. Kinds 14/15 are
     // deliberately absent: NIP-17 message rumors are unsigned.
     kinds: [4, 13, 1059, 20460],
     methods: [...CONNECT_METHODS, 'sign_event'],
+  },
+  {
+    id: 'kithmoot-private',
+    label: 'KithMoot private rooms',
+    description:
+      'Sign in, authorise devices and sync encrypted room bookmarks and read state. Grants account-wide sign-in proofs, device credentials and app settings; not restricted to KithMoot tags.',
+    kinds: [20460, 21236, 30078],
+    methods: ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt'],
   },
   {
     id: 'custom',

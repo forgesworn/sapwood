@@ -7,8 +7,9 @@
   import {
     device, refreshSlots, httpTransport,
     mgmtCreateClient, mgmtApproveSigning, mgmtRevokeClient, mgmtUpdateClient,
-    mgmtCanApproveSigning, mgmtClientUri,
+    mgmtCanApproveSigning, mgmtClientUri, mgmtApplyKithmootPermissions,
   } from '../lib/device.svelte.js'
+  import { kindLabelPlain as kindLabel } from '../lib/kinds.js'
   import KindPermissions from './KindPermissions.svelte'
   import ApprovalQueue from './ApprovalQueue.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
@@ -18,10 +19,17 @@
   import { copyText } from '../lib/clipboard.js'
   import { bunkerHasRelay } from '../lib/bunker.js'
   import { exactPolicyFromSlot, fullClientPolicy } from '../lib/client-policy.js'
+  import {
+    kithmootUpgradeBlockedReason,
+    kithmootPermissionChanges,
+    permissionSlotUnchanged,
+    type KithmootPermissionReview,
+  } from '../lib/client-permission-upgrade.js'
   import { nip19 } from 'nostr-tools'
 
   const overBridge = $derived(device.mode === 'http')
   const overUsb = $derived(device.mode === 'serial')
+  const overUsbRelay = $derived(device.mode === 'serial' || device.mode === 'relay')
   const canApprove = $derived(mgmtCanApproveSigning())
   // Master slots only: derived personas share their owner's slot table, so
   // they are not separate targets for app connections here.
@@ -53,6 +61,91 @@
   let uriValue = $state('')
   let uriError = $state<string | null>(null)
   let replacingSlot = $state<number | null>(null)
+
+  // --- KithMoot private-rooms permission review (USB/relay only) ---
+  let review = $state<KithmootPermissionReview | null>(null)
+  let reviewBusy = $state(false)
+  let reviewError = $state<string | null>(null)
+  let reviewStatus = $state<string | null>(null)
+  let reviewStatusSlot = $state<number | null>(null)
+
+  function kithmootBlockedReason(slot: ConnectSlot): string | null {
+    if (overBridge) return null
+    return kithmootUpgradeBlockedReason(slot)
+  }
+
+  function openKithmootReview(slot: ConnectSlot) {
+    if (reviewBusy) return
+    const reason = kithmootUpgradeBlockedReason(slot)
+    if (reason) return
+    reviewError = null
+    reviewStatus = null
+    reviewStatusSlot = null
+    // Explicit plain snapshot: the review is pinned to exactly this slot copy,
+    // the master slot, the connection generation and the transport mode.
+    review = {
+      slot: JSON.parse(JSON.stringify(slot)) as ConnectSlot,
+      masterSlot: device.selectedSlot,
+      connectionGeneration: device.connectionGeneration,
+      mode: device.mode === 'serial' ? 'serial' : 'relay',
+    }
+  }
+
+  function closeKithmootReview() {
+    if (reviewBusy) return
+    review = null
+    reviewError = null
+  }
+
+  async function confirmKithmootReview() {
+    const r = review
+    if (!r || reviewBusy) return
+    // Abort a stale review before calling: it must still match the identity,
+    // connection generation and transport it was opened under.
+    if (
+      r.masterSlot !== device.selectedSlot ||
+      r.connectionGeneration !== device.connectionGeneration ||
+      r.mode !== (device.mode === 'serial' ? 'serial' : 'relay')
+    ) {
+      reviewError = "This connection changed since the review opened. Close it and start again."
+      return
+    }
+    // Check the cached slot too; the backend then reads the signer before writing.
+    const fresh = device.slots.find((s) => s.slot_index === r.slot.slot_index)
+    if (!fresh || !permissionSlotUnchanged(r.slot, fresh)) {
+      reviewError = "This app's permissions changed since the review opened. Close it and start again."
+      return
+    }
+    reviewBusy = true
+    reviewError = null
+    try {
+      await mgmtApplyKithmootPermissions(r)
+      // The backend verifies the pinned context and applies the change before
+      // returning, so the call resolving is the success signal. No local
+      // refresh: a refresh failure must not turn a successful write into a
+      // contradictory UI, and the device table is authoritative on next read.
+      review = null
+      reviewError = null
+      reviewStatus = 'KithMoot rooms enabled. Existing permissions were kept.'
+      reviewStatusSlot = r.slot.slot_index
+    } catch (e) {
+      reviewError = e instanceof Error ? e.message : 'Could not apply the permission change on the device.'
+    } finally {
+      reviewBusy = false
+    }
+  }
+
+  function methodLabel(m: string): string {
+    switch (m) {
+      case 'get_public_key': return 'Read the public key'
+      case 'sign_event': return 'Sign events'
+      case 'nip44_encrypt': return 'Encrypt messages (NIP-44)'
+      case 'nip44_decrypt': return 'Decrypt messages (NIP-44)'
+      case 'connect': return 'Connect'
+      case 'ping': return 'Ping'
+      default: return m
+    }
+  }
 
   // Advanced raw bunker URI (bridge multi-instance mode only).
   const selectedBunkerUri = $derived(
@@ -106,6 +199,7 @@
   }
 
   async function handleApprove(slot: ConnectSlot) {
+    if (reviewBusy) return
     approvingSlot = slot.slot_index
     try { await mgmtApproveSigning(slot.slot_index, slot.secret_fingerprint) }
     catch (e) { device.error = e instanceof Error ? e.message : 'Approve failed' }
@@ -113,6 +207,7 @@
   }
 
   async function handleRevoke(slot: ConnectSlot) {
+    if (reviewBusy) return
     revokingSlot = slot.slot_index
     try {
       if (overBridge) {
@@ -129,6 +224,7 @@
   }
 
   async function handleUpdate(slot: ConnectSlot, changes: { label?: string; allowed_kinds?: number[] | null; auto_approve?: boolean }) {
+    if (reviewBusy) return
     updatingSlot = slot.slot_index
     try {
       if (overBridge) {
@@ -167,6 +263,7 @@
   }
 
   async function toggleUri(slot: ConnectSlot) {
+    if (reviewBusy) return
     if (uriForSlot === slot.slot_index) {
       uriForSlot = null
       uriValue = ''
@@ -191,6 +288,7 @@
   // signing setting, then removes the stale pending slot. The fresh link surfaces in the
   // "Connection ready" box above, ready to copy into the app.
   async function replaceLink(slot: ConnectSlot) {
+    if (reviewBusy) return
     replacingSlot = slot.slot_index
     uriError = null
     try {
@@ -212,6 +310,10 @@
     device.selectedSlot = parseInt((e.target as HTMLSelectElement).value)
     created = null
     uriForSlot = null
+    // Closing the review on identity switch is safe: the backend re-checks the
+    // pinned context anyway.
+    review = null
+    reviewError = null
     refreshSlots(device.selectedSlot)
   }
 
@@ -430,7 +532,7 @@
               {#if slot.signing_approved}
                 <span class="tag tag--blue" title="This app is allowed to sign">CAN SIGN</span>
               {:else if canApprove && !slot.strict_permissions}
-                <button class="btn btn-secondary btn-sm allow" disabled={approvingSlot === slot.slot_index} onclick={() => handleApprove(slot)}>
+                <button class="btn btn-secondary btn-sm allow" disabled={approvingSlot === slot.slot_index || reviewBusy} onclick={() => handleApprove(slot)}>
                   {approvingSlot === slot.slot_index ? 'Allowing…' : 'Allow signing'}
                 </button>
               {:else if slot.strict_permissions && !(slot.allowed_methods ?? []).includes('sign_event')}
@@ -443,13 +545,13 @@
                   class="tag"
                   class:tag--green={slot.auto_approve}
                   title={slot.auto_approve ? 'Signs without asking. Click to require the button per signature' : 'Each signature needs the button. Click to sign automatically'}
-                  disabled={updatingSlot === slot.slot_index}
+                  disabled={updatingSlot === slot.slot_index || reviewBusy}
                   onclick={() => handleUpdate(slot, { auto_approve: !slot.auto_approve })}
                 >
                   {slot.auto_approve ? 'AUTO' : 'MANUAL'}
                 </button>
               {/if}
-              <button class="btn btn-secondary btn-sm" onclick={() => toggleUri(slot)}>
+              <button class="btn btn-secondary btn-sm" disabled={reviewBusy} onclick={() => toggleUri(slot)}>
                 {uriForSlot === slot.slot_index ? 'Hide link' : 'Link'}
               </button>
               <ConfirmButton
@@ -494,9 +596,64 @@
             autoApprove={slot.auto_approve}
             strictPermissions={slot.strict_permissions ?? false}
             signingIncluded={(slot.allowed_methods ?? []).includes('sign_event')}
-            updating={updatingSlot === slot.slot_index}
+            updating={updatingSlot === slot.slot_index || (reviewBusy && review?.slot.slot_index === slot.slot_index)}
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />
+
+          {#if overUsbRelay}
+            <div class="km-block">
+              {#if review && review.masterSlot === device.selectedSlot && review.slot.slot_index === slot.slot_index}
+                {@const changes = kithmootPermissionChanges(review.slot)}
+                <div class="km-review">
+                  <h4>Add KithMoot private rooms to “{review.slot.label || `app ${review.slot.slot_index}`}”?</h4>
+                  <p class="km-note">Final signing methods:</p>
+                  <ul class="km-list">
+                    {#each changes.allowed_methods as m (m)}
+                      <li>{methodLabel(m)} <code class="km-tech">{m}</code></li>
+                    {/each}
+                  </ul>
+                  <p class="km-note">Final event kinds:</p>
+                  {#if changes.allowed_kinds.length === 0}
+                    <p class="km-note" role="status">All event kinds already allowed.</p>
+                  {:else}
+                    <ul class="km-list">
+                      {#each changes.allowed_kinds as k (k)}
+                        <li>{kindLabel(k)} <code class="km-tech">kind {k}</code></li>
+                      {/each}
+                    </ul>
+                  {/if}
+                  <p class="km-note">This adds account sign-in proofs (kind 21236), device credentials including person scope (kind 20460), and encrypted account settings including bookmarks and read positions (kind 30078). Whole-kind and NIP-44 permissions are not limited to KithMoot tags, rooms or recipients: the shared Bark, Cambium and My Signet pairing applies to every app it allows.</p>
+                  <p class="km-note">Existing permissions, key and persona approvals and the manual-signing setting are kept. This adds no public posting, profile or deletion powers; any broader extras shown above remain.</p>
+                  {#if review.slot.auto_approve === false}
+                    <p class="km-note" role="status">Manual signing is kept: each signature still needs a press of the button on the device.</p>
+                  {/if}
+                  {#if reviewError}<p class="error-text" role="alert">{reviewError}</p>{/if}
+                  <div class="km-actions">
+                    <button class="btn btn-primary btn-sm" disabled={reviewBusy} onclick={confirmKithmootReview}>
+                      {reviewBusy ? 'Applying…' : 'Confirm'}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" disabled={reviewBusy} onclick={closeKithmootReview}>Cancel</button>
+                  </div>
+                </div>
+              {:else}
+                <div class="km-actions">
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    disabled={!!kithmootBlockedReason(slot) || reviewBusy}
+                    onclick={() => openKithmootReview(slot)
+                  }>Add KithMoot rooms</button>
+                  {#if kithmootBlockedReason(slot)}
+                    <span class="hint-sm" role="status">{kithmootBlockedReason(slot)}</span>
+                  {/if}
+                </div>
+                {#if reviewStatus && reviewStatusSlot === slot.slot_index}
+                  <p class="hint-sm km-ok" role="status">{reviewStatus}</p>
+                {/if}
+              {/if}
+            </div>
+          {:else}
+            <p class="hint-sm km-guidance" role="status">Adding KithMoot rooms needs a USB or WiFi connection. Connect over USB or WiFi to change this app's permissions.</p>
+          {/if}
 
           {#if identityTags(slot).length > 0}
             <p class="hint-sm identity-approved">Approved identities: {identityTags(slot).length} ({identityTags(slot).map(identityTagLabel).join(', ')})</p>
@@ -585,6 +742,26 @@
   .link-gone { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; }
 
   .empty.centred { text-align: center; padding: 2rem 0; }
+
+  .km-block { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+  .km-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .km-review {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    border: 1px solid var(--green-dim); border-radius: 6px; background: #08130d;
+    padding: 0.75rem 0.9rem;
+  }
+  .km-review h4 { margin: 0; font-size: 0.95rem; color: var(--green); }
+  .km-list {
+    margin: 0; padding-left: 1.1rem; font-size: 0.82rem; color: var(--text-dim);
+    display: flex; flex-direction: column; gap: 0.15rem;
+  }
+  .km-tech { font-size: 0.72rem; color: var(--text-muted); margin-left: 0.4rem; }
+  .km-note { margin: 0; font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; }
+  .km-guidance { margin: 0.4rem 0 0; }
+  .km-ok { color: var(--green); margin: 0.4rem 0 0; }
+  @media (max-width: 640px) {
+    .km-review { padding: 0.65rem 0.7rem; }
+  }
 
   .no-identity { padding: 1.3rem 1.4rem; }
   .ni-title { font-size: 1.1rem; font-weight: 700; color: #cba24a; margin: 0 0 0.5rem; }

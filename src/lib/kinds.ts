@@ -69,7 +69,8 @@ const ALL_LABELS: Record<number, string> = {
   10013: 'Private Relay List', 10019: 'Nutzap Mint Recommendation',
   10030: 'Emoji List', 10050: 'DM Relays', 13194: 'Wallet Info',
   17375: 'Cashu Wallet', 22242: 'Relay Auth', 23194: 'Wallet Request',
-  20460: 'KithMoot Device Credential', 23195: 'Wallet Response', 24133: 'NIP-46', 27117: 'Gated Deposit Auth',
+  20460: 'KithMoot Device Credential', 21236: 'Account Sign-in Proof',
+  23195: 'Wallet Response', 24133: 'NIP-46', 27117: 'Gated Deposit Auth',
   27235: 'HTTP Auth',
   30000: 'Follow Sets', 30001: 'Bookmarks', 30002: 'Relay Sets',
   30003: 'Bookmark Sets', 30007: 'Kind Mute Sets',
@@ -83,6 +84,11 @@ const ALL_LABELS: Record<number, string> = {
   31925: 'Calendar RSVP', 31989: 'Handler Recommendation',
   31990: 'Handler Information', 34550: 'Community Definition',
   39000: 'Group Metadata',
+}
+
+/** Plain label without the kind suffix, falling back to `Kind N`. */
+export function kindLabelPlain(kind: number): string {
+  return ALL_LABELS[kind] ?? `Kind ${kind}`
 }
 
 export function kindLabel(kind: number): string {

@@ -113,8 +113,12 @@ import {
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
+  mgmtApplyKithmootPermissions,
 } from './device.svelte.js'
-import { FrameType } from './frame.js'
+import { kithmootPermissionChanges } from './client-permission-upgrade.js'
+import type { KithmootPermissionReview } from './client-permission-upgrade.js'
+import type { ConnectSlot } from './types.js'
+import { FrameType, parseFrame } from './frame.js'
 import { generateOperatorMnemonic, getOrCreateOperator, pubHexFromSecret } from './op-mgmt.js'
 import type { MasterInfo } from './types.js'
 import { fullClientPolicy, MANAGER_METHODS } from './client-policy.js'
@@ -1970,6 +1974,717 @@ describe('identity card auto-sync on serial master list', () => {
       await disconnect()
     }
   })
+
+  // --- mgmtApplyKithmootPermissions (real exported backend path) ---
+  //
+  // These tests exercise the exported adapter directly, without stubbing it.
+  // Serial tests feed frames through the captured listener / sendAndReceive
+  // mock; relay tests use the real connectRelay path (mock RelayTransport).
+
+  const KM_SLOT_INDEX = 4
+  const KM_FP = 'a'.repeat(64)
+  const KM_CUR = '1'.repeat(64)
+  const KM_PERSONA = '7'.repeat(64)
+
+  function kmSlot(overrides: Partial<ConnectSlot> = {}): ConnectSlot {
+    return {
+      slot_index: KM_SLOT_INDEX,
+      label: 'KithMoot app',
+      secret: '',
+      current_pubkey: KM_CUR,
+      authorized_pubkeys: [],
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1, 30023],
+      auto_approve: true,
+      signing_approved: true,
+      strict_permissions: false,
+      secret_fingerprint: KM_FP,
+      ids: '',
+      wb: false,
+      approved_identities: [KM_PERSONA],
+      ...overrides,
+    }
+  }
+
+  /** Encode a ConnectSlot list as the on-wire CONNSLOT_LIST JSON payload. */
+  function encodeSlotPayload(slots: ConnectSlot[]): Uint8Array {
+    const wire = slots.map((s) => ({
+      slot_index: s.slot_index,
+      label: s.label,
+      secret: s.secret,
+      current_pubkey: s.current_pubkey,
+      authorized_pubkeys: s.authorized_pubkeys ?? [],
+      allowed_methods: s.allowed_methods,
+      allowed_kinds: s.allowed_kinds,
+      auto_approve: s.auto_approve,
+      signing_approved: s.signing_approved,
+      strict_permissions: s.strict_permissions ?? false,
+      secret_fingerprint: s.secret_fingerprint,
+      ids: s.ids ?? '',
+      wb: s.wb ?? false,
+      approved_identities: s.approved_identities ?? [],
+    }))
+    return new TextEncoder().encode(JSON.stringify(wire))
+  }
+
+  function kmReview(slot: ConnectSlot, opts: Partial<KithmootPermissionReview> = {}): KithmootPermissionReview {
+    return {
+      slot,
+      masterSlot: 0,
+      connectionGeneration: device.connectionGeneration,
+      mode: opts.mode ?? 'relay',
+      ...opts,
+    }
+  }
+
+  function installRelayStub(opts: {
+    pubHex: string
+    initial: ConnectSlot
+    afterWrite?: ConnectSlot
+    onUpdate?: (params: unknown) => void
+    updateError?: Error
+  }) {
+    const { pubHex, initial, afterWrite, onUpdate, updateError } = opts
+    let listCalls = 0
+    let wrote = false
+    const updateCalls: unknown[] = []
+    const readCalls: unknown[] = []
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return {
+          master_count: 1,
+          master_npub_hex: pubHex,
+          mode: 'wifi-standalone',
+          relay: 'wss://r',
+        }
+      }
+      if (method === 'get_network_config') return remoteNetworkResponse()
+      if (method === 'list_clients') {
+        readCalls.push(params)
+        listCalls += 1
+        const slot = wrote && afterWrite ? afterWrite : initial
+        return { clients: [slot] }
+      }
+      if (method === 'update_client') {
+        updateCalls.push(params)
+        onUpdate?.(params)
+        if (updateError) throw updateError
+        wrote = true
+        return { ok: true }
+      }
+      return { ok: true }
+    })
+    return {
+      readCalls,
+      updateCalls,
+      getListCalls: () => listCalls,
+      wasWritten: () => wrote,
+    }
+  }
+
+  it('applies the additive KithMoot upgrade on relay: single mutation, decoded payload, verified read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({
+      allowed_methods: ['get_public_key', 'sign_event', 'make_invoice'],
+      allowed_kinds: [1, 20460],
+    })
+    const expectedChanges = kithmootPermissionChanges(before)
+    const after = { ...before, ...expectedChanges }
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: after })
+
+    // connectRelay itself issues a list_clients, so snapshot the count after
+    // the connection is established and measure deltas from there.
+    await connectRelay(pubHex, ['wss://r.example'])
+    const baselineList = stub.getListCalls()
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      await mgmtApplyKithmootPermissions(review)
+
+      // Pre-read + verify read: two additional list_clients, one update_client.
+      expect(stub.getListCalls() - baselineList).toBe(2)
+      expect(stub.updateCalls).toHaveLength(1)
+
+      // The exact payload the device received, decoded from raw form.
+      const update = stub.updateCalls[0] as Record<string, unknown>
+      expect(update.slot_index).toBe(KM_SLOT_INDEX)
+      expect(update.expected_secret_fingerprint).toBe(KM_FP)
+      expect(update.allowed_methods).toEqual(expectedChanges.allowed_methods)
+      expect(update.allowed_kinds).toEqual(expectedChanges.allowed_kinds)
+      expect(update.allowed_methods).toEqual([
+        'get_public_key', 'sign_event', 'make_invoice',
+        'nip44_encrypt', 'nip44_decrypt',
+      ])
+      expect(update.allowed_kinds).toEqual([1, 20460, 21236, 30078])
+      // Manual flags, persona tags and key unchanged in the write payload.
+      expect(update).not.toHaveProperty('auto_approve')
+      expect(update).not.toHaveProperty('signing_approved')
+      expect(update).not.toHaveProperty('approved_identities')
+      expect(update).not.toHaveProperty('current_pubkey')
+      expect(update).not.toHaveProperty('strict_permissions')
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('applies the KithMoot upgrade over USB: decoded CONNSLOT_UPDATE frame, verified re-read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [],
+      secret_fingerprint: undefined,
+    })
+    const expectedChanges = kithmootPermissionChanges(before)
+    const after = { ...before, ...expectedChanges, secret_fingerprint: undefined }
+    const frames: Uint8Array[] = []
+    let listReads = 0
+    serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+      frames.push(frame)
+      if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return FW_RESP
+      if (expect.includes(FrameType.CONNSLOT_LIST_RESP)) {
+        listReads += 1
+        const slot = listReads === 1 ? before : after
+        return {
+          type: FrameType.CONNSLOT_LIST_RESP,
+          payload: encodeSlotPayload([slot]),
+        }
+      }
+      if (expect.includes(FrameType.CONNSLOT_UPDATE_RESP)) {
+        return { type: FrameType.CONNSLOT_UPDATE_RESP, payload: new Uint8Array() }
+      }
+      return ACK
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    // Drive the same USB path the app uses: bridgeAuthed + SESSION_ACK.
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    device.selectedSlot = 0
+    device.connectionGeneration = device.connectionGeneration ?? 1
+    device.relays = []
+    try {
+      const review = kmReview(before, { mode: 'serial', masterSlot: 0 })
+      await mgmtApplyKithmootPermissions(review)
+
+      expect(listReads).toBe(2)
+      // Decode the actual CONNSLOT_UPDATE frame via the real parseFrame.
+      const updateFrames = frames.filter((f) => f.length > 0 && f[2] === FrameType.CONNSLOT_UPDATE)
+      expect(updateFrames).toHaveLength(1)
+      const parsed = parseFrame(updateFrames[0]!)
+      expect(parsed.type).toBe(FrameType.CONNSLOT_UPDATE)
+      // Payload: [masterSlot byte][JSON body].
+      expect(parsed.payload[0]).toBe(0)
+      const updateJson = JSON.parse(new TextDecoder().decode(parsed.payload.slice(1)))
+      expect(updateJson.slot_index).toBe(KM_SLOT_INDEX)
+      expect(updateJson.allowed_methods).toEqual(expectedChanges.allowed_methods)
+      expect(updateJson.allowed_kinds).toEqual(expectedChanges.allowed_kinds)
+      // Empty allowed_kinds on the source slot stays empty (unrestricted).
+      expect(updateJson.allowed_kinds).toEqual([])
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('preserves manual flags and persona tags on the fresh pre-read slot', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1],
+      auto_approve: false,
+      bound_identity: KM_PERSONA,
+      escalate: true,
+      petition_on_deny: true,
+      audit_child_wrap: true,
+      guardian_notice_wrap: true,
+    })
+    const expectedChanges = kithmootPermissionChanges(before)
+    const after = { ...before, ...expectedChanges }
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: after })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      const review = kmReview(device.slots.find(s => s.slot_index === KM_SLOT_INDEX)!, { mode: 'relay', masterSlot: 0 })
+      await mgmtApplyKithmootPermissions(review)
+      const update = stub.updateCalls[0] as Record<string, unknown>
+      // Manual flags + persona tags are never part of the mutation payload,
+      // so the device keeps their existing values untouched.
+      expect(update).not.toHaveProperty('auto_approve')
+      expect(update).not.toHaveProperty('signing_approved')
+      expect(update).not.toHaveProperty('approved_identities')
+      expect(update).not.toHaveProperty('current_pubkey')
+      expect(update).not.toHaveProperty('label')
+      expect(update).not.toHaveProperty('strict_permissions')
+      expect(Object.keys(update).sort()).toEqual(['allowed_kinds', 'allowed_methods', 'expected_secret_fingerprint', 'slot_index'])
+      expect(device.slots.find(s => s.slot_index === KM_SLOT_INDEX)).toMatchObject(after)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('rejects the write when the review was opened against a different master slot', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot()
+    installRelayStub({ pubHex, initial: before })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      // selectSlot is 0; review claims masterSlot 9.
+      const review = kmReview(before, { mode: 'relay', masterSlot: 9 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Connection context changed since review was opened/,
+      )
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('rejects the write when the connection generation changed during async read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot()
+    const stub = installRelayStub({ pubHex, initial: before })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      // Bump generation immediately (a reconnect), before the async pre-read
+      // resolves, to simulate a racing connection change.
+      const original = relayRequestMock.getMockImplementation()
+      relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+        if (method === 'list_clients') {
+          device.connectionGeneration = (device.connectionGeneration ?? 1) + 1
+        }
+        return original?.(method, params)
+      })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Connection context changed during Kithmoot permission update/,
+      )
+      expect(stub.updateCalls).toHaveLength(0)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('rejects the write when the selected master slot changed during async read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot()
+    const stub = installRelayStub({ pubHex, initial: before })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      const original = relayRequestMock.getMockImplementation()
+      relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+        if (method === 'list_clients') {
+          device.selectedSlot = 7
+        }
+        return original?.(method, params)
+      })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Connection context changed during Kithmoot permission update/,
+      )
+      expect(stub.updateCalls).toHaveLength(0)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('rejects a NACK from the device with zero retries and no verifying read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({ secret_fingerprint: undefined })
+    let updateSent = 0
+    let listReads = 0
+    serialMock.sendAndReceive.mockImplementation(async (_frame: Uint8Array, expect: number[]) => {
+      if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return FW_RESP
+      if (expect.includes(FrameType.CONNSLOT_LIST_RESP)) {
+        listReads += 1
+        return {
+          type: FrameType.CONNSLOT_LIST_RESP,
+          payload: encodeSlotPayload([before]),
+        }
+      }
+      if (expect.includes(FrameType.CONNSLOT_UPDATE_RESP)) {
+        updateSent += 1
+        return { type: FrameType.NACK, payload: new Uint8Array() }
+      }
+      return ACK
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    device.selectedSlot = 0
+    device.connectionGeneration = device.connectionGeneration ?? 1
+    try {
+      const review = kmReview(before, { mode: 'serial', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Kithmoot permission update denied by device/,
+      )
+      expect(updateSent).toBe(1)
+      // Only the pre-read happened; a denied write must not trigger a verifying read.
+      expect(listReads).toBe(1)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('reports a post-ack mismatch as uncertain when the verifying read disagrees', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot()
+    // The device accepts the write but the re-read returns an unchanged slot.
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: before })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    const baselineList = stub.getListCalls()
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Kithmoot permission update may have applied; refresh review before retrying/,
+      )
+      expect(stub.updateCalls).toHaveLength(1)
+      expect(stub.getListCalls() - baselineList).toBe(2)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it.each([
+    { allowed_kinds: [1, 30023, 99999] },
+    { bound_identity: 'ab'.repeat(32) },
+    { escalate: true },
+    { petition_on_deny: true },
+    { audit_child_wrap: true },
+    { guardian_notice_wrap: true },
+  ])('aborts before mutation when fresh policy or persona/family metadata changed: %j', async (changed) => {
+    const { pubHex } = freshMaster()
+    const reviewSlot = kmSlot({ allowed_kinds: [1, 30023] })
+    const freshSlot = kmSlot({ ...reviewSlot, ...changed })
+    const stub = installRelayStub({
+      pubHex,
+      initial: reviewSlot,
+      afterWrite: reviewSlot,
+    })
+    // Override list_clients to always return the fresh (changed) slot.
+    const original = relayRequestMock.getMockImplementation()
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'list_clients') return { clients: [freshSlot] }
+      return original?.(method, params)
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      const review = kmReview(reviewSlot, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Slot changed since review was opened/,
+      )
+      expect(stub.updateCalls).toHaveLength(0)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('aborts without mutation when the slot disappeared before the write', async () => {
+    const { pubHex } = freshMaster()
+    const reviewSlot = kmSlot()
+    // Fresh read returns an empty list: our slot is gone.
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      const review = kmReview(reviewSlot, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Reviewed slot no longer exists/,
+      )
+      const updateCalls = relayRequestMock.mock.calls.filter((c) => c[0] === 'update_client')
+      expect(updateCalls).toHaveLength(0)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('rejects an overlapping call while one is already in flight', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot()
+    resolveMock.mockResolvedValue(new Map())
+
+    // Start with a plain stub so connectRelay + its list_clients complete
+    // without the blocking gate. Install the gate only after connect.
+    let listCalls = 0
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') {
+        listCalls += 1
+        return { clients: [before] }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      let releaseRead!: () => void
+      const gate = new Promise<void>((resolve) => { releaseRead = resolve })
+      let gated = false
+      relayRequestMock.mockImplementation(async (method: unknown) => {
+        if (method === 'get_status') {
+          return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+        }
+        if (method === 'list_clients') {
+          listCalls += 1
+          if (!gated) {
+            gated = true
+            await gate
+          }
+          return { clients: [before] }
+        }
+        return { ok: true }
+      })
+
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      const first = mgmtApplyKithmootPermissions(review)
+      // Give the first call a tick to register its in-flight flag.
+      await Promise.resolve()
+      // Second call must short-circuit while the first is gated on list_clients.
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /already in flight/,
+      )
+      releaseRead()
+      await expect(first).rejects.toThrow(/Slot mismatch|may have applied/)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  // --- Transport regression tests (added) ---
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['non-array string', 'restricted'],
+    ['non-array number', 7],
+    ['non-integer element', [1, 2.5]],
+  ])('malformed FRESH relay allowed_kinds (%s) leaves restricted slot unmutated', async (_label, badKinds) => {
+    const { pubHex } = freshMaster()
+    // Review opened on a restricted source slot with valid kinds.
+    const reviewSlot = kmSlot({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1, 30023],
+    })
+    // Fresh read from the device is missing/malformed allowed_kinds: this
+    // MUST NOT be silently normalized into "unrestricted".
+    const freshSlot = kmSlot({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: badKinds as unknown as ConnectSlot['allowed_kinds'],
+    })
+    resolveMock.mockResolvedValue(new Map())
+    const updateCalls: unknown[] = []
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'list_clients') return { clients: [freshSlot] }
+      if (method === 'update_client') {
+        updateCalls.push(params)
+        return { ok: true }
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      const review = kmReview(reviewSlot, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Malformed allowed_kinds/,
+      )
+      expect(updateCalls).toHaveLength(0)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('upgrades a strict retained-only slot when current is null but authorized_pubkeys is nonempty', async () => {
+    const { pubHex } = freshMaster()
+    // Retained-only strict slot: no current signer yet, but an authorized key exists.
+    const before = kmSlot({
+      current_pubkey: null,
+      authorized_pubkeys: [KM_PERSONA],
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1],
+      strict_permissions: true,
+      auto_approve: false,
+    })
+    const expectedChanges = kithmootPermissionChanges(before)
+    const after = { ...before, ...expectedChanges }
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: after })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    const baselineList = stub.getListCalls()
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      await mgmtApplyKithmootPermissions(review)
+      expect(stub.updateCalls).toHaveLength(1)
+      expect(stub.getListCalls() - baselineList).toBe(2)
+      const update = stub.updateCalls[0] as Record<string, unknown>
+      // Only the additive method/kind sets are written; manual flags and ids
+      // remain untouched on the device (not present in payload).
+      expect(update).not.toHaveProperty('auto_approve')
+      expect(update).not.toHaveProperty('signing_approved')
+      expect(update).not.toHaveProperty('approved_identities')
+      expect(update).not.toHaveProperty('strict_permissions')
+      expect(update).not.toHaveProperty('ids')
+      expect(update.allowed_methods).toEqual(expectedChanges.allowed_methods)
+      expect(update.allowed_kinds).toEqual(expectedChanges.allowed_kinds)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('uses the ORIGINAL captured master byte even if review.masterSlot mutates during the deferred pre-read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [1],
+      // Synthetic nonempty secret: verifying read must preserve it.
+      secret: 'synth-secret-must-survive',
+    })
+    const expectedChanges = kithmootPermissionChanges(before)
+    const after = { ...before, ...expectedChanges, secret: 'synth-secret-must-survive' }
+
+    const frames: Uint8Array[] = []
+    let listReads = 0
+    serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+      frames.push(frame)
+      if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return FW_RESP
+      if (expect.includes(FrameType.CONNSLOT_LIST_RESP)) {
+        listReads += 1
+        const slot = listReads === 1 ? before : after
+        return { type: FrameType.CONNSLOT_LIST_RESP, payload: encodeSlotPayload([slot]) }
+      }
+      if (expect.includes(FrameType.CONNSLOT_UPDATE_RESP)) {
+        return { type: FrameType.CONNSLOT_UPDATE_RESP, payload: new Uint8Array() }
+      }
+      return ACK
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    device.selectedSlot = 0
+    device.connectionGeneration = device.connectionGeneration ?? 1
+    try {
+      const review = kmReview(before, { mode: 'serial', masterSlot: 0 })
+      // Capture the true original value up front (what the transport must use).
+      const originalMaster = review.masterSlot
+      // Mutate review.masterSlot while the deferred pre-read is in flight.
+      // No monkeypatching of production code: mutate from the mock read path.
+      const prior = serialMock.sendAndReceive.getMockImplementation()!
+      serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+        if (expect.includes(FrameType.CONNSLOT_LIST_RESP) && listReads === 0) {
+          review.masterSlot = 9
+        }
+        return prior(frame, expect)
+      })
+
+      await mgmtApplyKithmootPermissions(review)
+
+      const updateFrames = frames.filter((f) => f.length > 0 && f[2] === FrameType.CONNSLOT_UPDATE)
+      expect(updateFrames).toHaveLength(1)
+      const parsed = parseFrame(updateFrames[0]!)
+      // Must use the ORIGINAL captured master byte, not the mutated 9.
+      expect(parsed.payload[0]).toBe(originalMaster)
+      expect(originalMaster).toBe(0)
+      const updateJson = JSON.parse(new TextDecoder().decode(parsed.payload.slice(1)))
+      expect(updateJson.slot_index).toBe(KM_SLOT_INDEX)
+      expect(updateJson.allowed_methods).toEqual(expectedChanges.allowed_methods)
+      expect(updateJson.allowed_kinds).toEqual(expectedChanges.allowed_kinds)
+      // Post-verify ran (2 list reads) and preserved the synthetic secret.
+      expect(listReads).toBe(2)
+      expect(device.slots.find(s => s.slot_index === KM_SLOT_INDEX)?.secret).toBe(before.secret)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('returns mayHaveApplied with exactly one write when the verifying re-read differs (wb flipped)', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({ wb: false })
+    const expectedChanges = kithmootPermissionChanges(before)
+    // Device applied the permission change but also flipped wb, so the
+    // verifying read disagrees: outcome must be an uncertain single-write.
+    const after = { ...before, ...expectedChanges, wb: true }
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: after })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    const baselineList = stub.getListCalls()
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Kithmoot permission update may have applied; refresh review before retrying/,
+      )
+      expect(stub.updateCalls).toHaveLength(1)
+      expect(stub.getListCalls() - baselineList).toBe(2)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('returns mayHaveApplied with exactly one write when approved_identities changed after ack', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({ approved_identities: [KM_PERSONA] })
+    const expectedChanges = kithmootPermissionChanges(before)
+    const otherPersona = '8'.repeat(64)
+    const after = { ...before, ...expectedChanges, approved_identities: [otherPersona] }
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: after })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    const baselineList = stub.getListCalls()
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /Kithmoot permission update may have applied; refresh review before retrying/,
+      )
+      expect(stub.updateCalls).toHaveLength(1)
+      expect(stub.getListCalls() - baselineList).toBe(2)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('does not retry when the relay rejects the update write', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({ allowed_methods: ['get_public_key', 'sign_event'], allowed_kinds: [1] })
+    const stub = installRelayStub({
+      pubHex,
+      initial: before,
+      updateError: new Error('relay rejected update_client'),
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    const baselineList = stub.getListCalls()
+    try {
+      const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
+      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+        /may have applied/,
+      )
+      // Exactly one attempt, no retry, and no verifying read after failure.
+      expect(stub.updateCalls).toHaveLength(1)
+      expect(stub.getListCalls() - baselineList).toBe(1)
+      expect(stub.wasWritten()).toBe(false)
+    } finally {
+      await disconnect()
+    }
+  })
+
 
   it('revokes a relay client and hides its link when effective policy mismatches', async () => {
     const { pubHex } = freshMaster()

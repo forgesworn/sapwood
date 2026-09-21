@@ -4,9 +4,9 @@ import {
 } from './client-presets.js'
 
 describe('permission presets', () => {
-  it('exposes the four expected presets in order', () => {
+  it('exposes the expected presets in order', () => {
     expect(PERMISSION_PRESETS.map((p) => p.id)).toEqual([
-      'posting', 'everything', 'messaging', 'custom',
+      'posting', 'everything', 'messaging', 'kithmoot-private', 'custom',
     ])
   })
 
@@ -48,6 +48,19 @@ describe('resolveKinds', () => {
 
   it('custom uses the supplied kinds, de-duplicated and sorted', () => {
     expect(resolveKinds('custom', [7, 1, 1, 7])).toEqual([1, 7])
+  })
+
+  it('kithmoot-private returns the named profile kinds', () => {
+    expect(resolveKinds('kithmoot-private')).toEqual([20460, 21236, 30078])
+  })
+
+  it('kithmoot-private preset pins exact policy for the additive private-rooms upgrade', () => {
+    const policy = resolvePolicy('kithmoot-private')
+    expect(policy.allowed_kinds).toEqual([20460, 21236, 30078])
+    for (const m of ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt']) {
+      expect(policy.allowed_methods).toContain(m)
+    }
+    expect(isRestricted('kithmoot-private')).toBe(true)
   })
 
   it('custom with no kinds means unrestricted (null)', () => {
