@@ -78,6 +78,24 @@ describe('ConnectApp — happy path', () => {
     }, undefined)
   })
 
+  it('applies the KithMoot private rooms preset with exact methods and kinds', async () => {
+    const { container } = render(ConnectApp)
+    await fireEvent.click(screen.getByText('Connect an app'))
+    await fireEvent.input(container.querySelector('input')!, { target: { value: 'KithMoot' } })
+    await fireEvent.click(screen.getByText('Continue'))
+
+    await fireEvent.click(screen.getByText('KithMoot private rooms'))
+    await fireEvent.click(screen.getByText('Create connection'))
+
+    await screen.findByText('Connection ready')
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    expect(mockCreate).toHaveBeenCalledWith('KithMoot', {
+      allowed_methods: ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt'],
+      allowed_kinds: [20460, 21236, 30078],
+      auto_approve: true,
+    }, undefined)
+  })
+
   it('lets custom permissions include a numeric kind', async () => {
     const { container } = render(ConnectApp)
     await fireEvent.click(screen.getByText('Connect an app'))

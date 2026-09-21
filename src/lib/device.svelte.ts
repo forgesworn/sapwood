@@ -46,6 +46,7 @@ import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
 import { markPairingBackupStale } from './pairing-backup.js'
+import { kithmootPermissionChanges, permissionSlotUnchanged, kithmootUpgradeBlockedReason, type KithmootPermissionReview } from './client-permission-upgrade.js'
 
 // --- Reactive state ---
 
@@ -3638,6 +3639,270 @@ export async function mgmtUpdateClient(slotIndex: number, changes: { label?: str
   if (device.mode === 'relay') return relayUpdateClient(slotIndex, changes, expectedFingerprint)
   if (device.mode === 'serial') return serialUpdateClient(slotIndex, changes)
   throw new Error('not connected')
+}
+
+// --- KithMoot additive permission upgrade adapter --------------------------
+let mgmtKithmootWriteInFlight = false
+
+export async function mgmtApplyKithmootPermissions(review: KithmootPermissionReview): Promise<void> {
+  if (mgmtKithmootWriteInFlight) throw new Error('Kithmoot permission update already in flight')
+  mgmtKithmootWriteInFlight = true
+  try {
+    if (!device.connected || device.mode !== review.mode || device.selectedSlot !== review.masterSlot || device.connectionGeneration !== review.connectionGeneration) {
+      throw new Error('Connection context changed since review was opened')
+    }
+    kithmootPermissionChanges(review.slot) // Reject malformed review arrays before snapshot normalisation.
+    const source = review.slot
+    const snapshot: ConnectSlot = {
+      slot_index: source.slot_index,
+      label: source.label,
+      secret: '',
+      current_pubkey: source.current_pubkey,
+      authorized_pubkeys: Array.isArray(source.authorized_pubkeys) ? [...source.authorized_pubkeys] : [],
+      allowed_methods: Array.isArray(source.allowed_methods) ? [...source.allowed_methods] : [],
+      allowed_kinds: Array.isArray(source.allowed_kinds) ? [...source.allowed_kinds] : [],
+      auto_approve: source.auto_approve,
+      signing_approved: source.signing_approved,
+      strict_permissions: source.strict_permissions ?? false,
+      secret_fingerprint: source.secret_fingerprint,
+      ids: source.ids ?? '',
+      wb: source.wb ?? false,
+      approved_identities: Array.isArray(source.approved_identities) ? [...source.approved_identities] : [],
+    }
+
+    const blocked = kithmootUpgradeBlockedReason(snapshot)
+    if (blocked !== null) throw new Error(blocked)
+
+    const ctx = {
+      connected: device.connected,
+      mode: device.mode,
+      selectedSlot: device.selectedSlot,
+      generation: device.connectionGeneration,
+      transport: relayTransport,
+      target: relayMgmtTarget(),
+    }
+
+    const assertContext = () => {
+      if (
+        device.connected !== ctx.connected ||
+        device.mode !== ctx.mode ||
+        device.selectedSlot !== ctx.selectedSlot ||
+        device.connectionGeneration !== ctx.generation ||
+        relayTransport !== ctx.transport ||
+        relayMgmtTarget() !== ctx.target
+      ) {
+        throw new Error('Connection context changed during Kithmoot permission update')
+      }
+    }
+
+    const is64Hex = (value: string): boolean => /^[0-9a-f]{64}$/i.test(value)
+
+    const requireExpectedSlotFingerprint = (slotIndex: number, fingerprint: string | undefined): string => {
+      if (typeof fingerprint !== 'string' || !is64Hex(fingerprint)) {
+        throw new Error(`Slot ${slotIndex} secret_fingerprint is required and must be 64 hex for relay update`)
+      }
+      return fingerprint
+    }
+
+    const parseSlotEntry = (entry: unknown, mode: 'serial' | 'relay'): ConnectSlot => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        throw new Error('Malformed slot entry')
+      }
+      const rec = entry as Record<string, unknown>
+
+      const slot_index = rec.slot_index
+      if (typeof slot_index !== 'number' || !Number.isInteger(slot_index) || slot_index < 0) {
+        throw new Error('Malformed slot_index')
+      }
+
+      const label = rec.label
+      if (typeof label !== 'string') throw new Error('Malformed slot label')
+
+      const rawMethods = rec.allowed_methods
+      if (!Array.isArray(rawMethods)) throw new Error('Malformed allowed_methods')
+      const allowed_methods: string[] = []
+      for (const m of rawMethods) {
+        if (typeof m !== 'string') throw new Error('Malformed allowed_methods')
+        allowed_methods.push(m)
+      }
+
+      const rawKinds = rec.allowed_kinds
+      if (!Array.isArray(rawKinds)) throw new Error('Malformed allowed_kinds')
+      const allowed_kinds: number[] = []
+      for (const k of rawKinds) {
+        if (typeof k !== 'number' || !Number.isSafeInteger(k) || k < 0) {
+          throw new Error('Malformed allowed_kinds')
+        }
+        allowed_kinds.push(k)
+      }
+
+      const auto_approve = rec.auto_approve
+      if (typeof auto_approve !== 'boolean') throw new Error('Malformed auto_approve')
+      const signing_approved = rec.signing_approved
+      if (typeof signing_approved !== 'boolean') throw new Error('Malformed signing_approved')
+
+      const current_pubkey = rec.current_pubkey === undefined ? null : rec.current_pubkey
+      if (current_pubkey !== null && typeof current_pubkey !== 'string') throw new Error('Malformed current_pubkey')
+
+      const rawPubkeys = rec.authorized_pubkeys === undefined ? [] : rec.authorized_pubkeys
+      if (!Array.isArray(rawPubkeys)) throw new Error('Malformed authorized_pubkeys')
+      const authorized_pubkeys: string[] = []
+      for (const k of rawPubkeys) {
+        if (typeof k !== 'string') throw new Error('Malformed authorized_pubkeys')
+        authorized_pubkeys.push(k)
+      }
+
+      const rawIdentities = rec.approved_identities === undefined ? [] : rec.approved_identities
+      if (!Array.isArray(rawIdentities)) throw new Error('Malformed approved_identities')
+      const approved_identities: string[] = []
+      for (const i of rawIdentities) {
+        if (typeof i !== 'string') throw new Error('Malformed approved_identities')
+        approved_identities.push(i)
+      }
+
+      const strict_permissions = rec.strict_permissions === undefined ? false : rec.strict_permissions
+      if (typeof strict_permissions !== 'boolean') throw new Error('Malformed strict_permissions')
+
+      const ids = rec.ids === undefined ? '' : rec.ids
+      if (typeof ids !== 'string') throw new Error('Malformed ids')
+      const wb = rec.wb === undefined ? false : rec.wb
+      if (typeof wb !== 'boolean') throw new Error('Malformed wb')
+
+      let secret_fingerprint: string | undefined
+      const rawFingerprint = rec.secret_fingerprint
+      if (mode === 'relay') {
+        if (typeof rawFingerprint !== 'string' || !is64Hex(rawFingerprint)) {
+          throw new Error('Relay slot missing valid secret_fingerprint')
+        }
+        secret_fingerprint = rawFingerprint
+      } else if (rawFingerprint !== undefined) {
+        if (typeof rawFingerprint !== 'string' || !is64Hex(rawFingerprint)) {
+          throw new Error('Malformed secret_fingerprint')
+        }
+        secret_fingerprint = rawFingerprint
+      } else {
+        secret_fingerprint = snapshot.secret_fingerprint
+      }
+
+      return {
+        slot_index,
+        label,
+        secret: typeof rec.secret === 'string' ? rec.secret : '',
+        current_pubkey,
+        authorized_pubkeys,
+        allowed_methods,
+        allowed_kinds,
+        auto_approve,
+        signing_approved,
+        strict_permissions,
+        secret_fingerprint,
+        ids,
+        wb,
+        approved_identities,
+      }
+    }
+
+    const parseSlotList = (value: unknown, mode: 'serial' | 'relay'): ConnectSlot[] => {
+      if (!Array.isArray(value)) throw new Error('Slot list must be an array')
+      return value.map((entry) => parseSlotEntry(entry, mode))
+    }
+
+    const readSlots = async (): Promise<ConnectSlot[]> => {
+      assertContext()
+      if (ctx.mode === 'serial') {
+        await ensureBridgeAuth()
+        assertContext()
+        const resp = await serialTransport.sendAndReceive(
+          buildConnSlotList(ctx.selectedSlot),
+          [FrameType.CONNSLOT_LIST_RESP, FrameType.NACK],
+          SERIAL_RTT_MS,
+        )
+        assertContext()
+        if (resp.type === FrameType.NACK) throw new Error('Slot list read denied')
+        let root: unknown
+        try {
+          root = JSON.parse(new TextDecoder().decode(resp.payload))
+        } catch {
+          throw new Error('Malformed USB slot list payload')
+        }
+        return parseSlotList(root, 'serial')
+      } else if (ctx.mode === 'relay') {
+        const transport = ctx.transport
+        if (!transport) throw new Error('Relay transport missing')
+        const raw = await transport.request('list_clients', {}, RELAY_STATUS_TIMEOUT_MS, ctx.target)
+        assertContext()
+        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+          throw new Error('Malformed list_clients response')
+        }
+        const clients = (raw as Record<string, unknown>).clients
+        return parseSlotList(clients, 'relay')
+      } else {
+        throw new Error('Kithmoot permission update requires serial or relay connection')
+      }
+    }
+
+    const freshBefore = await readSlots()
+    assertContext()
+    const index = freshBefore.findIndex((s) => s.slot_index === snapshot.slot_index)
+    if (index === -1) throw new Error('Reviewed slot no longer exists')
+    const before = freshBefore[index]
+    if (!permissionSlotUnchanged(snapshot, before)) {
+      throw new Error('Slot changed since review was opened')
+    }
+
+    const changes = kithmootPermissionChanges(snapshot)
+
+    const relayUpdateParams =
+      ctx.mode === 'relay'
+        ? {
+            slot_index: snapshot.slot_index,
+            expected_secret_fingerprint: requireExpectedSlotFingerprint(snapshot.slot_index, snapshot.secret_fingerprint),
+            ...changes,
+          }
+        : undefined
+
+    try {
+      if (ctx.mode === 'serial') {
+        const resp = await serialTransport.sendAndReceive(
+          buildConnSlotUpdate(ctx.selectedSlot, { slot_index: snapshot.slot_index, ...changes }),
+          [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK],
+          35000,
+        )
+        assertContext()
+        if (resp.type === FrameType.NACK) throw new Error('Kithmoot permission update denied by device')
+      } else if (ctx.mode === 'relay') {
+        const transport = ctx.transport
+        if (!transport) throw new Error('Relay transport missing')
+        if (!relayUpdateParams) throw new Error('Missing relay update params')
+        await transport.request('update_client', relayUpdateParams, MGMT_WRITE_TIMEOUT_MS, ctx.target)
+        assertContext()
+      } else {
+        throw new Error('Kithmoot permission update requires serial or relay connection')
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Kithmoot permission update denied by device') throw err
+      throw new Error('Kithmoot permission update may have applied; refresh review before retrying')
+    }
+
+    try {
+      notePairingBackupStale()
+      // Fresh read guard is NOT atomic remote policy CAS; a concurrent remote change between read and write may remain undetected.
+      const freshAfter = await readSlots()
+      const afterIndex = freshAfter.findIndex((s) => s.slot_index === snapshot.slot_index)
+      if (afterIndex === -1) throw new Error('Slot missing after update')
+      const after = freshAfter[afterIndex]
+      const expectedAfter: ConnectSlot = { ...snapshot, ...changes }
+      if (!permissionSlotUnchanged(expectedAfter, after)) {
+        throw new Error('Slot mismatch after update')
+      }
+      assertContext()
+      device.slots = freshAfter
+    } catch (err) {
+      throw new Error('Kithmoot permission update may have applied; refresh review before retrying')
+    }
+  } finally {
+    mgmtKithmootWriteInFlight = false
+  }
 }
 
 export async function mgmtApproveSigning(slotIndex: number, expectedFingerprint?: string): Promise<void> {
