@@ -1,3 +1,4 @@
+import { consentScope } from './client-consent.js'
 // Pure review logic for the additive KithMoot private-rooms permission upgrade.
 //
 // This module holds no reactive state, performs no I/O, and mutates nothing.
@@ -118,6 +119,7 @@ export function permissionSlotUnchanged(
   expected: ConnectSlot,
   actual: ConnectSlot,
 ): boolean {
+  if (consentScope(expected.client_approvals) !== consentScope(actual.client_approvals)) return false
   if (expected.slot_index !== actual.slot_index) return false
   if ((expected.secret_fingerprint ?? '') !== (actual.secret_fingerprint ?? '')) return false
 

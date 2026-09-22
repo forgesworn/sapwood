@@ -1,3 +1,4 @@
+import { parseClientApprovals } from './client-consent.js'
 // Reactive device state shared across all components.
 // Supports two transport modes: Web Serial (direct USB) and HTTP (bridge API).
 
@@ -1199,6 +1200,7 @@ async function relayRefresh(prefetchedStatus?: Record<string, unknown>) {
         && SLOT_FINGERPRINT_RE.test(c.secret_fingerprint.toLowerCase())
         ? c.secret_fingerprint.toLowerCase()
         : undefined,
+      client_approvals: parseClientApprovals(c.client_approvals),
       approved_identities: Array.isArray(c.approved_identities)
         ? c.approved_identities.filter((tag): tag is string => typeof tag === 'string')
         : [],
@@ -3646,6 +3648,52 @@ export async function mgmtUpdateClient(slotIndex: number, changes: { label?: str
   throw new Error('not connected')
 }
 
+/** Withdraw consent without changing the pairing's capabilities or credential. */
+export async function mgmtWithdrawConsent(snapshot: ConnectSlot, client?: string, identity?: string): Promise<void> {
+  const generation = device.connectionGeneration
+  const master = device.selectedSlot
+  const mode = device.mode
+  const current = relayTransport
+  const fingerprint = snapshot.secret_fingerprint
+  const contextCurrent = () => device.connected && device.connectionGeneration === generation
+    && device.selectedSlot === master && device.mode === mode && relayTransport === current
+  if (!contextCurrent() || (mode !== 'serial' && mode !== 'relay')) throw new Error('Connect with management access')
+  if (!fingerprint || !/^[0-9a-f]{64}$/.test(fingerprint) || !Array.isArray(snapshot.client_approvals)) {
+    throw new Error('Refresh the signer to read per-device consent')
+  }
+  if (client !== undefined && (!/^[0-9a-f]{64}$/.test(client) || !snapshot.client_approvals.some(c => c.client_pubkey === client))) {
+    throw new Error('Device credential changed; refresh the signer')
+  }
+  if (identity !== undefined && !/^(?:[0-9a-f]{16}|[0-9a-f]{64})$/.test(identity)) throw new Error('Invalid persona')
+  const params = {
+    slot_index: snapshot.slot_index, expected_secret_fingerprint: fingerprint,
+    ...(client === undefined ? {} : { client_pubkey: client }),
+    ...(identity === undefined ? {} : { identity }),
+  }
+  if (mode === 'relay') {
+    if (!current || !(await relayCapabilities()).includes('per_client_identity_consent_v1')) {
+      throw new Error('This signer does not support per-device consent management')
+    }
+    if (!contextCurrent()) throw new Error('Connection changed before withdrawal')
+    await current.request(identity === undefined ? 'clear_client_identities' : 'revoke_client_identity', params, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
+  } else {
+    await ensureBridgeAuth()
+    if (!contextCurrent()) throw new Error('Connection changed before withdrawal')
+    const response = await serialTransport.sendAndReceive(buildConnSlotUpdate(master, {
+      slot_index: snapshot.slot_index, expected_secret_fingerprint: fingerprint,
+      withdraw_consent_v1: { ...(client === undefined ? {} : { client_pubkey: client }), ...(identity === undefined ? {} : { identity }) },
+    }), [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK], SERIAL_RTT_MS)
+    if (response.type !== FrameType.CONNSLOT_UPDATE_RESP || new TextDecoder().decode(response.payload) !== 'consent_withdrawn_v1') {
+      throw new Error('The signer did not confirm consent withdrawal; refresh before retrying')
+    }
+  }
+  if (!contextCurrent()) throw new Error('Withdrawal sent; connection changed before verification. Refresh the signer.')
+  if (mode === 'serial') await serialFetchSlots(master)
+  else await relayRefresh()
+  if (!contextCurrent()) throw new Error('Withdrawal sent; reconnect to check the signer')
+  notePairingBackupStale()
+}
+
 // --- KithMoot additive permission upgrade adapter --------------------------
 let mgmtKithmootWriteInFlight = false
 
@@ -3672,6 +3720,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
       secret_fingerprint: source.secret_fingerprint,
       ids: source.ids ?? '',
       wb: source.wb ?? false,
+      client_approvals: parseClientApprovals(source.client_approvals),
       approved_identities: Array.isArray(source.approved_identities) ? [...source.approved_identities] : [],
       bound_identity: source.bound_identity ?? null,
       escalate: Boolean(source.escalate),
@@ -3823,6 +3872,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
         ids,
         wb,
         approved_identities,
+        client_approvals: parseClientApprovals(rec.client_approvals),
         bound_identity,
         escalate,
         petition_on_deny,

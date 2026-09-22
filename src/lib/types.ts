@@ -1,6 +1,13 @@
 // Shared types for the Sapwood management UI.
 // These mirror the Heartwood ESP32 data model.
 
+/** Persona consent for one authenticated device credential. */
+export interface ClientApproval {
+  client_pubkey: string
+  approved_identities: string[]
+  legacy_identity_tags: string[]
+}
+
 /** A named connection slot (matches common/src/policy.rs::ConnectSlot). */
 export interface ConnectSlot {
   slot_index: number
@@ -31,6 +38,8 @@ export interface ConnectSlot {
    * array. Populated on the relay management (`list_clients`) path, which
    * summarises the slot instead of sending its raw wire fields. */
   approved_identities?: string[]
+  /** Present only when the signer exposes per-device consent. */
+  client_approvals?: ClientApproval[]
   /** Relay/firmware client_summary binding: 64-hex identity currently bound to
    * this slot, or null when nothing is bound. Absent on older firmware. */
   bound_identity?: string | null

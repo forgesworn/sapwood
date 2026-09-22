@@ -113,7 +113,7 @@ import {
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
-  mgmtApplyKithmootPermissions,
+  mgmtApplyKithmootPermissions, mgmtWithdrawConsent,
 } from './device.svelte.js'
 import { kithmootPermissionChanges } from './client-permission-upgrade.js'
 import type { KithmootPermissionReview } from './client-permission-upgrade.js'
@@ -2966,5 +2966,46 @@ describe('vaultReconnectShouldAbort (post-delivery reconnect)', () => {
   it('never aborts when no announcement has been seen', () => {
     expect(vaultReconnectShouldAbort(null, started, grace)).toBe(false)
     expect(vaultReconnectShouldAbort(undefined, started, grace)).toBe(false)
+  })
+})
+
+
+describe('per-device consent withdrawal over USB', () => {
+  const client = 'aa'.repeat(32), identity = 'bb'.repeat(32), fingerprint = 'cc'.repeat(32)
+  const consentSlot = (): ConnectSlot => ({ slot_index: 2, label: 'Shared', secret: '',
+    current_pubkey: client, allowed_methods: ['sign_event'], allowed_kinds: [30078],
+    auto_approve: true, signing_approved: true, secret_fingerprint: fingerprint,
+    client_approvals: [{ client_pubkey: client, approved_identities: [identity], legacy_identity_tags: [] }] })
+  const reply = (text: string) => ({ type: FrameType.CONNSLOT_UPDATE_RESP, payload: new TextEncoder().encode(text) })
+  beforeEach(() => {
+    device.mode = 'serial'; device.connected = true; device.bridgeAuthed = true; device.selectedSlot = 0
+  })
+  it('binds targeted withdrawal to credential and checks versioned acknowledgement', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(reply('consent_withdrawn_v1'))
+      .mockResolvedValueOnce({ type: FrameType.CONNSLOT_LIST_RESP, payload: new TextEncoder().encode(JSON.stringify([consentSlot()])) })
+    await mgmtWithdrawConsent(consentSlot(), client, identity)
+    const parsed = parseFrame(serialMock.sendAndReceive.mock.calls[0]![0])!
+    const payload = JSON.parse(new TextDecoder().decode(parsed.payload.slice(1)))
+    expect(payload).toEqual({ slot_index: 2, expected_secret_fingerprint: fingerprint,
+      withdraw_consent_v1: { client_pubkey: client, identity } })
+  })
+  it('does not treat an old firmware generic ok as consent withdrawal', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(reply('ok'))
+    await expect(mgmtWithdrawConsent(consentSlot(), client)).rejects.toThrow('did not confirm')
+    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
+  })
+  it('rejects unknown or malformed client scope before sending', async () => {
+    await expect(mgmtWithdrawConsent(consentSlot(), 'dd'.repeat(32))).rejects.toThrow('credential changed')
+    await expect(mgmtWithdrawConsent({ ...consentSlot(), client_approvals: undefined })).rejects.toThrow('Refresh')
+    expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
+  })
+  it('does not write after the selected master changes during authentication', async () => {
+    device.bridgeAuthed = false
+    serialMock.sendAndReceive.mockImplementationOnce(async () => {
+      device.selectedSlot = 1
+      return { type: FrameType.SESSION_ACK, payload: new Uint8Array([0]) }
+    })
+    await expect(mgmtWithdrawConsent(consentSlot(), client)).rejects.toThrow('Connection changed')
+    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
   })
 })

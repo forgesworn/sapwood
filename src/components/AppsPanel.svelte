@@ -7,10 +7,11 @@
   import {
     device, refreshSlots, httpTransport,
     mgmtCreateClient, mgmtApproveSigning, mgmtRevokeClient, mgmtUpdateClient,
-    mgmtCanApproveSigning, mgmtClientUri, mgmtApplyKithmootPermissions,
+    mgmtCanApproveSigning, mgmtClientUri, mgmtApplyKithmootPermissions, mgmtWithdrawConsent,
   } from '../lib/device.svelte.js'
   import { kindLabelPlain as kindLabel } from '../lib/kinds.js'
   import KindPermissions from './KindPermissions.svelte'
+  import ClientConsent from './ClientConsent.svelte'
   import ApprovalQueue from './ApprovalQueue.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
   import type { ConnectSlot } from '../lib/types.js'
@@ -359,7 +360,7 @@
         }
       } catch { /* unparsable npub: skip */ }
     }
-    return tag
+    return tag.length > 16 ? shortPubkey(tag) : tag
   }
 
   function timeAgo(iso: string): string {
@@ -588,6 +589,12 @@
               {/if}
             </div>
           {/if}
+
+          {#key `${device.connectionGeneration}:${device.selectedSlot}:${slot.secret_fingerprint ?? slot.slot_index}`}
+            <ClientConsent {slot} canRevoke={overUsbRelay && !reviewBusy}
+              identityLabel={identityTagLabel}
+              onrevoke={(client, identity) => mgmtWithdrawConsent(slot, client, identity)} />
+          {/key}
 
           <KindPermissions
             allowedKinds={slot.allowed_kinds}
