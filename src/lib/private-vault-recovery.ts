@@ -1,5 +1,5 @@
 /** Read-only recovery; vault signing and publishing are never exposed here. */
-import { createVaultRelayReader, readVaultHeadRotations, vaultKeyContext } from 'signet-protocol'
+import { createVaultRelayReader, readVaultHeadRotations, vaultKeyContext } from 'signet-protocol/experimental'
 import { openVaultPayload } from '@forgesworn/signet-contacts/wire'
 import { parseDependantsManifest } from './recovery.js'
 import type { DependantsManifest } from './recovery.js'

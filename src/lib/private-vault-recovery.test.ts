@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const read = vi.hoisted(() => vi.fn())
-vi.mock('signet-protocol', async importOriginal => ({
-  ...await importOriginal<typeof import('signet-protocol')>(), readVaultHeadRotations: read,
+vi.mock('signet-protocol/experimental', async importOriginal => ({
+  ...await importOriginal<typeof import('signet-protocol/experimental')>(), readVaultHeadRotations: read,
 }))
 import { recoverVaultFamilyRoster } from './private-vault-recovery.js'
 const request = vi.fn()
