@@ -61,6 +61,8 @@ npm run build     # production build to dist/
 
 The same console at a shell prompt. `sapwood` speaks the identical frame protocol over [node-serialport](https://serialport.io/): cross-platform on Linux, macOS and Windows, Node 20+, ~30ms startup.
 
+It is not on npm (the npm package called `sapwood` is an unrelated project), so build it from a clone of this repository:
+
 ```bash
 npm install && npm run build:cli
 npm link                               # puts `sapwood` on PATH (or run node dist-cli/sapwood.mjs)

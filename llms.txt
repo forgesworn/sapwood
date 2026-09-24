@@ -24,7 +24,8 @@ npm run dev       # dev server at localhost:5173
 
 Or visit the hosted build in Chrome or Edge, plug in a Heartwood device, and
 click Connect USB. For the CLI: `npm run build:cli && npm link`, then run
-`sapwood device`.
+`sapwood device`. The CLI is not on npm; the npm package called `sapwood` is
+an unrelated project.
 
 ## Key concepts
 
