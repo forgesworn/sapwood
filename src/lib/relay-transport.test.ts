@@ -421,6 +421,7 @@ describe('replay-safe management mutations', () => {
       'get_network_config',
       'list_clients',
       'list_identities',
+      'list_unlock_phones',
       'get_status',
     ]) expect(requiresManagementMutationChallenge(method)).toBe(false)
 
@@ -432,6 +433,8 @@ describe('replay-safe management mutations', () => {
       'approve_signing',
       'revoke_client',
       'update_client',
+      'revoke_unlock_phone',
+      'set_announce_operator',
       'client_uri',
       'set_identity_meta',
       'stage_network_config',

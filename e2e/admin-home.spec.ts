@@ -248,9 +248,10 @@ test.describe('mobile', () => {
     await expect(page.getByLabel('WiFi password')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save to device', exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Boot PIN', exact: true })).toBeVisible()
-    const unattendedWarning = page.getByText(/For an unattended signer in another location, leave the boot PIN clear/)
+    const unattendedWarning = page.getByText(/A boot PIN is typed over the USB cable/)
     await expect(unattendedWarning).toBeVisible()
-    await expect(unattendedWarning).toContainText('automatic signing and remote management cannot resume')
+    await expect(unattendedWarning).toContainText('signing and remote management cannot resume')
+    await expect(unattendedWarning).toContainText('use a vault key with phone unlock instead')
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

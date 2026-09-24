@@ -116,6 +116,7 @@ const READ_ONLY_MANAGEMENT_METHODS = new Set([
   'get_network_config',
   'list_clients',
   'list_identities',
+  'list_unlock_phones',
   'get_status',
 ])
 

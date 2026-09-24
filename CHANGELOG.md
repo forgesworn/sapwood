@@ -5,6 +5,25 @@ All notable changes to Sapwood are recorded here. Format loosely follows
 
 ## Unreleased
 
+### Added
+
+- **Phones that can unlock.** Device > After a power cut lists the phones
+  (running Cambium 0.5.0 or later) that may unlock the signer after a restart,
+  adds one, and revokes one. Adding scans the code Cambium shows (or takes it
+  pasted), asks the signer over USB with one button hold, and passes the
+  signer's sealed answer to the phone over its relays from a throwaway key.
+  Sapwood cannot open that answer. Both sides then show the same six
+  characters (spoken-token over the signer's one-off hand-off key); a mismatch
+  means someone else answered the phone first. Listing and revoking also work
+  over WiFi. Needs firmware 0.18.0-beta.17 or later.
+- **Three plain choices for after a power cut:** no encryption, phone unlock,
+  or Sapwood and PIN only, each with what it costs if someone takes the board.
+  Turning encryption off, by disabling the vault key or clearing the PIN, now
+  waits for the owner to tick the sentence that says every key can be copied
+  off a taken board.
+- A switch for the signer's own unlock message to Sapwood, the one stable tag
+  a locked signer posts; phones do not need it.
+
 ### Fixed
 
 - **Unlocking a locked signer no longer takes two goes.** Over USB, Sapwood
