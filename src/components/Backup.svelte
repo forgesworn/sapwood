@@ -5,7 +5,9 @@
   // the device) and encrypts them under a passphrase; import restores them after
   // the identities have been re-provisioned. USB only. The heavy lifting and the
   // crypto live in lib/backup.ts; this component is the form around it.
-  import { device, serialTransport, ensureBridgeAuth } from '../lib/device.svelte.js'
+  import {
+    device, serialTransport, ensureBridgeAuth, isThisBrowsersUsbPairing, forgetBridgeAuth,
+  } from '../lib/device.svelte.js'
   import { npubToHex } from '../lib/known-devices.js'
   import { copyText } from '../lib/clipboard.js'
   import {
@@ -144,6 +146,19 @@
     }
   }
 
+  // A backup carries the USB pairing (bridge secret) of the board it came
+  // from. When that is this browser's own pairing, sending it only costs the
+  // owner a pointless second prompt, so it is left out. When it belongs to
+  // another browser or a bridge daemon, installing it hands USB management
+  // to them and locks this browser out, which the 2026-09-24 rehearsal did
+  // without anyone meaning to. So it is opt-in, and off by default.
+  const carriesOtherPairing = $derived(
+    !!preview
+    && /^[0-9a-f]{64}$/i.test(preview.payload.bridge_secret)
+    && !isThisBrowsersUsbPairing(preview.payload.bridge_secret),
+  )
+  let installBackupPairing = $state(false)
+
   async function runImport() {
     if (!preview) return
     importErr = null
@@ -151,8 +166,14 @@
     importing = true
     try {
       await ensureBridgeAuth()
-      const result = await importBackup(serialTransport, preview.payload, deviceMasters)
+      const handOver = carriesOtherPairing && installBackupPairing
+      const result = await importBackup(serialTransport, preview.payload, deviceMasters, { keepBridgeSecret: handOver })
       importMsg = `Restored ${result.restored} app slots. The connected apps reconnect on their own.`
+      if (handOver) {
+        forgetBridgeAuth()
+        importMsg += ' If you approved “Replace bridge secret?”, the signer now takes USB management from the backup’s pairing, not from this browser.'
+      }
+      installBackupPairing = false
       preview = null
       importFile = null
       importPass = ''
@@ -283,10 +304,22 @@
         </div>
       {/if}
       {#if matchedSlots > 0}
+        {#if carriesOtherPairing}
+          <label class="hint-sm pairing-choice">
+            <input type="checkbox" bind:checked={installBackupPairing} disabled={importing} />
+            Also install the USB pairing saved in this backup. It belongs to the browser or bridge that
+            made the backup, not this one: only tick this if that bridge will manage this signer, because
+            this browser then loses USB management of it until you pair it again.
+          </label>
+        {/if}
         <button class="btn btn-primary" onclick={runImport} disabled={importing}>
           {importing ? 'Confirm on the signer…' : `Restore ${matchedSlots} app slot${matchedSlots === 1 ? '' : 's'}`}
         </button>
-        {#if importing}<p class="hint-sm">Press the button on the signer to approve the restore.</p>{/if}
+        {#if importing}
+          <p class="hint-sm">
+            Hold the button on the signer when it shows “Restore {matchedSlots} slots?”{carriesOtherPairing && installBackupPairing ? ', then again for “Replace bridge secret?”' : ''}.
+          </p>
+        {/if}
       {:else}
         <p class="hint-sm error-text">None of this backup's identities are on the signer. Re-provision them, then unlock again.</p>
       {/if}
@@ -306,6 +339,7 @@
   .field-input.file { padding: 0.35rem; color: var(--text-dim); }
   .sub .btn { align-self: flex-start; }
   .backup-warning { margin: 0; color: var(--amber); font-weight: 600; }
+  .pairing-choice { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0; }
   .inventory {
     display: flex; flex-direction: column; gap: 0.4rem;
     background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem;

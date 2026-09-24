@@ -88,6 +88,15 @@ describe('exportBackup', () => {
     await expect(exportBackup(t)).rejects.toBeInstanceOf(BackupError)
   })
 
+  it('tells declined apart from not paired', async () => {
+    await expect(exportBackup(fakeTransport({ type: FrameType.NACK, payload: enc.encode('declined on the board') })))
+      .rejects.toThrow(/declined on the signer/)
+    await expect(exportBackup(fakeTransport({ type: FrameType.NACK, payload: enc.encode('bridge auth required') })))
+      .rejects.toThrow(/not paired to the signer/)
+    await expect(exportBackup(fakeTransport({ type: FrameType.NACK, payload: new Uint8Array(0) })))
+      .rejects.toThrow(/refused the export/)
+  })
+
   it('throws on malformed payload JSON', async () => {
     const t = fakeTransport({ type: FrameType.BACKUP_EXPORT_RESPONSE, payload: enc.encode('{ not json') })
     await expect(exportBackup(t)).rejects.toThrow(/not valid JSON/)
@@ -121,6 +130,25 @@ describe('importBackup', () => {
     await expect(importBackup(t, PAYLOAD, [{ pubkeyHex: '99'.repeat(32), label: 'Other' }]))
       .rejects.toThrow(/None of the backup/)
     expect(t.seen).toHaveLength(0)
+  })
+
+  it('says why the signer refused, from the reason byte', async () => {
+    const full = fakeTransport({ type: FrameType.BACKUP_IMPORT_RESPONSE, payload: new Uint8Array([0x00, 8]) })
+    await expect(importBackup(full, PAYLOAD, [{ pubkeyHex: 'aa'.repeat(32), label: 'Personal' }]))
+      .rejects.toThrow(/ran out of storage/)
+    const declined = fakeTransport({ type: FrameType.BACKUP_IMPORT_RESPONSE, payload: new Uint8Array([0x00, 7]) })
+    await expect(importBackup(declined, PAYLOAD, [{ pubkeyHex: 'aa'.repeat(32), label: 'Personal' }]))
+      .rejects.toThrow(/declined on the signer/)
+    const unpaired = fakeTransport({ type: FrameType.NACK, payload: enc.encode('bridge auth required') })
+    await expect(importBackup(unpaired, PAYLOAD, [{ pubkeyHex: 'aa'.repeat(32), label: 'Personal' }]))
+      .rejects.toThrow(/not paired to the signer/)
+  })
+
+  it('leaves the bridge secret out when asked, so the signer keeps its USB pairing', async () => {
+    const t = fakeTransport({ type: FrameType.BACKUP_IMPORT_RESPONSE, payload: new Uint8Array([0x01]) })
+    await importBackup(t, PAYLOAD, [{ pubkeyHex: 'aa'.repeat(32), label: 'Personal' }], { keepBridgeSecret: false })
+    const sent = JSON.parse(new TextDecoder().decode(t.seen[0]!.payload)) as BackupPayload
+    expect(sent.bridge_secret).toBe('')
   })
 
   it('throws when the device reports failure (0x00)', async () => {

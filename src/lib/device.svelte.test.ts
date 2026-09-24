@@ -113,7 +113,7 @@ import {
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
-  mgmtApplyKithmootPermissions, mgmtWithdrawConsent,
+  mgmtApplyKithmootPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
 } from './device.svelte.js'
 import { kithmootPermissionChanges } from './client-permission-upgrade.js'
 import type { KithmootPermissionReview } from './client-permission-upgrade.js'
@@ -3007,5 +3007,71 @@ describe('per-device consent withdrawal over USB', () => {
     })
     await expect(mgmtWithdrawConsent(consentSlot(), client)).rejects.toThrow('Connection changed')
     expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('letting go of an idle cable', () => {
+  const secret = 'ab'.repeat(32)
+  const mock = serialMock as typeof serialMock & { busy?: boolean; lastActivityAt?: number }
+
+  function serialSession() {
+    localStorage.setItem('heartwood.bridgeSecret', secret)
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    device.awaitingButton = null
+    device.idleReleased = false
+    mock.busy = false
+    mock.lastActivityAt = 0
+    serialMock.sendAndReceive.mockReset()
+    serialMock.sendAndReceive.mockResolvedValue({ type: FrameType.ACK, payload: new Uint8Array(0) })
+    serialMock.disconnect.mockReset()
+  }
+
+  function reset() {
+    device.mode = 'none'
+    device.connected = false
+    device.bridgeAuthed = false
+    delete mock.busy
+    delete mock.lastActivityAt
+  }
+
+  it('ends the bridge session, then closes the port, after a minute with nothing happening', async () => {
+    serialSession()
+    try {
+      expect(await releaseIdleSerial(Date.now() + 61_000)).toBe(true)
+      const sent = parseFrame(serialMock.sendAndReceive.mock.calls[0]![0] as Uint8Array)
+      expect(sent.type).toBe(FrameType.SESSION_END)
+      expect(Buffer.from(sent.payload).toString('hex')).toBe(secret)
+      expect(serialMock.disconnect).toHaveBeenCalledOnce()
+      expect(device.idleReleased).toBe(true)
+      expect(device.bridgeAuthed).toBe(false)
+    } finally {
+      reset()
+    }
+  })
+
+  it('keeps the port while the cable is in use, a request is pending, or a card is up', async () => {
+    serialSession()
+    try {
+      mock.lastActivityAt = Date.now()
+      expect(await releaseIdleSerial(Date.now() + 30_000)).toBe(false)
+      mock.lastActivityAt = 0
+      mock.busy = true
+      expect(await releaseIdleSerial(Date.now() + 61_000)).toBe(false)
+      mock.busy = false
+      device.awaitingButton = 'hold the button'
+      expect(await releaseIdleSerial(Date.now() + 61_000)).toBe(false)
+      expect(serialMock.disconnect).not.toHaveBeenCalled()
+    } finally {
+      device.awaitingButton = null
+      reset()
+    }
+  })
+
+  it('knows a backup carrying this browser\'s own USB pairing', () => {
+    localStorage.setItem('heartwood.bridgeSecret', secret)
+    expect(isThisBrowsersUsbPairing(secret.toUpperCase())).toBe(true)
+    expect(isThisBrowsersUsbPairing('cd'.repeat(32))).toBe(false)
   })
 })

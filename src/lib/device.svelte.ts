@@ -7,7 +7,7 @@ import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
   buildGetNetConfig, buildPatchNetConfig, buildSetOperator, type LocalNetConfigPatch,
-  buildSessionAuth, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
+  buildSessionAuth, buildSessionEnd, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
   buildFirmwareInfo, buildWifiScan,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
   buildDeriveIdentity, buildProvisionRemove,
@@ -219,6 +219,9 @@ export const device = $state({
   /** When set, the signer is waiting on a physical button hold and this is the
    *  instruction to show (e.g. the one-time USB pairing). Cleared when done. */
   awaitingButton: null as string | null,
+  /** Sapwood let go of the cable after a minute with nothing happening, so
+   *  other tools can open the port. The connect screen says so. */
+  idleReleased: false,
   /** The signer's last WiFi-join failure reason, lifted out of the log stream so
    *  it can be surfaced instead of buried. Cleared once WiFi comes up. */
   wifiJoinError: null as string | null,
@@ -455,6 +458,53 @@ export async function connectSerial(baudRate = 115200, port?: SerialPort) {
   device.wifiJoinError = null
   stopVaultWatcher()
   await serialTransport.connect(baudRate, port)
+  device.idleReleased = false
+  lastUserActivityAt = Date.now()
+  startIdleRelease()
+}
+
+// --- Letting go of an idle cable ---
+//
+// Holding the port open blocks every other tool (the CLI, esptool, a second
+// tab) until someone clicks Disconnect. After a minute with no frame on the
+// cable, no click or key in Sapwood, no request in flight and no card on the
+// signer, Sapwood ends its bridge session and closes the port. The connect
+// screen then reconnects in one click, without the port chooser.
+const SERIAL_IDLE_RELEASE_MS = 60_000
+let lastUserActivityAt = Date.now()
+let idleWatcher: ReturnType<typeof setInterval> | null = null
+
+function startIdleRelease(): void {
+  if (idleWatcher || typeof window === 'undefined') return
+  const touch = () => { lastUserActivityAt = Date.now() }
+  window.addEventListener('pointerdown', touch, { capture: true, passive: true })
+  window.addEventListener('keydown', touch, { capture: true, passive: true })
+  idleWatcher = setInterval(() => { void releaseIdleSerial() }, 5_000)
+}
+
+/** Close an idle serial session (exported for tests). Returns true if it did. */
+export async function releaseIdleSerial(now = Date.now()): Promise<boolean> {
+  if (device.mode !== 'serial' || !device.connected) return false
+  if (serialTransport.busy || device.awaitingButton) return false
+  const last = Math.max(serialTransport.lastActivityAt, lastUserActivityAt)
+  if (now - last < SERIAL_IDLE_RELEASE_MS) return false
+  addLog('USB idle for a minute: ended the bridge session and released the port')
+  await disconnect()
+  device.idleReleased = true
+  return true
+}
+
+/**
+ * End the signer's bridge session before the port goes. The signer otherwise
+ * keeps it authenticated until it reboots, and whatever opens the port next
+ * inherits it. Bounded and best effort: older firmware NACKs the frame.
+ */
+async function endBridgeSession(): Promise<void> {
+  if (device.mode !== 'serial' || !device.bridgeAuthed) return
+  device.bridgeAuthed = false
+  try {
+    await serialTransport.sendAndReceive(buildSessionEnd(bridgeSecret()), [FrameType.ACK, FrameType.NACK], 2_000)
+  } catch { /* the port is closing anyway */ }
 }
 
 /** Uint8Array → base64, chunked so String.fromCharCode never overflows argv. */
@@ -1656,6 +1706,7 @@ export async function disconnect() {
     // Any late mutation continuation is generation-stale and must not be able
     // to read/publish authority from a subsequently attached signer.
     usbAuthorityMutationToken = null
+    await endBridgeSession()
     await serialTransport.disconnect()
   } else if (device.mode === 'http') {
     await httpTransport.disconnect()
@@ -3033,6 +3084,19 @@ function bridgeSecret(): string {
     localStorage.setItem(BRIDGE_SECRET_KEY, s)
   }
   return s
+}
+
+/** Whether `secretHex` (a backup's bridge secret) is this browser's own USB
+ *  pairing. Compares without handing the secret out. */
+export function isThisBrowsersUsbPairing(secretHex: string): boolean {
+  const ours = localStorage.getItem(BRIDGE_SECRET_KEY) ?? ''
+  return /^[0-9a-f]{64}$/.test(ours) && secretHex.toLowerCase() === ours
+}
+
+/** Forget the cached bridge authentication, so the next ensureBridgeAuth asks
+ *  the signer again (after a restore that may have replaced its secret). */
+export function forgetBridgeAuth(): void {
+  device.bridgeAuthed = false
 }
 
 /**

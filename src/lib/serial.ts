@@ -48,15 +48,27 @@ export class SerialTransport {
   private requestQueue: SerialRequest[] = []
   private activeRequest: SerialRequest | null = null
   private requestDraining = false
+  /** When a frame was last written or received (ms since epoch). */
+  lastActivityAt = 0
 
   // Splits the raw byte stream into frames and log lines.
   private stream = new FrameStream({
-    onFrame: (frame) => this.emit({ kind: 'frame', frame }),
+    // Frames, not log lines: a WiFi signer logs all the time, and its chatter
+    // must not count as someone using the cable.
+    onFrame: (frame) => {
+      this.lastActivityAt = Date.now()
+      this.emit({ kind: 'frame', frame })
+    },
     onLog: (line) => this.emit({ kind: 'log', line }),
   })
 
   get connected(): boolean {
     return this.port !== null && this.running
+  }
+
+  /** True while a request is waiting on the device or queued behind one. */
+  get busy(): boolean {
+    return this.activeRequest !== null || this.requestQueue.length > 0
   }
 
   /** Subscribe to transport events. Returns an unsubscribe function. */
@@ -191,6 +203,7 @@ export class SerialTransport {
    *  a non-responding device (e.g. one still in the bootloader after a flash that
    *  didn't reboot) can't lock the stream forever. */
   async write(data: Uint8Array, timeoutMs = 5_000): Promise<void> {
+    this.lastActivityAt = Date.now()
     const run = this.writeChain.then(() => this.writeOne(data, timeoutMs))
     // Keep the chain alive even if this write rejects, so one failure doesn't
     // wedge every subsequent write.

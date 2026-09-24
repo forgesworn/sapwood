@@ -40,6 +40,7 @@ export const FrameType = {
   POLICY_PUSH:           0x20,
   SESSION_AUTH:          0x21,
   SESSION_ACK:           0x22,
+  SESSION_END:           0x2D,
   SET_BRIDGE_SECRET:     0x23,
   FACTORY_RESET:         0x24,
   SET_PIN:               0x25,
@@ -355,6 +356,17 @@ export function buildSetBridgeSecret(hexSecret: string): Uint8Array {
 /** Build a SESSION_AUTH frame. Payload: the 32-byte bridge secret. */
 export function buildSessionAuth(hexSecret: string): Uint8Array {
   return buildFrame(FrameType.SESSION_AUTH, hexToBytes32(hexSecret))
+}
+
+/**
+ * Build a SESSION_END frame (0x2D). Payload: the 32-byte bridge secret, so
+ * only the holder can end the session. Sent before letting go of the port:
+ * the signer otherwise keeps the bridge authenticated until it reboots, and
+ * whatever opens the port next inherits it. Older firmware NACKs it
+ * ("unknown frame"), which is harmless.
+ */
+export function buildSessionEnd(hexSecret: string): Uint8Array {
+  return buildFrame(FrameType.SESSION_END, hexToBytes32(hexSecret))
 }
 
 function hexToBytes32(hexSecret: string): Uint8Array {
