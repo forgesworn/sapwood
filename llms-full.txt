@@ -1,37 +1,33 @@
-# Sapwood — Complete AI Reference
+# Sapwood - Complete AI Reference
 
-> Shape your signer -- browser-based management UI for the Heartwood ESP32 signing device.
+> Shape your signer -- browser-based local and remote management UI for the Heartwood ESP32 signing device.
 
-Version: 0.1.0
 Repository: https://github.com/forgesworn/sapwood
-Live: https://forgesworn.github.io/sapwood/
+Live: https://sapwood.forgesworn.dev/
 Licence: MIT
 
 ---
 
 ## What it is
 
-Sapwood is a static single-page application (SPA) that lets you manage a Heartwood ESP32 hardware signer directly from a browser tab. No server, no install, no bridge required for management tasks. Connect your device via USB, open the URL in Chrome or Edge, click Connect USB.
+Sapwood is a static single-page application (SPA) that manages a Heartwood ESP32 hardware signer. Bootstrap over USB (no install, no server), then leave the device online in WiFi-standalone mode and manage it remotely from Sapwood on a phone through Nostr relays.
 
-Stack: Svelte 5 (runes mode), Vite, TypeScript (strict), Vitest. Total bundle: 21 KB gzipped.
+Stack: Svelte 5 (runes mode), Vite, TypeScript (strict), Vitest.
 
 ---
 
 ## Architecture
 
 ```
-GitHub Pages / Hetzner  (static file hosting)
-         |
-    Browser SPA  (Sapwood)
-         |
-    Web Serial API  (Chrome/Edge 89+)
-         |
-    ESP32 USB-Serial-JTAG  (Heartwood firmware)
+Browser (Sapwood)  --Web Serial-->  Heartwood               (local, USB)
+Phone (Sapwood)    --Nostr relays--> Heartwood outbound WiFi (remote)
 ```
 
-The browser speaks the Heartwood frame protocol directly over USB. No bridge, no server, no network path from the device to the internet during management operations.
+Local USB management speaks the Heartwood frame protocol directly over the serial connection: no bridge, no server, no network path from the device to the internet.
 
-The bridge (separate binary in heartwood-esp32) is only used for NIP-46 relay connectivity -- that is, for signing requests arriving over Nostr. Sapwood replaces the bridge for local management only.
+Remote management sends authenticated, NIP-44-encrypted management events (kind 24134) over Nostr relays to the device's outbound WiFi connection; `src/lib/relay-transport.ts` runs one persistent subscription and routes replies back to pending requests by id, mirroring bray's management probe. The device exposes no inbound port and requires no cloud account.
+
+A separate heartwood bridge daemon (in heartwood-esp32) exists for the hardened USB-only tier, where the signing chip's radio stays off and an always-on host relays NIP-46 signing traffic over the cable. `src/lib/bridge-probe.ts` detects whether an origin is actually serving that bridge API, so a static host answering with the SPA's own `index.html` is not mistaken for one.
 
 ---
 
@@ -39,26 +35,33 @@ The bridge (separate binary in heartwood-esp32) is only used for NIP-46 relay co
 
 ```
 src/lib/
-  frame.ts          -- TypeScript port of heartwood-common/src/frame.rs (encode/decode)
-  frame.test.ts     -- 19 tests verifying byte-level compatibility with the Rust impl
-  serial.ts         -- Web Serial API transport (hunts magic bytes, emits frame/log events)
-  serial.test.ts    -- transport-layer tests
-  device.svelte.ts  -- Svelte 5 reactive device state store
-  crc32.ts          -- CRC32-IEEE 802.3 implementation
-  types.ts          -- shared TypeScript types (MasterInfo, ClientPolicy, OtaStatus, etc.)
-  kinds.ts          -- Nostr event kind constants
-  profiles.ts       -- npub / profile helpers
-  provision.ts      -- master-slot provisioning helpers
-  provision.test.ts -- provisioning tests
-  http.ts           -- fetch helpers for firmware binaries
-  http.test.ts      -- http helper tests
+  frame.ts            -- TypeScript port of heartwood-common/src/frame.rs (encode/decode)
+  frame-stream.ts      -- splits the serial byte stream into log lines and frames
+  serial.ts            -- Web Serial API transport
+  relay-transport.ts   -- Nostr relay management transport (kind 24134, NIP-44)
+  bridge-probe.ts       -- detects a real heartwood bridge API vs a static-host 404 page
+  bridge-setup.ts       -- bridge secret / session setup helpers
+  device.svelte.ts      -- Svelte 5 reactive device state store
+  crc32.ts              -- CRC32-IEEE 802.3 implementation
+  types.ts              -- shared TypeScript types (MasterInfo, ClientPolicy, OtaStatus, etc.)
+  kinds.ts              -- Nostr event kind labels and risk categories, used by the permission UI
+  op-mgmt.ts            -- operator-key management authority for remote requests
+  operator-key.ts        -- operator key derivation, shared with the CLI
+  backup.ts              -- backup/restore engine and encrypted envelope (Argon2id + XChaCha20-Poly1305)
+  provision.ts            -- master-slot provisioning helpers
+  ota.ts                  -- OTA upload/verify flow
+  flasher.ts               -- app-only USB flashing for single-slot boards
+  recovery.ts               -- family recovery (words-only rebuild) flow
+  pacing.ts                  -- UART write pacing, shared with the CLI
 ```
+
+`cli/` mirrors the same operations as a cross-platform CLI over node-serialport: `cli/transport.ts` for the transport, `cli/commands.ts` for the commands (pure, tested against a fake transport).
 
 ---
 
 ## Frame protocol
 
-TypeScript port of the Rust implementation in heartwood-common/src/frame.rs.
+TypeScript port of the Rust implementation in heartwood-common/src/frame.rs, defined in `src/lib/frame.ts` as `FrameType`.
 
 ### Wire format
 
@@ -69,117 +72,108 @@ TypeScript port of the Rust implementation in heartwood-common/src/frame.rs.
 - Magic: 2 bytes `0x48 0x57` ("HW")
 - Type: 1 byte frame type
 - Length: 2 bytes big-endian, payload byte count
-- Payload: 0–N bytes (type-dependent)
+- Payload: 0-N bytes (type-dependent)
 - CRC32: 4 bytes big-endian, IEEE 802.3 polynomial, covers type + length + payload bytes
 
-### Frame types
+### Frame types in active use
 
 | Frame | Type | Direction | Payload |
 |-------|------|-----------|---------|
-| PROVISION_LIST | 0x05 | host → device | (empty) |
-| PROVISION_LIST_RESPONSE | 0x07 | device → host | JSON `Vec<MasterInfo>` |
-| FACTORY_RESET | 0x24 | host → device | (empty, requires button) |
-| POLICY_LIST_REQUEST | 0x27 | host → device | master_slot: u8 (1 byte) |
-| POLICY_LIST_RESPONSE | 0x28 | device → host | JSON `Vec<ClientPolicy>` |
-| POLICY_REVOKE | 0x29 | host → device | master_slot (1 byte) + pubkey_hex (64 ASCII bytes) |
-| POLICY_UPDATE | 0x2A | host → device | master_slot (1 byte) + JSON ClientPolicy |
-| OTA_BEGIN | 0x30 | host → device | size_u32_be (4 bytes) + sha256_hex (64 bytes); requires button |
-| OTA_CHUNK | 0x31 | host → device | offset_u32_be (4 bytes) + binary chunk |
-| OTA_FINISH | 0x32 | host → device | (empty) |
-| OTA_STATUS | 0x33 | device → host | status_byte (0 = ok) |
+| PROVISION_LIST | 0x05 | host -> device | (empty) |
+| PROVISION_LIST_RESPONSE | 0x07 | device -> host | JSON masters, then derived personas with `persona: true` |
+| PROVISION_REMOVE | 0x04 | host -> device | slot_u8; device ACKs then reboots, remaining slots renumber |
+| DERIVE_IDENTITY | 0x60 | host -> device | parent_slot (1 byte) + name (utf8); device derives the nsec-tree child on-device |
+| DERIVE_IDENTITY_RESPONSE | 0x61 | device -> host | JSON `{slot, label, npub, parent_slot, purpose, existing}` |
+| ENCRYPTED_REQUEST | 0x10 | host -> device | target_pubkey (32) + client_pubkey (32) + created_at (8, u64 be) + NIP-44 ciphertext (base64); a full NIP-46 request |
+| SIGN_ENVELOPE_RESPONSE | 0x35 | device -> host | signed kind:24133 envelope; content decrypts under the client-identity conversation key |
+| SESSION_AUTH | 0x21 | host -> device | 32-byte bridge secret; device replies SESSION_ACK (0x22) |
+| CONNSLOT_LIST | 0x42 | host -> device | master_slot (1 byte); secrets redacted, no session needed |
+| CONNSLOT_REVOKE | 0x46 | host -> device | master_slot (1) + slot_index (1); requires SESSION_AUTH first |
+| FACTORY_RESET | 0x24 | host -> device | (empty, requires button) |
+| OTA_BEGIN | 0x30 | host -> device | size_u32_be (4 bytes) + sha256_hex (64 bytes); requires button |
+| OTA_CHUNK | 0x31 | host -> device | offset_u32_be (4 bytes) + binary chunk |
+| OTA_FINISH | 0x32 | host -> device | (empty) |
+| OTA_STATUS | 0x33 | device -> host | status_byte (0 = ok) |
+| BACKUP_EXPORT_REQUEST | 0x50 | host -> device | (empty, requires button; device replies with JSON `BackupPayload`) |
+| BACKUP_EXPORT_RESPONSE | 0x51 | device -> host | JSON `BackupPayload` (masters + connection slots + bridge secret) |
+| BACKUP_IMPORT_REQUEST | 0x52 | host -> device | JSON `BackupPayload`, masters pre-filtered to those the device holds; requires button |
+| BACKUP_IMPORT_RESPONSE | 0x53 | device -> host | 1 byte: 0x01 ok / 0x00 fail |
+
+**Declared but not implemented.** `POLICY_LIST_REQUEST` (0x27), `POLICY_LIST_RESPONSE` (0x28), `POLICY_REVOKE` (0x29) and `POLICY_UPDATE` (0x2A) exist in `heartwood-common/src/types.rs` and in `frame.ts`, but the firmware has no handler for any of them; Sapwood only touches them in byte-roundtrip tests. App permissions go over the `CONNSLOT_*` frames instead.
 
 ### Stream parsing
 
-The serial stream carries both ESP-IDF log lines (plain text, newline-terminated) and protocol frames (binary). `serial.ts` hunts for the `0x48 0x57` magic sequence to separate them. Log output is emitted as log events; decoded frames are emitted as frame events.
+The serial stream carries both ESP-IDF log lines (plain text, newline-terminated) and protocol frames (binary). `frame-stream.ts` hunts for the `0x48 0x57` magic sequence to separate them; `serial.ts` wraps the Web Serial API around it and emits frame and log events.
 
 ---
 
 ## Features
 
-### Masters
+### Identities (masters)
 
-Lists provisioned master slots on the device. Each master shows:
-- Slot index
-- npub (bech32-encoded public key)
-- Derivation mode
+Lists provisioned master slots on the device: slot index, npub, derivation mode. Calls PROVISION_LIST (0x05), receives PROVISION_LIST_RESPONSE (0x07). New identities can be typed by name and derived on-device (DERIVE_IDENTITY, no secret in the browser), or imported from a phrase/nsec/ncryptsec for older firmware.
 
-Calls PROVISION_LIST (0x05) → receives PROVISION_LIST_RESPONSE (0x07).
+### Apps (connected clients)
 
-### Clients
-
-Lists TOFU-approved client policies for a chosen master slot. Each client shows the client pubkey, label, and permitted NIP-46 methods. Supports:
-- Revoke: sends POLICY_REVOKE (0x29)
-- Update: sends POLICY_UPDATE (0x2A) with modified ClientPolicy JSON
-
-Calls POLICY_LIST_REQUEST (0x27) → receives POLICY_LIST_RESPONSE (0x28).
+One surface across USB, WiFi and bridge transports for creating connections and setting per-kind signing permissions. Uses the `CONNSLOT_*` frames (list, create, update, revoke, uri) rather than the unimplemented `POLICY_*` frames.
 
 ### Firmware OTA
 
-Uploads a firmware binary from the local filesystem or a URL to the device over USB. Steps:
-1. User selects a .bin file; SHA-256 is computed in-browser
-2. OTA_BEGIN (0x30) sent with file size and SHA-256; device prompts for button press
-3. Binary is split into chunks; each sent as OTA_CHUNK (0x31)
-4. OTA_FINISH (0x32) sent; device verifies SHA-256 and reboots
-5. Progress bar tracks chunk offset
+Uploads a firmware binary to the device over USB. Steps: select a `.bin` file, SHA-256 computed in-browser; OTA_BEGIN (0x30) sent with size and hash, device prompts for a button press; binary split into chunks sent as OTA_CHUNK (0x31); OTA_FINISH (0x32) sent, device verifies the hash and reboots; a progress bar tracks chunk offset. OTA_STATUS (0x33) responses are checked throughout. Boards without an OTA slot (T-Display, C6, an early V4) get a quick app-only USB update instead: `planAppOnlyWrite` in `flasher.ts` reads the partition table off the chip and refuses a two-slot board before writing.
 
-OTA_STATUS (0x33) responses are checked throughout for device-side errors.
+### Backup and restore
+
+Backs up app pairings and the bridge secret to an encrypted file (Argon2id + XChaCha20-Poly1305), USB only, button-confirmed (BACKUP_EXPORT_REQUEST/RESPONSE, BACKUP_IMPORT_REQUEST/RESPONSE). Separately, typed 19/31-word identity recovery, the operator key, and re-derivable named identities each have their own backup path; see docs/backup-and-restore.md and docs/key-backup.md.
 
 ### Logs
 
-Streams real-time ESP-IDF log output from the device. Log lines appear as the device emits them -- useful for debugging firmware issues without a separate serial terminal.
+Streams real-time ESP-IDF log output from the device.
 
-### Factory Reset
+### Factory reset
 
-Erases all keys and client policies on the device. Sends FACTORY_RESET (0x24). The device will not execute this command until the physical button on the ESP32 is pressed. A web UI compromise cannot trigger factory reset without physical access.
+Erases all keys and client policies. Sends FACTORY_RESET (0x24); the device will not execute it until the physical button is pressed.
 
 ---
 
 ## Security model
 
-**Secrets never leave the ESP32.** The serial protocol only carries:
-- Public keys and npubs (outbound from device)
-- Policy metadata (client pubkeys, labels, permitted methods)
-- Unsigned events inbound, signatures outbound (for NIP-46 signing, not Sapwood's concern)
-- Firmware binary chunks (OTA)
+**Secrets never leave the ESP32.** The protocol only carries public keys and npubs, policy/connection metadata, NIP-44 ciphertext and signatures (not plaintext key material), and firmware binary chunks (OTA).
 
-**Physical button confirmation** is required for all destructive operations:
-- Factory reset
-- OTA firmware update
-- (Provisioning, when using the provision CLI)
+**Physical button confirmation** gates every destructive or secret-revealing operation: factory reset, OTA, backup export/import, and provisioning. A compromised Sapwood SPA cannot extract keys or perform destructive actions without physical access to the button.
 
-A compromised Sapwood SPA cannot extract private keys or perform destructive actions without physical access to the button. The attacker must be in the same room.
+**Network tiers:**
+- WiFi-standalone (standard): the signer joins WiFi and serves management and NIP-46 over relays itself. This is what the guided flasher produces by default.
+- USB-only, radio off (hardened): no network stack runs on the key-holding chip; remote signing requires the heartwood bridge daemon on an always-on host with the signer plugged in.
 
-**WiFi is off by default** on the ESP32: in the high-assurance USB-bridged mode all radios stay disabled and the host machine does the networking. The opt-in WiFi-standalone mode enables the radio so the signer talks to Nostr relays directly (no Pi); keys still never leave the chip, NIP-44 is decrypted on-device, and out-of-policy signing still needs the physical button. The device stores an ordered list of fallback WiFi networks and rotates through them; Sapwood edits the list over USB or the authenticated relay channel without ever resending stored passwords.
+Regardless of tier, firmware updates, factory reset and PIN changes always require the USB cable. Identity management works over WiFi too: derive-by-name sends no secret at all, and importing a phrase/nsec/ncryptsec travels NIP-44 encrypted end-to-end under the operator-signer conversation key, so relays only ever carry ciphertext.
 
-**Planned: Web Bluetooth (portable mode only).** BLE connectivity is planned for child-key-only portable mode. Before BLE ships, additional firmware hardening is required: rate limiting on management frame types, button-press BLE pairing, and CSP headers on static hosting.
+**Planned: Web Bluetooth (portable mode only).** BLE connectivity is planned for child-key-only portable mode. Before it ships: rate limiting on management frame types, button-press BLE pairing, and CSP headers on static hosting.
 
 ---
 
 ## Dependencies
 
-Runtime (compiled into bundle):
-- @noble/curves ^2.0.1 -- elliptic curve operations
-- @noble/hashes ^2.0.1 -- SHA-256 (for OTA verification and key ops)
-- @scure/bip32 ^2.0.1 -- HD key derivation
-- @scure/bip39 ^2.0.1 -- mnemonic support
+Runtime (compiled into bundle): `@noble/ciphers`, `@noble/curves`, `@noble/hashes`, `@paulmillr/qr`, `@scure/bip32`, `@scure/bip39`, `esptool-js`, `nostr-tools`, `serialport` (CLI only).
 
-Dev:
-- svelte ^5.0.0, @sveltejs/vite-plugin-svelte ^5.0.0
-- vite ^6.0.0
-- typescript ^5.7.0
-- vitest ^3.0.0, jsdom ^26.0.0, @testing-library/svelte ^5.0.0
+Dev: `svelte`, `@sveltejs/vite-plugin-svelte`, `vite`, `typescript`, `vitest`, `jsdom`, `@testing-library/svelte`, `@playwright/test`, `esbuild`.
+
+See package.json for exact ranges.
 
 ---
 
 ## Build commands
 
 ```bash
-npm install          # install dependencies
-npm run dev          # dev server at http://localhost:5173
-npm run build        # production build to dist/
-npm run preview      # preview dist/ locally
-npm test             # run all tests (vitest run)
-npm run test:watch   # watch mode
+npm install           # install dependencies
+npm run dev            # dev server at http://localhost:5173
+npm run build           # production build to dist/
+npm run build:cli        # bundle the CLI to dist-cli/sapwood.mjs
+npm run preview           # preview dist/ locally
+npm run check              # svelte-check
+npm run check:cli           # tsc on the CLI
+npm test                     # run all tests (vitest run)
+npm run test:watch            # watch mode
+npm run test:e2e               # playwright end-to-end tests
 ```
 
 ---
@@ -205,7 +199,8 @@ Web Serial API is required.
 - Monospace font throughout (terminal/cockpit aesthetic)
 - Dark theme only
 - Tone: sovereign, precise, calm. No exclamation marks.
-- Git commits: `type: description` format (e.g. `feat:`, `fix:`, `refactor:`)
+- No em dashes in UI copy: use a full stop, comma or colon instead
+- Git commits: `type: description` format. No Co-Authored-By lines.
 
 ---
 
@@ -215,7 +210,7 @@ Web Serial API is required.
 |-----------|------|------|
 | Heartwood | forgesworn/heartwood-esp32 | ESP32 firmware, bridge, provision CLI |
 | Sapwood | forgesworn/sapwood | Web management UI (this repo) |
-| Bark | nicorache/bark | Browser extension for NIP-46 signing |
-| nsec-tree | nicorache/nsec-tree | Key derivation library |
+| Bark | see README | Browser extension for NIP-46 signing |
+| nsec-tree | see README | Key derivation library |
 
 Named after the living, active layer of wood between bark and heartwood.

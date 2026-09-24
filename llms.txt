@@ -1,34 +1,68 @@
 # Sapwood
 
-> Shape your signer -- browser-based management UI for the Heartwood ESP32 signing device.
+> Managing a Heartwood ESP32 hardware signer normally means a serial terminal
+> or a cloud dashboard. Sapwood is a browser-based management UI: connect over
+> USB with the Web Serial API, or manage remotely over authenticated Nostr
+> relays once the device is online.
 
-Sapwood connects to a Heartwood ESP32 hardware signer via Web Serial API (Chrome/Edge), or remotely over authenticated Nostr relay management, and provides a management interface for client policies, network settings (including an ordered fallback WiFi network list), signed firmware updates (OTA where the board has slots, app-only quick USB reflash where it does not), backup/restore, factory reset, and device monitoring. No server required -- it's a static SPA.
+Sapwood is for anyone running a Heartwood signer who wants a UI for
+identities, connected apps, WiFi, firmware and backups without a server or
+cloud account in the loop. Local USB management uses the Web Serial API
+directly; remote management sends authenticated, encrypted events over Nostr
+relays to the device's outbound WiFi connection, so there is no inbound port
+and no management server to trust. It is a static SPA (Svelte 5), and the
+same functionality is also available as a cross-platform CLI.
 
-## Key facts
+## Getting started
 
-- Static SPA: Svelte 5, 21KB gzipped, zero server dependencies
-- Connects via Web Serial API directly to ESP32 USB-Serial-JTAG
-- TypeScript port of the Heartwood frame protocol (19 tests, byte-compatible with Rust)
-- Secrets never leave the ESP32 -- all destructive ops require physical button press
-- Part of the Heartwood ecosystem: Heartwood (device) + Sapwood (management UI) + Bark (browser extension)
+```
+git clone https://github.com/forgesworn/sapwood.git
+cd sapwood
+npm install
+npm run dev       # dev server at localhost:5173
+```
 
-## Frame protocol
+Or visit the hosted build in Chrome or Edge, plug in a Heartwood device, and
+click Connect USB. For the CLI: `npm run build:cli && npm link`, then run
+`sapwood device`.
 
-Frame format: [0x48 0x57] [type_u8] [length_u16_be] [payload...] [crc32_be32]
-CRC32 (IEEE 802.3) covers type + length bytes + payload.
+## Key concepts
 
-Key frame types:
-- 0x05 PROVISION_LIST (empty) -> 0x07 PROVISION_LIST_RESPONSE (JSON)
-- 0x24 FACTORY_RESET (empty, requires button)
-- 0x27 POLICY_LIST_REQUEST (slot byte) -> 0x28 POLICY_LIST_RESPONSE (JSON)
-- 0x29 POLICY_REVOKE (slot + 64-char hex pubkey)
-- 0x2A POLICY_UPDATE (slot + JSON ClientPolicy)
-- 0x30-0x32 OTA_BEGIN/CHUNK/FINISH -> 0x33 OTA_STATUS
+- Frame protocol: USB traffic is a TypeScript port of the Rust frame format in
+  heartwood-common (`src/lib/frame.ts`): `[0x48 0x57] [type_u8] [length_u16_be]
+  [payload...] [crc32_be32]`.
+- Two transports, one state store: USB (Web Serial) and remote (Nostr relays)
+  both feed the same reactive device state, so UI components do not know
+  which transport is active.
+- Physical button confirmation gates every destructive or secret-revealing
+  operation on the device (factory reset, OTA, backup export/import,
+  provisioning). A compromised browser tab cannot act without it.
+- Named identities: the signer derives child identities from a master it
+  already holds (`DERIVE_IDENTITY`), so no secret needs to enter the browser.
+- Exact client policies: connected apps are scoped to specific NIP-46 methods
+  and event kinds; unlisted methods and kinds fail closed.
 
-## Source
+## API surface
 
-- Repository: https://github.com/forgesworn/sapwood
-- Live: https://forgesworn.github.io/sapwood/
-- Frame protocol: src/lib/frame.ts
-- Serial transport: src/lib/serial.ts
-- Device state: src/lib/device.svelte.ts
+Frame types are defined in `src/lib/frame.ts` (`FrameType`), including
+provisioning (`PROVISION_LIST`, `PROVISION_LIST_RESPONSE`), identity
+derivation (`DERIVE_IDENTITY`, `DERIVE_IDENTITY_RESPONSE`), remote signing
+(`ENCRYPTED_REQUEST`, `SIGN_ENVELOPE_RESPONSE`), connected-app management
+(`CONNSLOT_LIST`, `CONNSLOT_REVOKE` and related `CONNSLOT_*` frames), OTA
+firmware update (`OTA_BEGIN`/`OTA_CHUNK`/`OTA_FINISH`/`OTA_STATUS`), and
+backup/restore (`BACKUP_EXPORT_REQUEST`/`BACKUP_EXPORT_RESPONSE`,
+`BACKUP_IMPORT_REQUEST`/`BACKUP_IMPORT_RESPONSE`).
+
+The CLI (`cli/commands.ts`) exposes the same operations as subcommands:
+`device`, `identities`, `identities remove`, `derive`, `apps`,
+`apps revoke`, `logs`, `firmware update`, `key backup`, `operator new`,
+`operator restore`, `backup export`, `backup import`. All support `--json`.
+
+## Optional
+
+- Source: https://github.com/forgesworn/sapwood
+- Live: https://sapwood.forgesworn.dev/
+- Backup and restore: docs/backup-and-restore.md
+- Key backup: docs/key-backup.md
+- Architecture: ARCHITECTURE.md
+- Full reference: llms-full.txt
