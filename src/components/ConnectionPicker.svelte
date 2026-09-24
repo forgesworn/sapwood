@@ -265,6 +265,12 @@
         <span class="conn-label">DISCONNECTED</span>
       </div>
     {/if}
+    {#if device.idleReleased}
+      <p class="hint-sm">
+        Sapwood let go of the USB cable after a minute idle, so other tools can use it.
+        Connect again when you need the signer.
+      </p>
+    {/if}
     {#if showRelayForm}
       <div class="relay-setup">
         <h3 class="section-title relay-title">Connect remotely</h3>

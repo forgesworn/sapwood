@@ -295,7 +295,7 @@ export async function exportBackup(t: BackupTransport): Promise<BackupPayload> {
     BUTTON_TIMEOUT_MS,
   )
   if (resp.type !== FrameType.BACKUP_EXPORT_RESPONSE) {
-    throw new BackupError('The signer refused the export. If it showed a prompt, confirm it with the button; if it showed nothing, this browser is not paired to it over USB (the export needs an authenticated bridge session).')
+    throw new BackupError(exportRefusalMessage(resp.payload))
   }
   return parseBackupPayload(resp.payload)
 }
@@ -339,6 +339,61 @@ export function matchBackup(
   return { matched, report }
 }
 
+// --- refusal reasons ---
+
+/**
+ * Why the signer refused a restore: the byte after 0x00 in
+ * BACKUP_IMPORT_RESPONSE (heartwood_common::backup::ImportRefusal). Firmware
+ * before these sent the 0x00 alone. Every refusal used to read as "confirm the
+ * prompt", including a restore the owner had approved that then ran out of
+ * storage.
+ */
+const IMPORT_REFUSALS: Record<number, string> = {
+  1: 'The signer could not read this backup. Update its firmware, then try again.',
+  2: 'This backup holds no app pairings to restore.',
+  3: 'This backup holds more app pairings for one identity than the signer can store (16).',
+  4: 'The signer refused a pairing in this backup that fails its safety checks. Nothing was changed.',
+  5: 'This backup lists the same identity twice, so the signer refused it. Nothing was changed.',
+  6: 'None of the backup’s identities are on this signer. Re-provision them first, then import.',
+  7: 'The restore was declined on the signer, or its prompt timed out. Nothing was changed.',
+  8: 'The signer ran out of storage writing the pairings and put everything back as it was. Remove app pairings or identities it no longer needs, then import again.',
+  9: 'The signer could not store the pairings, and could not confirm the old ones were put back. Restart it, check its app pairings, and import again.',
+}
+
+/** The owner-facing reason for a refused BACKUP_IMPORT_RESPONSE payload. */
+export function importRefusalMessage(payload: Uint8Array): string {
+  const reason = payload.length > 1 ? IMPORT_REFUSALS[payload[1]!] : undefined
+  return reason ?? 'The signer did not restore the backup. If it showed a prompt, it was declined or timed out; if its screen flashed red, it could not store the pairings.'
+}
+
+const NOT_PAIRED = 'This browser is not paired to the signer over USB, so it refused. Reconnect and try again.'
+
+/** A NACK's reason text, mapped to what the owner should do. */
+function nackRefusalMessage(payload: Uint8Array, action: 'export' | 'restore'): string {
+  const reason = decoder.decode(payload).trim()
+  if (/bridge auth required/i.test(reason)) return NOT_PAIRED
+  if (/approval on screen/i.test(reason)) return `The signer is showing another approval. Answer it on the signer, then try the ${action} again.`
+  if (/declined/i.test(reason)) return `The ${action} was declined on the signer, or its prompt timed out. Nothing was changed.`
+  if (reason) return `The signer refused the ${action}: ${reason}.`
+  return ''
+}
+
+/** The owner-facing reason for a NACKed BACKUP_EXPORT_REQUEST. */
+export function exportRefusalMessage(payload: Uint8Array): string {
+  // Firmware before reason texts NACKed empty both for "not paired" and for
+  // "declined", so the old two-way message is the fallback.
+  return nackRefusalMessage(payload, 'export')
+    || 'The signer refused the export. If it showed a prompt, confirm it with the button; if it showed nothing, this browser is not paired to it over USB (the export needs an authenticated bridge session).'
+}
+
+/** How to restore. */
+export interface ImportOptions {
+  /** False sends the backup without its bridge secret, so the signer keeps
+   *  its current USB pairing and skips the "Replace bridge secret?" prompt.
+   *  Default true. */
+  keepBridgeSecret?: boolean
+}
+
 /** The result of a restore: how many slots were sent, and the per-master report. */
 export interface ImportResult {
   restored: number
@@ -354,6 +409,7 @@ export async function importBackup(
   t: BackupTransport,
   payload: BackupPayload,
   deviceMasters: DeviceMaster[],
+  options: ImportOptions = {},
 ): Promise<ImportResult> {
   const { matched, report } = matchBackup(payload, deviceMasters)
   if (matched.length === 0) {
@@ -364,14 +420,23 @@ export async function importBackup(
   // frame budget the inventory would eat into for nothing. Strip it here so
   // masters and slots are the only thing sent.
   const { note_inventory: _inventory, note_inventory_unreadable: _unreadable, ...withoutInventory } = payload
-  const filtered: BackupPayload = { ...withoutInventory, masters: matched }
+  // Without the bridge secret the signer skips its second prompt
+  // ("Replace bridge secret?") and keeps the USB pairing it has.
+  const filtered: BackupPayload = {
+    ...withoutInventory,
+    masters: matched,
+    bridge_secret: options.keepBridgeSecret === false ? '' : withoutInventory.bridge_secret,
+  }
   const resp = await t.sendAndReceive(
     buildBackupImportRequest(JSON.stringify(filtered)),
     [FrameType.BACKUP_IMPORT_RESPONSE, FrameType.NACK],
     BUTTON_TIMEOUT_MS,
   )
-  if (resp.type !== FrameType.BACKUP_IMPORT_RESPONSE || resp.payload[0] !== 0x01) {
-    throw new BackupError('The signer did not restore the backup. Confirm the prompt on its screen with the button.')
+  if (resp.type === FrameType.NACK) {
+    throw new BackupError(nackRefusalMessage(resp.payload, 'restore'))
+  }
+  if (resp.payload[0] !== 0x01) {
+    throw new BackupError(importRefusalMessage(resp.payload))
   }
   const restored = matched.reduce((total, master) => total + master.connection_slots.length, 0)
   return { restored, masters: report }
