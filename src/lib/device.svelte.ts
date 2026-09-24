@@ -8,7 +8,7 @@ import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
   buildGetNetConfig, buildPatchNetConfig, buildSetOperator, type LocalNetConfigPatch,
   buildSessionAuth, buildSessionEnd, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
-  buildFirmwareInfo, buildWifiScan,
+  buildFirmwareInfo, buildWifiScan, buildDisplayFlip,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
   buildDeriveIdentity, buildProvisionRemove,
 } from './frame.js'
@@ -76,6 +76,9 @@ export interface RelayStatus {
   /** Whether runtime logging is dropped to warnings (calms activity LEDs
    *  wired to the log UART). */
   log_quiet?: boolean
+  /** Whether the screen is turned through 180 degrees (absent on older
+   *  firmware). */
+  display_flip?: boolean
   /** Running firmware version (absent on older firmware). */
   version?: string
   /** Board identifier, e.g. 'tdisplay' (absent on older firmware). */
@@ -838,6 +841,7 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(typeof raw.free_heap === 'number' ? { free_heap: raw.free_heap } : {}),
     ...(typeof raw.largest_free_block === 'number' ? { largest_free_block: raw.largest_free_block } : {}),
     ...(typeof raw.log_quiet === 'boolean' ? { log_quiet: raw.log_quiet } : {}),
+    ...(typeof raw.display_flip === 'boolean' ? { display_flip: raw.display_flip } : {}),
     ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
     ...(typeof raw.board === 'string' ? { board: raw.board } : {}),
     ...(raw.truncated === true ? { truncated: true } : {}),
@@ -1687,6 +1691,43 @@ export async function relaySetLogQuiet(quiet: boolean): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
   await relayTransport.request('set_log_level', { quiet }, MGMT_WRITE_TIMEOUT_MS)
   await relayRefresh()
+}
+
+// --- Screen orientation ---
+//
+// A board sits whichever way its case, cable or owner's hand suits, and the
+// buttons live on one edge, so the signer can turn its picture through 180
+// degrees (the button labels on its cards follow). Also settable on the board:
+// hold its button on the DEVICE page.
+
+/** Ask a USB signer whether its screen is flipped. Null when the firmware
+ *  predates the setting (it NACKs), or the cable is not the transport. */
+export async function usbDisplayFlip(): Promise<boolean | null> {
+  if (device.mode !== 'serial') return null
+  try {
+    const resp = await serialTransport.sendAndReceive(buildDisplayFlip(), [FrameType.DISPLAY_FLIP_RESP, FrameType.NACK], 4_000)
+    return resp.type === FrameType.DISPLAY_FLIP_RESP ? resp.payload[0] === 1 : null
+  } catch {
+    return null
+  }
+}
+
+/** Turn the signer's screen through 180 degrees, or back upright. Returns the
+ *  orientation the signer reports. */
+export async function setDisplayFlip(flip: boolean): Promise<boolean> {
+  if (device.mode === 'relay') {
+    if (!relayTransport) throw new Error('not connected over relay')
+    await relayTransport.request('set_display_flip', { flip }, MGMT_WRITE_TIMEOUT_MS)
+    await relayRefresh()
+    return flip
+  }
+  if (device.mode !== 'serial') throw new Error('Connect to the signer first.')
+  await ensureBridgeAuth()
+  const resp = await serialTransport.sendAndReceive(buildDisplayFlip(flip), [FrameType.DISPLAY_FLIP_RESP, FrameType.NACK], SERIAL_RTT_MS)
+  if (resp.type !== FrameType.DISPLAY_FLIP_RESP) {
+    throw new Error(`The signer did not change its screen: ${new TextDecoder().decode(resp.payload) || 'no reason given'}.`)
+  }
+  return resp.payload[0] === 1
 }
 
 export async function refreshRelayAudit(): Promise<void> {
