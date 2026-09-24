@@ -49,6 +49,8 @@ export const FrameType = {
   PIN_UNLOCK:            0x26,
   VAULT_SET:             0x62,
   VAULT_UNLOCK:          0x63,
+  PHONE_UNLOCK_CMD:      0x64,
+  PHONE_UNLOCK_RESP:     0x65,
   POLICY_LIST_REQUEST:   0x27,
   POLICY_LIST_RESPONSE:  0x28,
   POLICY_REVOKE:         0x29,
@@ -363,6 +365,18 @@ export function buildSetBridgeSecret(hexSecret: string): Uint8Array {
  */
 export function buildDisplayFlip(flip?: boolean): Uint8Array {
   return buildFrame(FrameType.DISPLAY_FLIP, flip === undefined ? new Uint8Array(0) : new Uint8Array([flip ? 1 : 0]))
+}
+
+/**
+ * Build a PHONE_UNLOCK_CMD frame (0x64). Payload: one JSON command,
+ * {"op":"enrol","enrol_pubkey":"<64 hex>","label":"..."} | {"op":"list"} |
+ * {"op":"revoke","id":N} | {"op":"set_announce_operator","on":bool}. Needs an
+ * authenticated bridge session; enrol also needs a press on the board. The
+ * signer answers PHONE_UNLOCK_RESP (JSON) or NACK with a reason; firmware
+ * older than 0.18.0-beta.17 NACKs with an empty payload.
+ */
+export function buildPhoneUnlockCmd(command: Record<string, unknown>): Uint8Array {
+  return buildFrame(FrameType.PHONE_UNLOCK_CMD, new TextEncoder().encode(JSON.stringify(command)))
 }
 
 /** Build a SESSION_AUTH frame. Payload: the 32-byte bridge secret. */

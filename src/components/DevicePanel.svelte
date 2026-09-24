@@ -21,7 +21,9 @@
   import {
     PAIRING_BACKUP_EVENT, pairingBackupStatus, type PairingBackupStatus,
   } from '../lib/pairing-backup.js'
+  import { inferUnlockMode, type UnlockMode } from '../lib/phone-unlock.js'
   import Connectivity from './Connectivity.svelte'
+  import UnlockPhones from './UnlockPhones.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import Backup from './Backup.svelte'
   import PasswordReveal from './PasswordReveal.svelte'
@@ -192,6 +194,7 @@
         ? (pinValue ? 'PIN set.' : 'PIN cleared.')
         : 'The device rejected the PIN change.'
       pinValue = ''
+      clearPinAck = false
     } catch (e) {
       pinStatus = e instanceof Error ? e.message : 'Failed'
     } finally {
@@ -353,6 +356,47 @@
     vaultStored = key
     vaultImport = ''
     vaultStatus = 'Vault key saved in this browser. It will be used the next time the signer asks for it.'
+  }
+
+  // --- After a power cut: the three modes ---
+  // The signer does not report whether it is encrypted, so the current mode
+  // is inferred (inferUnlockMode) and left unmarked when it cannot be told.
+  // "No encryption" is never a default: turning encryption off, by either
+  // route, waits for the owner to confirm the sentence that says what it costs.
+  let phoneCount = $state<number | null>(null)
+  const currentMode = $derived(inferUnlockMode(phoneCount, !!vaultStored))
+  let chosenMode = $state<UnlockMode | null>(null)
+  let modesSection = $state<HTMLElement | null>(null)
+  let noEncryptionAck = $state(false)
+  let clearPinAck = $state(false)
+
+  const NO_ENCRYPTION_RISK = 'Anyone who takes the board can copy every key off it over USB in minutes. If it is taken, I treat every identity on it as stolen.'
+
+  const MODES: { id: UnlockMode; name: string; after: string; taken: string }[] = [
+    {
+      id: 'none',
+      name: 'No encryption',
+      after: 'Signs again straight away.',
+      taken: 'They can copy every key off it over USB in minutes. Treat every identity on it as stolen.',
+    },
+    {
+      id: 'phone',
+      name: 'Phone unlock',
+      after: 'Your phone shows a notification: one tap and its screen lock.',
+      taken: 'Keys stay sealed unless you tap a prompt you were not expecting.',
+    },
+    {
+      id: 'sapwood',
+      name: 'Sapwood or PIN only',
+      after: 'Unlock from Sapwood, or type the PIN on the cable. The slowest recovery.',
+      taken: 'Keys stay sealed.',
+    },
+  ]
+
+  function showNoEncryption() {
+    chosenMode = 'none'
+    noEncryptionAck = false
+    modesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   // --- Danger zone ---
@@ -571,6 +615,86 @@
     <OtaUpdate />
   </section>
 
+  <!-- After a power cut: modes and phones -->
+  {#if overUsb || device.mode === 'relay'}
+    <section bind:this={modesSection}>
+      <h2 class="section-title">After a power cut</h2>
+      <p class="hint">How this signer gets its keys back after it restarts. Each choice costs
+        something; pick the one that suits where the signer lives.</p>
+      <div class="modes">
+        {#each MODES as mode (mode.id)}
+          <div class="card mode" class:mode-current={currentMode === mode.id}>
+            <div class="mode-head">
+              <span class="mode-name">{mode.name}</span>
+              {#if currentMode === mode.id}<span class="tag tag--green">current</span>{/if}
+            </div>
+            <p class="hint-sm"><span class="mode-label">After a power cut:</span> {mode.after}</p>
+            <p class="hint-sm"><span class="mode-label">If someone takes the board:</span> {mode.taken}</p>
+            {#if currentMode !== mode.id && chosenMode !== mode.id}
+              <button class="btn btn-ghost btn-sm" onclick={() => { chosenMode = mode.id; noEncryptionAck = false }}>
+                Switch to this
+              </button>
+            {/if}
+            {#if chosenMode === mode.id && currentMode !== mode.id}
+              <div class="mode-steps">
+                {#if mode.id === 'phone'}
+                  {#if currentMode === null}
+                    <p class="hint-sm">Phone unlock needs encryption on. Turn on Encrypt at rest
+                      (Security, below) or set a boot PIN, then add a phone below. Add two if you
+                      can, so one lost abroad does not leave the signer locked.</p>
+                  {:else}
+                    <p class="hint-sm">Add a phone below. Encryption is already on.</p>
+                  {/if}
+                {:else if mode.id === 'sapwood'}
+                  {#if (phoneCount ?? 0) > 0}
+                    <p class="hint-sm">Revoke each phone below. Encryption stays on.</p>
+                  {:else}
+                    <p class="hint-sm">Turn on Encrypt at rest (Security, below), or set a boot PIN.</p>
+                  {/if}
+                {:else}
+                  {#if !overUsb}
+                    <p class="hint-sm">Turning encryption off needs the signer on the USB cable.</p>
+                  {:else}
+                    <label class="hint-sm ack">
+                      <input type="checkbox" bind:checked={noEncryptionAck} disabled={vaultPending} />
+                      {NO_ENCRYPTION_RISK}{#if (phoneCount ?? 0) > 0}&#32;Every phone stops being able to unlock it.{/if}
+                    </label>
+                    {#if vaultStored}
+                      <button class="btn btn-danger btn-sm" disabled={!noEncryptionAck || vaultPending}
+                        onclick={async () => {
+                          await handleVaultDisable()
+                          if (!vaultStored) chosenMode = null
+                          noEncryptionAck = false
+                        }}>
+                        {vaultPending ? 'Waiting for the button…' : 'Turn encryption off'}
+                      </button>
+                      {#if vaultStatus}<p class="hint-sm status">{vaultStatus}</p>{/if}
+                    {:else}
+                      <p class="hint-sm">This browser holds no vault key for the signer. If it has a
+                        boot PIN, clear the PIN in Security, below.</p>
+                    {/if}
+                  {/if}
+                {/if}
+                <button class="btn btn-ghost btn-sm" onclick={() => { chosenMode = null }}>Cancel</button>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+      {#if currentMode === null}
+        <p class="hint-sm">This browser holds no vault key for the signer, and the signer does not
+          say whether it has a boot PIN. With neither, it runs without encryption.</p>
+      {/if}
+      <p class="hint-sm">There is no automatic phone unlock. Anyone holding the board can make it ask
+        for its key, and a phone that answered by itself would hand it over: no safer than no
+        encryption, while looking safer.</p>
+      {#if vaultStatus && chosenMode === null}<p class="hint-sm status">{vaultStatus}</p>{/if}
+      <div class="phones">
+        <UnlockPhones bind:count={phoneCount} />
+      </div>
+    </section>
+  {/if}
+
   <!-- Security (USB only) -->
   <section>
     <h2 class="section-title">Security</h2>
@@ -596,10 +720,16 @@
           />
           <PasswordReveal bind:shown={showPin} disabled={pinPending} />
         </div>
-        <button class="btn btn-secondary" disabled={pinPending} onclick={handleSetPin}>
+        <button class="btn btn-secondary" disabled={pinPending || (!pinValue && !clearPinAck)} onclick={handleSetPin}>
           {pinPending ? 'Waiting…' : pinValue ? 'Set PIN' : 'Clear PIN'}
         </button>
       </div>
+      {#if !pinValue}
+        <label class="hint-sm ack">
+          <input type="checkbox" bind:checked={clearPinAck} disabled={pinPending} />
+          Clearing a PIN turns encryption off and stops every phone unlocking it. {NO_ENCRYPTION_RISK}
+        </label>
+      {/if}
       {#if pinStatus}<p class="hint-sm status">{pinStatus}</p>{/if}
 
       <h3 class="sub-title">Bridge secret</h3>
@@ -692,15 +822,9 @@
             </button>
           </div>
         </div>
-        <ConfirmButton
-          label="Disable encryption"
-          question="Return to plaintext key storage on the signer?"
-          confirmLabel="Yes, disable it"
-          busyLabel="Waiting for the button…"
-          busy={vaultPending}
-          buttonClass="btn btn-secondary btn-sm"
-          onconfirm={handleVaultDisable}
-        />
+        <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={showNoEncryption}>
+          Disable encryption
+        </button>
       {:else}
         <ConfirmButton
           label="Encrypt at rest"
@@ -872,6 +996,17 @@
   .status { margin-top: 0.6rem; color: var(--text-dim); }
 
   .bridge-hint { margin-top: 0.8rem; }
+
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.75rem; margin: 0.8rem 0; }
+  .mode { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
+  .mode-current { border-color: var(--green-dim); }
+  .mode-head { display: flex; gap: 0.5rem; align-items: center; }
+  .mode-name { font-weight: 600; color: var(--text); }
+  .mode-label { color: var(--text); }
+  .mode-steps { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-top: 0.3rem; }
+  .ack { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.4rem; }
+  .ack input { margin-top: 0.2rem; flex: none; }
+  .phones { margin-top: 1.2rem; }
 
   .vault-escrow {
     display: flex; flex-direction: column; gap: 0.6rem;

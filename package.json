@@ -64,6 +64,7 @@
     "@scure/bip39": "^2.4.0",
     "esptool-js": "^0.6.1",
     "nostr-tools": "2.23.9",
-    "serialport": "^13.0.0"
+    "serialport": "^13.0.0",
+    "spoken-token": "^2.1.0"
   }
 }

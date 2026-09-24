@@ -8,7 +8,7 @@ import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
   buildGetNetConfig, buildPatchNetConfig, buildSetOperator, type LocalNetConfigPatch,
   buildSessionAuth, buildSessionEnd, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
-  buildFirmwareInfo, buildWifiScan, buildDisplayFlip,
+  buildFirmwareInfo, buildWifiScan, buildDisplayFlip, buildPhoneUnlockCmd,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
   buildDeriveIdentity, buildProvisionRemove,
 } from './frame.js'
@@ -42,6 +42,7 @@ import {
   rememberDevice, replaceDeviceRelays, savePendingNetworkHandoff, npubShort,
 } from './known-devices.js'
 import { VaultAnnouncementWatcher, publishVaultDelivery, loadVaultKey } from './vault.js'
+import { PHONE_UNLOCK_CAPABILITY, parsePhoneList, type UnlockPhoneList } from './phone-unlock.js'
 import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
@@ -1728,6 +1729,94 @@ export async function setDisplayFlip(flip: boolean): Promise<boolean> {
     throw new Error(`The signer did not change its screen: ${new TextDecoder().decode(resp.payload) || 'no reason given'}.`)
   }
   return resp.payload[0] === 1
+}
+
+// --- Phones that can unlock ---
+//
+// Phones enrolled with Cambium can unlock the signer after a restart
+// (src/lib/phone-unlock.ts). Listing, revoking and the operator-announcement
+// switch work over the cable (frame 0x64, authenticated bridge session) and
+// over the relay; adding a phone needs the cable and a press on the board.
+
+/** The signer asked for the bridge session before answering. */
+export class PhoneUnlockAuthRequired extends Error {
+  constructor() { super('The signer wants this browser to authenticate over USB before it lists its phones.') }
+}
+
+// A card on the board waits 30 s for the press; the frame must outlast a
+// person reaching for it, and a timeout closes the serial session.
+const PHONE_ENROL_TIMEOUT_MS = 75_000
+
+async function usbPhoneCommand(command: Record<string, unknown>, timeoutMs = SERIAL_RTT_MS): Promise<unknown | null> {
+  const resp = await serialTransport.sendAndReceive(
+    buildPhoneUnlockCmd(command),
+    [FrameType.PHONE_UNLOCK_RESP, FrameType.NACK],
+    timeoutMs,
+  )
+  if (resp.type === FrameType.PHONE_UNLOCK_RESP) return JSON.parse(new TextDecoder().decode(resp.payload)) as unknown
+  const reason = new TextDecoder().decode(resp.payload).trim()
+  // Firmware older than 0.18.0-beta.17 NACKs the unknown frame with no reason.
+  if (!reason) return null
+  if (/bridge auth required/i.test(reason)) throw new PhoneUnlockAuthRequired()
+  throw new Error(`The signer refused: ${reason}.`)
+}
+
+/**
+ * The phones this signer holds, or null when its firmware has no phone
+ * unlock. Over the cable, `authenticate` opens the bridge session first (which
+ * on a browser that never paired asks for a press); without it an
+ * unauthenticated session throws PhoneUnlockAuthRequired, so a panel can show
+ * a button instead of raising a card on its own.
+ */
+export async function listUnlockPhones({ authenticate = false } = {}): Promise<UnlockPhoneList | null> {
+  if (device.mode === 'relay') {
+    if (!relayTransport) throw new Error('not connected over relay')
+    if (!(await relayCapabilities()).includes(PHONE_UNLOCK_CAPABILITY)) return null
+    return parsePhoneList(await relayTransport.request('list_unlock_phones', {}, MGMT_WRITE_TIMEOUT_MS))
+  }
+  if (device.mode !== 'serial') return null
+  if (authenticate) await ensureBridgeAuth()
+  const answer = await usbPhoneCommand({ op: 'list' })
+  return answer === null ? null : parsePhoneList(answer)
+}
+
+/** Remove a phone's authority to unlock. No press: removing authority is always allowed. */
+export async function revokeUnlockPhone(id: number): Promise<void> {
+  if (device.mode === 'relay') {
+    if (!relayTransport) throw new Error('not connected over relay')
+    await relayTransport.request('revoke_unlock_phone', { id }, MGMT_WRITE_TIMEOUT_MS)
+    return
+  }
+  if (device.mode !== 'serial') throw new Error('Connect to the signer first.')
+  await ensureBridgeAuth()
+  if (await usbPhoneCommand({ op: 'revoke', id }) === null) throw new Error('This firmware has no phone unlock.')
+}
+
+/** Whether a locked signer still posts the announcement tagged to the
+ *  operator (the one stable tag on the wire), from its next locked boot. */
+export async function setAnnounceOperator(on: boolean): Promise<void> {
+  if (device.mode === 'relay') {
+    if (!relayTransport) throw new Error('not connected over relay')
+    await relayTransport.request('set_announce_operator', { on }, MGMT_WRITE_TIMEOUT_MS)
+    return
+  }
+  if (device.mode !== 'serial') throw new Error('Connect to the signer first.')
+  await ensureBridgeAuth()
+  if (await usbPhoneCommand({ op: 'set_announce_operator', on }) === null) throw new Error('This firmware has no phone unlock.')
+}
+
+/**
+ * Ask the signer to add a phone: USB only, and the board shows a card that
+ * must be pressed. Sent exactly once (the signer refuses a reused enrolment
+ * key anyway). Resolves with the board's raw answer, which holds only the
+ * hand-off key and ciphertext sealed to the phone.
+ */
+export async function enrolUnlockPhone(enrolPubkey: string, label: string): Promise<unknown> {
+  if (device.mode !== 'serial') throw new Error('Adding a phone needs the signer on the USB cable.')
+  await ensureBridgeAuth()
+  const answer = await usbPhoneCommand({ op: 'enrol', enrol_pubkey: enrolPubkey, label }, PHONE_ENROL_TIMEOUT_MS)
+  if (answer === null) throw new Error('This firmware has no phone unlock. Update the signer first.')
+  return answer
 }
 
 export async function refreshRelayAudit(): Promise<void> {
