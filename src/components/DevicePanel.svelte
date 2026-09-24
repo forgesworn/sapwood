@@ -5,7 +5,7 @@
   // tabs plus the device half of Settings.
   import {
     device, serialTransport, httpTransport, bridgeRestart, mgmtRevokeClient,
-    relaySetLogQuiet, ensureBridgeAuth,
+    relaySetLogQuiet, ensureBridgeAuth, usbDisplayFlip, setDisplayFlip,
   } from '../lib/device.svelte.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
   import { getFirmwareVersion } from '../lib/device.svelte.js'
@@ -78,6 +78,29 @@
       usbHealth = null
     }
   })
+
+  // Screen orientation. Over the cable it is asked for (null: firmware that
+  // predates it); over the relay it rides the status poll.
+  let usbFlip = $state<boolean | null>(null)
+  $effect(() => {
+    if (device.connected && device.mode === 'serial') {
+      void usbDisplayFlip().then((flip) => { usbFlip = flip })
+    } else {
+      usbFlip = null
+    }
+  })
+  const screenFlip = $derived(
+    device.mode === 'relay'
+      ? (typeof device.relayStatus?.display_flip === 'boolean' ? device.relayStatus.display_flip : null)
+      : device.mode === 'serial' ? usbFlip : null,
+  )
+  let flipPending = $state(false)
+  async function turnScreen(flip: boolean) {
+    flipPending = true
+    try { usbFlip = await setDisplayFlip(flip) }
+    catch (e) { device.error = e instanceof Error ? e.message : 'Could not turn the screen.' }
+    finally { flipPending = false }
+  }
   // Update nudge: firmware updating shouldn't rely on the owner scrolling to
   // the Firmware section unprompted. When the bundle is newer than what the
   // connected signer reports, a banner at the top points them there.
@@ -510,6 +533,30 @@
         </div>
         <p class="hint-sm no-gap">The signer's blue activity light flashes with its log output. Quiet keeps
           warnings only, so the light stays dark in normal use.</p>
+      </div>
+    {/if}
+    {#if screenFlip !== null}
+      <div class="log-quiet">
+        <span class="lq-label">Screen orientation</span>
+        <div class="lq-buttons">
+          <button
+            class="btn btn-sm"
+            class:btn-secondary={screenFlip}
+            class:lq-on={!screenFlip}
+            disabled={flipPending || !screenFlip}
+            onclick={() => turnScreen(false)}
+          >Upright</button>
+          <button
+            class="btn btn-sm"
+            class:btn-secondary={!screenFlip}
+            class:lq-on={screenFlip}
+            disabled={flipPending || screenFlip}
+            onclick={() => turnScreen(true)}
+          >Flipped</button>
+        </div>
+        <p class="hint-sm no-gap">Turn the picture round if the signer sits the other way up, for the
+          other hand or a case. The button labels on its cards move with it. On the signer itself: hold its
+          button on the DEVICE page.</p>
       </div>
     {/if}
   </section>

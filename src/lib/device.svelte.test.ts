@@ -114,6 +114,7 @@ import {
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
   mgmtApplyKithmootPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
+  usbDisplayFlip, setDisplayFlip,
 } from './device.svelte.js'
 import { kithmootPermissionChanges } from './client-permission-upgrade.js'
 import type { KithmootPermissionReview } from './client-permission-upgrade.js'
@@ -3073,5 +3074,48 @@ describe('letting go of an idle cable', () => {
     localStorage.setItem('heartwood.bridgeSecret', secret)
     expect(isThisBrowsersUsbPairing(secret.toUpperCase())).toBe(true)
     expect(isThisBrowsersUsbPairing('cd'.repeat(32))).toBe(false)
+  })
+})
+
+describe('screen orientation over USB', () => {
+  function serialSession() {
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    serialMock.sendAndReceive.mockReset()
+  }
+  function reset() {
+    device.mode = 'none'
+    device.connected = false
+    device.bridgeAuthed = false
+  }
+
+  it('asks with an empty frame, and reads older firmware\'s NACK as unknown', async () => {
+    serialSession()
+    try {
+      serialMock.sendAndReceive.mockResolvedValueOnce({ type: FrameType.DISPLAY_FLIP_RESP, payload: new Uint8Array([1]) })
+      expect(await usbDisplayFlip()).toBe(true)
+      const asked = parseFrame(serialMock.sendAndReceive.mock.calls[0]![0] as Uint8Array)
+      expect(asked.type).toBe(FrameType.DISPLAY_FLIP)
+      expect(asked.payload).toHaveLength(0)
+      serialMock.sendAndReceive.mockResolvedValueOnce({ type: FrameType.NACK, payload: new TextEncoder().encode('unknown frame') })
+      expect(await usbDisplayFlip()).toBeNull()
+    } finally {
+      reset()
+    }
+  })
+
+  it('sets it, and says why when the signer refuses', async () => {
+    serialSession()
+    try {
+      serialMock.sendAndReceive.mockResolvedValueOnce({ type: FrameType.DISPLAY_FLIP_RESP, payload: new Uint8Array([0]) })
+      expect(await setDisplayFlip(false)).toBe(false)
+      const sent = parseFrame(serialMock.sendAndReceive.mock.calls[0]![0] as Uint8Array)
+      expect(Array.from(sent.payload)).toEqual([0])
+      serialMock.sendAndReceive.mockResolvedValueOnce({ type: FrameType.NACK, payload: new TextEncoder().encode('bridge auth required') })
+      await expect(setDisplayFlip(true)).rejects.toThrow(/bridge auth required/)
+    } finally {
+      reset()
+    }
   })
 })

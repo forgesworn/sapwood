@@ -26,6 +26,8 @@ export const FrameType = {
   RESTORE_IDENTITY:      0x58,
   FIRMWARE_INFO:         0x59,
   FIRMWARE_INFO_RESPONSE: 0x5a,
+  DISPLAY_FLIP:          0x66,
+  DISPLAY_FLIP_RESP:     0x67,
   DERIVE_IDENTITY:       0x60,
   DERIVE_IDENTITY_RESPONSE: 0x61,
   SET_IDENTITY_META:     0x5b,
@@ -351,6 +353,16 @@ export function buildSetOperator(baseRevision: number, operatorPubHex: string): 
  */
 export function buildSetBridgeSecret(hexSecret: string): Uint8Array {
   return buildFrame(FrameType.SET_BRIDGE_SECRET, hexToBytes32(hexSecret))
+}
+
+/**
+ * Build a DISPLAY_FLIP frame (0x66). No argument asks; true turns the screen
+ * through 180 degrees, false puts it upright (setting needs an authenticated
+ * bridge session). The signer answers DISPLAY_FLIP_RESP [1|0]; firmware that
+ * predates it NACKs.
+ */
+export function buildDisplayFlip(flip?: boolean): Uint8Array {
+  return buildFrame(FrameType.DISPLAY_FLIP, flip === undefined ? new Uint8Array(0) : new Uint8Array([flip ? 1 : 0]))
 }
 
 /** Build a SESSION_AUTH frame. Payload: the 32-byte bridge secret. */
