@@ -1811,12 +1811,19 @@ export async function setAnnounceOperator(on: boolean): Promise<void> {
  * key anyway). Resolves with the board's raw answer, which holds only the
  * hand-off key and ciphertext sealed to the phone.
  */
-export async function enrolUnlockPhone(enrolPubkey: string, label: string): Promise<unknown> {
+export async function enrolUnlockPhone(enrolPubkey: string, label: string, prompt?: string): Promise<unknown> {
   if (device.mode !== 'serial') throw new Error('Adding a phone needs the signer on the USB cable.')
+  // Authenticate first: a first-time pairing shows (and then clears) its own
+  // button prompt, which must not replace the one for the enrol card.
   await ensureBridgeAuth()
-  const answer = await usbPhoneCommand({ op: 'enrol', enrol_pubkey: enrolPubkey, label }, PHONE_ENROL_TIMEOUT_MS)
-  if (answer === null) throw new Error('This firmware has no phone unlock. Update the signer first.')
-  return answer
+  if (prompt) device.awaitingButton = prompt
+  try {
+    const answer = await usbPhoneCommand({ op: 'enrol', enrol_pubkey: enrolPubkey, label }, PHONE_ENROL_TIMEOUT_MS)
+    if (answer === null) throw new Error('This firmware has no phone unlock. Update the signer first.')
+    return answer
+  } finally {
+    if (prompt) device.awaitingButton = null
+  }
 }
 
 export async function refreshRelayAudit(): Promise<void> {

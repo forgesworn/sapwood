@@ -193,13 +193,20 @@ export type UnlockMode = 'none' | 'phone' | 'sapwood'
 /**
  * The signer does not report whether it is encrypted, so the mode is
  * inferred. An enrolled phone proves encryption is on (enrolment needs the
- * data key, and turning encryption off drops every phone). A vault key held by
- * this browser means encryption is on. Anything else might be a boot PIN, or
- * nothing: Sapwood cannot tell, returns null, and says so rather than guess.
+ * data key, and turning encryption off drops every phone). `known` is what
+ * this page saw the signer accept this session (a seal, a PIN set, or
+ * encryption turned off), and outranks a vault key this browser merely
+ * holds. Anything else might be a boot PIN, or nothing: Sapwood cannot tell,
+ * returns null, and says so rather than guess.
  */
-export function inferUnlockMode(phones: number | null, vaultKeyHeld: boolean): UnlockMode | null {
+export function inferUnlockMode(
+  phones: number | null,
+  vaultKeyHeld: boolean,
+  known: boolean | null = null,
+): UnlockMode | null {
+  if (known === false) return 'none'
   if (phones !== null && phones > 0) return 'phone'
-  if (vaultKeyHeld) return 'sapwood'
+  if (known === true || vaultKeyHeld) return 'sapwood'
   return null
 }
 
@@ -239,4 +246,18 @@ export async function enrolPhone(
   const accepted = await publishHandOff(deps.pool, live, buildHandOffEvent(answer, code.rendezvous))
   if (!accepted.length) throw new HandOffUndelivered(answer.id)
   return { id: answer.id, checkCode: checkCode(answer.ephemeralPubkey), accepted }
+}
+
+// Enrolment keys this page has already sent to a signer. Cambium keeps a code
+// on screen for minutes, so the same QR can be scanned again after "Finished";
+// the signer refuses a reused key too, but only the last 16 and only until it
+// reboots.
+const spentEnrolKeys = new Set<string>()
+
+export function markCodeSpent(code: EnrolmentCode): void {
+  spentEnrolKeys.add(code.enrolPubkey)
+}
+
+export function isCodeSpent(code: EnrolmentCode): boolean {
+  return spentEnrolKeys.has(code.enrolPubkey)
 }

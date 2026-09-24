@@ -3,13 +3,14 @@
   // signer after a restart with a tap. Add one by scanning the code Cambium
   // shows, list them, revoke one. No secret passes through Sapwood: the board
   // seals each phone's unlock secret to a key only that phone holds.
+  import { untrack } from 'svelte'
   import { SimplePool } from 'nostr-tools/pool'
   import {
     device, listUnlockPhones, revokeUnlockPhone, setAnnounceOperator, enrolUnlockPhone,
     PhoneUnlockAuthRequired,
   } from '../lib/device.svelte.js'
   import {
-    parseEnrolmentCode, enrolPhone, HandOffUndelivered,
+    parseEnrolmentCode, enrolPhone, HandOffUndelivered, markCodeSpent, isCodeSpent,
     type EnrolmentCode, type EnrolResult, type UnlockPhoneList,
   } from '../lib/phone-unlock.js'
   import ConfirmButton from './ConfirmButton.svelte'
@@ -18,12 +19,18 @@
   interface Props {
     /** Enrolled phones, or null while unknown (for the mode chooser). */
     count?: number | null
+    /** Bumped by the page when something else changed the phones, such as
+     *  turning encryption off (which drops every phone). */
+    refresh?: number
   }
-  let { count = $bindable(null) }: Props = $props()
+  let { count = $bindable(null), refresh = 0 }: Props = $props()
 
   const overUsb = $derived(device.mode === 'serial')
+  // A locked signer answers almost nothing, and its empty refusal would read
+  // as firmware without phone unlock.
+  const locked = $derived(device.masters.some((m) => m.locked === true))
 
-  type Support = 'checking' | 'unsupported' | 'needs-auth' | 'ready' | 'error'
+  type Support = 'checking' | 'unsupported' | 'locked' | 'needs-auth' | 'ready' | 'error'
   let support = $state<Support>('checking')
   let list = $state<UnlockPhoneList | null>(null)
   let loadError = $state<string | null>(null)
@@ -55,18 +62,34 @@
     }
   }
 
+  // Reload on a new connection, a change of lock state, or a refresh from the
+  // page; nothing load() reads (the relay status poll, the bridge session)
+  // may re-run it, or the list is fetched again every few seconds.
   $effect(() => {
-    if (device.connected && (device.mode === 'serial' || device.mode === 'relay')) {
-      void load()
-    } else {
-      support = 'unsupported'
-      list = null
-    }
+    const live = device.connected && (device.mode === 'serial' || device.mode === 'relay')
+    const isLocked = locked
+    void device.connectionGeneration
+    void refresh
+    untrack(() => {
+      if (!live) {
+        support = 'unsupported'
+        list = null
+      } else if (isLocked) {
+        support = 'locked'
+        list = null
+      } else {
+        void load()
+      }
+    })
   })
 
   // --- Revoke ---
   let revoking = $state<number | null>(null)
   let revokeStatus = $state<string | null>(null)
+
+  const lastPhoneWarning = $derived(list && list.phones.length === 1 && !list.announceOperator
+    ? ' It is the last phone, and Sapwood\'s own unlock message is off, so after a restart only the USB cable could unlock it.'
+    : '')
 
   async function revoke(id: number, label: string) {
     revoking = id
@@ -115,6 +138,9 @@
 
   const pastedCode = $derived(pasted.trim() ? parseEnrolmentCode(pasted) : null)
 
+  const pastedSpent = $derived(pastedCode ? isCodeSpent(pastedCode) : false)
+  let scanSpent = $state(false)
+
   function startAdd(mode: 'scan' | 'paste') {
     step = mode
     pasted = ''
@@ -122,11 +148,16 @@
     result = null
     addError = null
     codeSpent = false
+    scanSpent = false
   }
 
   function accept(text: string): boolean {
     const parsed = parseEnrolmentCode(text)
     if (!parsed) return false
+    if (isCodeSpent(parsed)) {
+      scanSpent = true
+      return false
+    }
     code = parsed
     step = 'confirm'
     return true
@@ -146,7 +177,7 @@
       return 'The signer has no WiFi relays set, so it could never reach a phone. Set its network up first (Network, above).'
     }
     if (/unlock the board first/i.test(reason)) {
-      return 'Unlock the signer first.'
+      return 'The signer is locked or holds no identity yet. Unlock it, or add an identity, first.'
     }
     return reason
   }
@@ -162,12 +193,9 @@
         pool,
         enrol: async (enrolPubkey, label) => {
           codeSpent = true
-          device.awaitingButton = `Confirm on your signer: it shows “Add unlock phone?” and ${label}. Hold its button within 30 seconds.`
-          try {
-            return await enrolUnlockPhone(enrolPubkey, label)
-          } finally {
-            device.awaitingButton = null
-          }
+          if (code) markCodeSpent(code)
+          return enrolUnlockPhone(enrolPubkey, label,
+            `Confirm on your signer: it shows “Add unlock phone?” and ${label}. Hold its button within 30 seconds.`)
         },
         onBoard: () => { working = 'Waiting for the signer\'s button…' },
       })
@@ -195,6 +223,8 @@
     <p class="hint-sm">Asking the signer…</p>
   {:else if support === 'unsupported'}
     <p class="hint-sm">This signer's firmware has no phone unlock. It arrived in 0.18.0-beta.17.</p>
+  {:else if support === 'locked'}
+    <p class="hint-sm">Unlock the signer to see its phones.</p>
   {:else if support === 'needs-auth'}
     <p class="hint-sm">The signer lists its phones once this browser authenticates over USB.</p>
     <button class="btn btn-secondary btn-sm" disabled={loading} onclick={() => load(true)}>
@@ -214,7 +244,7 @@
             <span class="mono phone-id">record {phone.id}</span>
             <ConfirmButton
               label="Revoke"
-              question={`Stop ${phone.label} unlocking this signer?`}
+              question={`Stop ${phone.label} unlocking this signer?${lastPhoneWarning}`}
               confirmLabel="Yes, revoke"
               busyLabel="Revoking…"
               busy={revoking === phone.id}
@@ -241,63 +271,6 @@
       {:else}
         <p class="hint-sm">Adding a phone needs the signer on the USB cable and a press on its button.</p>
       {/if}
-    {:else}
-      <div class="add card">
-        {#if step === 'scan' || step === 'paste'}
-          <p class="hint-sm">On the phone, open Cambium and tap “Set up phone unlock” under this
-            signer. It shows a code; nothing in it is secret. Its “Copy code” button gives the text
-            to paste here.</p>
-          {#if step === 'scan'}
-            <QrScanner onresult={accept} oncancel={() => { step = 'paste' }} />
-          {:else}
-            <textarea class="field-input code-input" rows="3" spellcheck="false" autocomplete="off"
-              placeholder="heartwood-unlock:enrol?v=1&amp;…" bind:value={pasted}></textarea>
-            {#if pasted.trim() && !pastedCode}
-              <p class="warn-text">That is not a phone-unlock code from Cambium.</p>
-            {/if}
-            <div class="inline-form">
-              <button class="btn btn-secondary btn-sm" disabled={!pastedCode}
-                onclick={() => accept(pasted)}>Use this code</button>
-              <button class="btn btn-ghost btn-sm" onclick={() => startAdd('scan')}>Scan instead</button>
-            </div>
-          {/if}
-          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
-        {:else if step === 'confirm' && code}
-          <table class="kv-table"><tbody>
-            <tr><td class="label">Phone</td><td>{code.label}</td></tr>
-            <tr><td class="label">Waiting on</td><td>
-              {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
-            </td></tr>
-          </tbody></table>
-          <p class="hint-sm">The signer will show “Add unlock phone?” with this name. Hold its button
-            to agree. The signer then seals the phone's unlock secret to the phone, and Sapwood passes
-            it on without being able to read it.</p>
-          <div class="inline-form">
-            <button class="btn btn-primary btn-sm" onclick={add}>Add {code.label}</button>
-            <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
-          </div>
-        {:else if step === 'working'}
-          <p class="hint-sm">{working}</p>
-        {:else if step === 'done' && result}
-          <p class="success-text">The signer added {code?.label} as record {result.id}.</p>
-          <p class="hint-sm">The phone should now show these six characters:</p>
-          <p class="check-code mono">{result.checkCode}</p>
-          <p class="hint-sm">If they match, confirm on the phone with its screen lock. If they do
-            not, someone else answered the phone first: revoke record {result.id} now and start
-            again.</p>
-          <button class="btn btn-secondary btn-sm" onclick={() => { step = 'idle' }}>Finished</button>
-        {:else if step === 'failed'}
-          <p class="warn-text">{addError}</p>
-          <div class="inline-form">
-            {#if codeSpent}
-              <button class="btn btn-secondary btn-sm" onclick={() => startAdd('scan')}>Scan a new code</button>
-            {:else}
-              <button class="btn btn-secondary btn-sm" onclick={add}>Try again</button>
-            {/if}
-            <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
-          </div>
-        {/if}
-      </div>
     {/if}
 
     <details class="disclosure announce">
@@ -305,15 +278,81 @@
       <p class="hint-sm">When it is locked, the signer also posts a message tagged with your operator
         key, so Sapwood can offer to unlock it over WiFi. That tag is the same every time, so a relay
         can link the signer's restarts. Phone messages carry no such tag. If your phones are enough,
-        turn it off; Sapwood can still unlock over USB.</p>
+        turn it off; Sapwood can still unlock over USB. It stays on while no phone is set up, or a
+        locked signer could only be unlocked over the cable.</p>
       <div class="lq-buttons">
         <button class="btn btn-sm" class:btn-secondary={!list.announceOperator} class:lq-on={list.announceOperator}
           disabled={announcePending || list.announceOperator} onclick={() => changeAnnounce(true)}>On</button>
         <button class="btn btn-sm" class:btn-secondary={list.announceOperator} class:lq-on={!list.announceOperator}
-          disabled={announcePending || !list.announceOperator} onclick={() => changeAnnounce(false)}>Off</button>
+          disabled={announcePending || !list.announceOperator || list.phones.length === 0}
+          onclick={() => changeAnnounce(false)}>Off</button>
       </div>
       {#if announceStatus}<p class="hint-sm status">{announceStatus}</p>{/if}
     </details>
+  {/if}
+
+  {#if step !== 'idle'}
+    <div class="add card">
+      {#if step === 'scan' || step === 'paste'}
+        <p class="hint-sm">On the phone, open Cambium and tap “Set up phone unlock” under this
+          signer. It shows a code; nothing in it is secret. Its “Copy code” button gives the text
+          to paste here.</p>
+        {#if step === 'scan'}
+          <QrScanner onresult={accept} oncancel={() => { step = 'paste' }} />
+          {#if scanSpent}
+            <p class="warn-text">That code was already used here. Start again on the phone for a new one.</p>
+          {/if}
+        {:else}
+          <textarea class="field-input code-input" rows="3" spellcheck="false" autocomplete="off"
+            placeholder="heartwood-unlock:enrol?v=1&amp;…" bind:value={pasted}></textarea>
+          {#if pasted.trim() && !pastedCode}
+            <p class="warn-text">That is not a phone-unlock code from Cambium.</p>
+          {:else if pastedSpent}
+            <p class="warn-text">This code was already used here. Start again on the phone for a new one.</p>
+          {/if}
+          <div class="inline-form">
+            <button class="btn btn-secondary btn-sm" disabled={!pastedCode || pastedSpent}
+              onclick={() => accept(pasted)}>Use this code</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => startAdd('scan')}>Scan instead</button>
+          </div>
+        {/if}
+        <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
+      {:else if step === 'confirm' && code}
+        <table class="kv-table"><tbody>
+          <tr><td class="label">Phone</td><td>{code.label}</td></tr>
+          <tr><td class="label">Waiting on</td><td>
+            {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
+          </td></tr>
+        </tbody></table>
+        <p class="hint-sm">The signer will show “Add unlock phone?” with this name. Hold its button
+          to agree. The signer then seals the phone's unlock secret to the phone, and Sapwood passes
+          it on without being able to read it.</p>
+        <div class="inline-form">
+          <button class="btn btn-primary btn-sm" onclick={add}>Add {code.label}</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
+        </div>
+      {:else if step === 'working'}
+        <p class="hint-sm">{working}</p>
+      {:else if step === 'done' && result}
+        <p class="success-text">The signer added {code?.label} as record {result.id}.</p>
+        <p class="hint-sm">The phone should now show these six characters:</p>
+        <p class="check-code mono">{result.checkCode}</p>
+        <p class="hint-sm">If they match, confirm on the phone with its screen lock. If they do
+          not, someone else answered the phone first: revoke record {result.id} now and start
+          again.</p>
+        <button class="btn btn-secondary btn-sm" onclick={() => { step = 'idle' }}>Finished</button>
+      {:else if step === 'failed'}
+        <p class="warn-text">{addError}</p>
+        <div class="inline-form">
+          {#if codeSpent}
+            <button class="btn btn-secondary btn-sm" onclick={() => startAdd('scan')}>Scan a new code</button>
+          {:else}
+            <button class="btn btn-secondary btn-sm" onclick={add}>Try again</button>
+          {/if}
+          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
+        </div>
+      {/if}
+    </div>
   {/if}
 </div>
 

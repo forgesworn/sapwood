@@ -149,4 +149,10 @@ describe('inferUnlockMode', () => {
     expect(inferUnlockMode(0, false)).toBeNull()
     expect(inferUnlockMode(null, false)).toBeNull()
   })
+
+  it('trusts what this session saw the signer accept over a held key', () => {
+    expect(inferUnlockMode(2, true, false)).toBe('none')
+    expect(inferUnlockMode(0, false, true)).toBe('sapwood')
+    expect(inferUnlockMode(1, false, true)).toBe('phone')
+  })
 })

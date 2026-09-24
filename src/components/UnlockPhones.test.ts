@@ -43,6 +43,8 @@ vi.mock('../lib/device.svelte.js', async () => {
     mode: 'serial',
     bridgeAuthed: true,
     awaitingButton: null,
+    masters: [],
+    connectionGeneration: 0,
   }
   const device = new Proxy(state, {
     get(target, property, receiver) {
@@ -75,7 +77,7 @@ const LIST = { phones: [{ id: 3106288131, label: 'Pixel' }], max: 16, announceOp
 beforeEach(() => {
   vi.clearAllMocks()
   api.awaiting.length = 0
-  Object.assign(device, { connected: true, mode: 'serial', bridgeAuthed: true, awaitingButton: null })
+  Object.assign(device, { connected: true, mode: 'serial', bridgeAuthed: true, awaitingButton: null, masters: [] })
   api.listUnlockPhones.mockResolvedValue(LIST)
 })
 
@@ -118,14 +120,19 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
-    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8')
+    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8', expect.stringMatching(/Add unlock phone/))
     expect(relays.ensureRelay).toHaveBeenCalledWith('wss://relay.example', expect.anything())
     const [urls, event] = relays.publish.mock.calls[0] as unknown as [string[], { kind: number; tags: string[][] }]
     expect(urls).toEqual(['wss://relay.example'])
     expect(event.kind).toBe(24137)
     expect(event.tags).toEqual([['h', R]])
-    expect(api.awaiting.find((m) => m !== null)).toMatch(/Add unlock phone/)
-    expect(api.awaiting.at(-1)).toBeNull()
+
+    // Finished, then the same code again: refused here, not sent twice.
+    await fireEvent.click(screen.getByRole('button', { name: 'Finished' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE } })
+    expect(screen.getByText(/already used here/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Use this code' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('refuses text that is not an enrolment code', async () => {
@@ -140,12 +147,33 @@ describe('UnlockPhones', () => {
     api.enrolUnlockPhone.mockRejectedValue(new Error('The signer refused: declined on the board.'))
     render(UnlockPhones)
     await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
-    await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE } })
+    await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE.replace(P, 'c3'.repeat(32)) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
     expect(await screen.findByText(/Each code works once/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Scan a new code' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('says to unlock a locked signer rather than blaming its firmware', async () => {
+    Object.assign(device, { masters: [{ npub: 'x', locked: true }] })
+    render(UnlockPhones)
+    expect(await screen.findByText('Unlock the signer to see its phones.')).toBeTruthy()
+    expect(api.listUnlockPhones).not.toHaveBeenCalled()
+  })
+
+  it('keeps the operator message on while no phone is set up', async () => {
+    api.listUnlockPhones.mockResolvedValue({ phones: [], max: 16, announceOperator: true })
+    render(UnlockPhones)
+    expect(await screen.findByText('No phones yet.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Off' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('warns before revoking the last phone when the operator message is off', async () => {
+    api.listUnlockPhones.mockResolvedValue({ ...LIST, announceOperator: false })
+    render(UnlockPhones)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
+    expect(screen.getByText(/only the USB cable could unlock it/)).toBeTruthy()
   })
 
   it('keeps adding to the cable over WiFi', async () => {
