@@ -96,6 +96,16 @@ export interface RelayStatus {
   nvs?: { used_entries: number; free_entries: number; total_entries: number } | null
   /** Persona registry ceiling for this board (absent on older firmware). */
   max_personas?: number
+  /** How the signer's seeds are protected at rest (plan G2; absent on
+   *  firmware before #192, released beta.17 does not send it). `"encrypted"`
+   *  means sealed, but which secret (PIN or vault) is unknown. Device
+   *  operator only: never sent to a per-identity delegate. */
+  at_rest?: string
+  /** How many phones can unlock this board (plan G2; absent alongside
+   *  `at_rest` on older firmware). `null` means a present phone record is
+   *  damaged, not that there are none — always `0` once `at_rest` is
+   *  `"none"`. Device operator only. */
+  unlock_phone_count?: number | null
 }
 
 /** Network state returned by relay management. Password material is never
@@ -850,6 +860,10 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(raw.truncated === true ? { truncated: true } : {}),
     ...(isNvsStats(raw.nvs) ? { nvs: raw.nvs } : {}),
     ...(typeof raw.max_personas === 'number' ? { max_personas: raw.max_personas } : {}),
+    ...(typeof raw.at_rest === 'string' ? { at_rest: raw.at_rest } : {}),
+    ...('unlock_phone_count' in raw
+      ? { unlock_phone_count: typeof raw.unlock_phone_count === 'number' ? raw.unlock_phone_count : null }
+      : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
@@ -2789,6 +2803,16 @@ export interface FirmwareInfo {
   nvs_total_entries?: number
   /** Persona registry ceiling for this board (absent on older firmware). */
   max_personas?: number
+  /** How the signer's seeds are protected at rest (plan G2; absent on
+   *  firmware before #192, released beta.17 does not send it). `"encrypted"`
+   *  means sealed, but which secret (PIN or vault) is unknown. Answered even
+   *  while locked, before any PIN or vault key is entered. */
+  at_rest?: string
+  /** How many phones can unlock this board (plan G2; absent alongside
+   *  `at_rest` on older firmware). `null` means a present phone record is
+   *  damaged, not that there are none — always `0` once `at_rest` is
+   *  `"none"`. */
+  unlock_phone_count?: number | null
 }
 
 /**
@@ -2820,6 +2844,10 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
       ...(typeof info.nvs_free_entries === 'number' ? { nvs_free_entries: info.nvs_free_entries } : {}),
       ...(typeof info.nvs_total_entries === 'number' ? { nvs_total_entries: info.nvs_total_entries } : {}),
       ...(typeof info.max_personas === 'number' ? { max_personas: info.max_personas } : {}),
+      ...(typeof info.at_rest === 'string' ? { at_rest: info.at_rest } : {}),
+      ...('unlock_phone_count' in info
+        ? { unlock_phone_count: typeof info.unlock_phone_count === 'number' ? info.unlock_phone_count : null }
+        : {}),
     }
   } catch {
     return null // older firmware, or no response — treat as unknown

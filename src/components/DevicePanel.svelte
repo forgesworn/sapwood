@@ -23,7 +23,7 @@
   import {
     PAIRING_BACKUP_EVENT, pairingBackupStatus, type PairingBackupStatus,
   } from '../lib/pairing-backup.js'
-  import { inferUnlockMode, type UnlockMode } from '../lib/phone-unlock.js'
+  import { resolveUnlockMode, type UnlockMode } from '../lib/phone-unlock.js'
   import Connectivity from './Connectivity.svelte'
   import UnlockPhones from './UnlockPhones.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
@@ -74,6 +74,7 @@
     max_sign_bytes?: number; max_sign_bytes_object?: number
     free_heap?: number; largest_block?: number
     nvs_used_entries?: number; nvs_free_entries?: number; nvs_total_entries?: number
+    at_rest?: string; unlock_phone_count?: number | null
   } | null>(null)
   $effect(() => {
     if (device.connected && device.mode === 'serial') {
@@ -372,16 +373,34 @@
   }
 
   // --- After a power cut: the three modes ---
-  // The signer does not report whether it is encrypted, so the current mode
-  // is inferred (inferUnlockMode) and left unmarked when it cannot be told.
-  // "No encryption" is never a default: turning encryption off, by either
-  // route, waits for the owner to confirm the sentence that says what it costs.
+  // Firmware ≥ #192 reports `at_rest`/`unlock_phone_count` directly (over USB
+  // on FIRMWARE_INFO, over the relay on get_status), so the mode is read
+  // rather than inferred where a signer sends it. Older firmware (released
+  // beta.17) sends neither: resolveUnlockMode falls back to its side-effect
+  // guess (inferUnlockMode) and the mode is left unmarked when even that
+  // cannot tell. "No encryption" is never a default: turning encryption off,
+  // by either route, waits for the owner to confirm the sentence that says
+  // what it costs.
+  const atRestReport = $derived(
+    device.mode === 'relay' ? device.relayStatus?.at_rest
+      : device.mode === 'serial' ? usbHealth?.at_rest
+        : undefined,
+  )
+  // The firmware's own phone count is available even while locked (before
+  // any PIN/vault secret is entered), unlike the enumerated list below, which
+  // needs an authenticated session. Prefer it when the signer sends it.
+  const unlockPhoneCountReport = $derived(
+    device.mode === 'relay' ? device.relayStatus?.unlock_phone_count
+      : device.mode === 'serial' ? usbHealth?.unlock_phone_count
+        : undefined,
+  )
   let phoneCount = $state<number | null>(null)
+  const effectivePhoneCount = $derived(unlockPhoneCountReport !== undefined ? unlockPhoneCountReport : phoneCount)
   /** Bumped when this page changed encryption: turning it off drops every phone. */
   let phonesRefresh = $state(0)
   /** What this session saw the signer accept; null until then. */
   let encryptionKnown = $state<boolean | null>(null)
-  const currentMode = $derived(inferUnlockMode(phoneCount, !!vaultStored, encryptionKnown))
+  const currentMode = $derived(resolveUnlockMode(atRestReport, effectivePhoneCount, !!vaultStored, encryptionKnown))
   let chosenMode = $state<UnlockMode | null>(null)
   let modesSection = $state<HTMLElement | null>(null)
   let noEncryptionAck = $state(false)
@@ -615,7 +634,7 @@
                     <p class="hint-sm">Add a phone below{overUsb ? '' : ', with the signer on the USB cable'}. Encryption is already on.</p>
                   {/if}
                 {:else if mode.id === 'sapwood'}
-                  {#if (phoneCount ?? 0) > 0}
+                  {#if (effectivePhoneCount ?? 0) > 0}
                     <p class="hint-sm">Revoke each phone below. Encryption stays on.</p>
                   {:else}
                     <p class="hint-sm">Turn on Encrypt at rest (Security{overUsb ? ', below' : ', over the USB cable'}), or set a boot PIN.</p>
@@ -626,7 +645,7 @@
                   {:else}
                     <label class="hint-sm ack">
                       <input type="checkbox" bind:checked={noEncryptionAck} disabled={vaultPending} />
-                      {NO_ENCRYPTION_RISK}{#if (phoneCount ?? 0) > 0}&#32;Every phone stops being able to unlock it.{/if}
+                      {NO_ENCRYPTION_RISK}{#if (effectivePhoneCount ?? 0) > 0}&#32;Every phone stops being able to unlock it.{/if}
                     </label>
                     {#if vaultStored}
                       <button class="btn btn-danger btn-sm" disabled={!noEncryptionAck || vaultPending}

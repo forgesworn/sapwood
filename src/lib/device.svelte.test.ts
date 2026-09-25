@@ -1534,6 +1534,30 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
+  it('reports a damaged phone blob as null, not zero, over the relay', async () => {
+    const { pubHex } = freshMaster()
+    const activeRelays = ['wss://active.example']
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return {
+          master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: activeRelays[0],
+          at_rest: 'pin', unlock_phone_count: null,
+        }
+      }
+      if (method === 'get_network_config') return remoteNetworkResponse(activeRelays)
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, activeRelays)
+    try {
+      expect(device.relayStatus?.at_rest).toBe('pin')
+      expect(device.relayStatus?.unlock_phone_count).toBeNull()
+    } finally {
+      await disconnect()
+    }
+  })
+
   it('ignores a configured-route completion from an obsolete connection generation', async () => {
     const { pubHex } = freshMaster()
     const relayA = ['wss://country-a.example']
