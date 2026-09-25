@@ -234,10 +234,17 @@
     const made = createInvite(relays)
     const pool = new SimplePool()
     invitePool = pool
-    await openRelays(pool, relays)
+    const live = await openRelays(pool, relays)
     if (step !== 'invite' || invitePool !== pool) {
       try { pool.destroy() } catch { /* already closed */ }
       return // cancelled, or superseded by a newer invite, while opening
+    }
+    if (!live.length) {
+      zeroInviteSecret(made)
+      stopInvite()
+      addError = 'None of the relays answered, so the phone could not reply. Check this computer\'s connection and try again.'
+      step = 'invite-aborted'
+      return
     }
     invite = made
     const since = Math.floor(Date.now() / 1000) - 60
@@ -462,7 +469,7 @@
     <div class="add card">
       {#if step === 'invite'}
         {#if !invite}
-          <p class="hint-sm">Opening the phone's relays…</p>
+          <p class="hint-sm">Opening relays…</p>
         {:else}
           <h4 class="invite-title">Scan this with Cambium</h4>
           <p class="hint-sm">On the phone, open Cambium, go to this signer's screen, and tap
