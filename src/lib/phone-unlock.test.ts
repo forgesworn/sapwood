@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { verifyEvent } from 'nostr-tools/pure'
 import {
-  HANDOFF_KIND, HandOffUndelivered, buildHandOffEvent, checkCode, decoyHandOffDelayMs, enrolPhone,
+  HANDOFF_KIND, HandOffUndelivered, buildHandOffEvent, checkCode, enrolPhone,
   findOrphanedPhoneId, fitLabel, friendlyEnrolRefusal, inferUnlockMode, parseEnrolAnswer,
-  parseEnrolmentCode, parsePhoneList, requestCode, requestWords, scheduleDecoyHandOff,
+  parseEnrolmentCode, parsePhoneList, requestCode, requestWords,
 } from './phone-unlock.js'
 
 const P = 'a1'.repeat(32)
@@ -230,44 +230,5 @@ describe('findOrphanedPhoneId', () => {
 
   it('returns null when more than one record is new (ambiguous)', () => {
     expect(findOrphanedPhoneId([A], [A, B, C])).toBeNull()
-  })
-})
-
-describe('scheduleDecoyHandOff', () => {
-  const answer = { id: 9, ephemeralPubkey: E, sealed: 'ciphertext' }
-  const event = buildHandOffEvent(answer, R, 1_700_000_000_000)
-
-  it('waits a few seconds of jitter by default', () => {
-    expect(decoyHandOffDelayMs(() => 0)).toBe(2_000)
-    expect(decoyHandOffDelayMs(() => 1)).toBe(5_000)
-  })
-
-  it('publishes the same event again from the supplied pool after the delay, then reports done', async () => {
-    vi.useFakeTimers()
-    try {
-      const pool = fakePool(['wss://relay.example'], ['wss://relay.example'])
-      const onDone = vi.fn()
-      scheduleDecoyHandOff(['wss://relay.example'], event, { pool, onDone, delayMs: 1_000 })
-      expect(pool.order).toEqual([])
-      await vi.advanceTimersByTimeAsync(1_000)
-      expect(pool.order).toEqual(['open wss://relay.example'])
-      expect(pool.published).toEqual([event])
-      expect(onDone).toHaveBeenCalledOnce()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('never throws when every relay is unreachable', async () => {
-    vi.useFakeTimers()
-    try {
-      const pool = fakePool([], [])
-      const onDone = vi.fn()
-      scheduleDecoyHandOff(['wss://relay.example'], event, { pool, onDone, delayMs: 0 })
-      await vi.advanceTimersByTimeAsync(0)
-      expect(onDone).toHaveBeenCalledOnce()
-    } finally {
-      vi.useRealTimers()
-    }
   })
 })

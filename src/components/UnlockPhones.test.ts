@@ -19,7 +19,6 @@ const api = vi.hoisted(() => {
     setAnnounceOperator: vi.fn(async () => {}),
     enrolUnlockPhone: vi.fn(),
     supportsPhoneEnrolRelay: vi.fn(() => false),
-    scheduleDecoyHandOff: vi.fn(() => 0 as unknown as ReturnType<typeof setTimeout>),
     awaiting: [] as (string | null)[],
   }
 })
@@ -37,15 +36,6 @@ vi.mock('nostr-tools/pool', () => ({
     destroy = relays.destroy
   },
 }))
-
-// The decoy hand-off publish runs on a real few-second delay in production;
-// stub it in tests so component tests neither wait for it nor mix its calls
-// into the primary publish's assertions. Its own behaviour is covered in
-// phone-unlock.test.ts.
-vi.mock('../lib/phone-unlock.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/phone-unlock.js')>()
-  return { ...actual, scheduleDecoyHandOff: api.scheduleDecoyHandOff }
-})
 
 vi.mock('../lib/device.svelte.js', async () => {
   const { createSubscriber } = await import('svelte/reactivity')
@@ -138,7 +128,7 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
-    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8', expect.stringMatching(/ADD PHONE for Pixel 8/))
+    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
     expect(relays.ensureRelay).toHaveBeenCalledWith('wss://relay.example', expect.anything())
     const [urls, event] = relays.publish.mock.calls[0] as unknown as [string[], { kind: number; tags: string[][] }]
     expect(urls).toEqual(['wss://relay.example'])
@@ -216,13 +206,13 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
-    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/ADD PHONE for Pixel 8/))
-    // The decoy hand-off is scheduled with the same event the primary publish used.
-    expect(api.scheduleDecoyHandOff).toHaveBeenCalledOnce()
-    const [decoyRelays, decoyEvent] = api.scheduleDecoyHandOff.mock.calls[0] as unknown as [string[], { kind: number; tags: string[][] }]
-    expect(decoyRelays).toEqual(['wss://relay.example'])
-    expect(decoyEvent.kind).toBe(24137)
-    expect(decoyEvent.tags).toEqual([['h', R]])
+    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
+    // Sent exactly once: the hand-off is only ever published the once.
+    const [urls, event] = relays.publish.mock.calls[0] as unknown as [string[], { kind: number; tags: string[][] }]
+    expect(urls).toEqual(['wss://relay.example'])
+    expect(event.kind).toBe(24137)
+    expect(event.tags).toEqual([['h', R]])
+    expect(relays.publish).toHaveBeenCalledOnce()
   })
 
   it('offers to revoke an orphaned record when a relay enrolment times out with no reply', async () => {

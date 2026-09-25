@@ -351,11 +351,6 @@ export async function enrolPhone(
     pool: RelayPool
     enrol: (enrolPubkey: string, label: string) => Promise<unknown>
     onBoard?: () => void
-    /** Called with the hand-off event once it is built, before the primary
-     *  publish. Lets a caller also publish it from an independent relay
-     *  connection after a delay (see `scheduleDecoyHandOff`), so a relay that
-     *  sees both events cannot trivially use their timing to link them. */
-    onHandOff?: (event: ReturnType<typeof buildHandOffEvent>) => void
   },
 ): Promise<EnrolResult> {
   const live = await openRelays(deps.pool, code.relays)
@@ -364,41 +359,15 @@ export async function enrolPhone(
   }
   deps.onBoard?.()
   const answer = parseEnrolAnswer(await deps.enrol(code.enrolPubkey, code.label))
-  const event = buildHandOffEvent(answer, code.rendezvous)
-  deps.onHandOff?.(event)
-  const accepted = await publishHandOff(deps.pool, live, event)
+  // Residual (documented in heartwood-esp32's SECURITY-MODEL.md): the
+  // enrolment request and this hand-off both leave from this browser at
+  // about the same moment, so a relay that sees both can link them to this
+  // enrolment. Publishing the hand-off again later, or from elsewhere, would
+  // not remove that link, since the first publish already happened alongside
+  // the request; it would only add a second, equally correlatable event.
+  const accepted = await publishHandOff(deps.pool, live, buildHandOffEvent(answer, code.rendezvous))
   if (!accepted.length) throw new HandOffUndelivered(answer.id)
   return { id: answer.id, checkCode: checkCode(answer.ephemeralPubkey), accepted }
-}
-
-type DecoyRelayPool = RelayPool & { destroy?: () => void }
-
-/** A few seconds of jitter before the decoy publish, so a relay watching for
- *  both events cannot use their timing alone to link them. */
-export function decoyHandOffDelayMs(randomMs: () => number = Math.random): number {
-  return 2_000 + Math.floor(randomMs() * 3_000)
-}
-
-/**
- * Publish the same hand-off again from an independent relay connection
- * (`deps.pool` must be a fresh pool: reusing the primary one would defeat the
- * point), after a short delay. Best effort: the phone already has its secret
- * from the primary publish in `enrolPhone`, so any failure here is swallowed
- * rather than surfaced to the owner; this step only weakens the correlation
- * between the enrolment's timing and the phone's.
- */
-export function scheduleDecoyHandOff(
-  relays: string[],
-  event: ReturnType<typeof buildHandOffEvent>,
-  deps: { pool: DecoyRelayPool, onDone?: () => void, delayMs?: number },
-): ReturnType<typeof setTimeout> {
-  const delayMs = deps.delayMs ?? decoyHandOffDelayMs()
-  return setTimeout(() => {
-    void openRelays(deps.pool, relays)
-      .then((live) => (live.length ? publishHandOff(deps.pool, live, event) : undefined))
-      .catch(() => { /* best effort: the primary publish already delivered the secret */ })
-      .finally(() => deps.onDone?.())
-  }, delayMs)
 }
 
 // Enrolment keys this page has already sent to a signer. Cambium keeps a code

@@ -11,7 +11,7 @@
   } from '../lib/device.svelte.js'
   import {
     parseEnrolmentCode, enrolPhone, HandOffUndelivered, markCodeSpent, isCodeSpent,
-    requestWords, fitLabel, friendlyEnrolRefusal, findOrphanedPhoneId, scheduleDecoyHandOff,
+    requestWords, fitLabel, friendlyEnrolRefusal, findOrphanedPhoneId,
     type EnrolmentCode, type EnrolResult, type UnlockPhoneList,
   } from '../lib/phone-unlock.js'
   import ConfirmButton from './ConfirmButton.svelte'
@@ -229,24 +229,12 @@
           codeSpent = true
           if (code) markCodeSpent(code)
           return enrolUnlockPhone(enrolPubkey, label,
-            `Check the signer: “ADD PHONE for ${label}”, then five words, then “same on phone? hold 2s”. Hold its button once they match your phone.`)
+            `Check the signer: it shows ADD PHONE and five words. Compare the five words with your phone, then hold its button.`)
         },
         onBoard: () => {
           working = isRelay
             ? 'Waiting on the signer\'s card. This can take up to about two minutes: it queues behind any other approval, then holds on screen for a press.'
             : 'Waiting for the signer\'s button…'
-        },
-        onHandOff: (event) => {
-          // A second, independent connection publishes the same hand-off
-          // again after a short delay, so a relay watching for both events
-          // cannot use their timing alone to link this enrolment to the
-          // phone. Best effort: the primary publish above already delivered
-          // the secret.
-          const decoyPool = new SimplePool()
-          scheduleDecoyHandOff(code!.relays, event, {
-            pool: decoyPool,
-            onDone: () => { try { decoyPool.destroy() } catch { /* already closed */ } },
-          })
         },
       })
       step = 'done'
@@ -378,10 +366,11 @@
             {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
           </td></tr>
         </tbody></table>
-        <p class="hint-sm">The signer's card will read “ADD PHONE for {fitLabel(code.label)}”, then
-          five words, then “same on phone? hold 2s”. Hold its button for two seconds once the words
-          match the phone's own screen: never this page, since whoever relayed the request could have
-          swapped the words shown here.</p>
+        <p class="hint-sm">The signer shows ADD PHONE and five words. Compare those five words
+          with your phone's own screen before holding the button: that is the check that matters,
+          since whoever relayed the request could have swapped the words shown here. A check code
+          appears afterwards too, but it only confirms the phone got the hand-off; it does not
+          defend against a swapped phone.</p>
         <div class="words-preview">
           <p class="hint-sm">Sapwood's own copy, for reference only. Compare the words on your
             signer with your phone, not with this page:</p>
@@ -395,8 +384,9 @@
         <p class="hint-sm">{working}</p>
       {:else if step === 'done' && result}
         <p class="success-text">The signer added {code?.label} as record {result.id}.</p>
-        <p class="hint-sm">Its screen shows “PHONE ADDED”, this check code, and “else revoke
-          {result.id}”. The phone should show the same six characters:</p>
+        <p class="hint-sm">This check code confirms the phone got it: the five words you compared
+          before holding the button are what defended against a swapped phone. The phone should show
+          the same six characters:</p>
         <p class="check-code mono">{result.checkCode}</p>
         <p class="hint-sm">If they match, confirm on the phone with its screen lock. If they do
           not, someone else answered the phone first: revoke record {result.id} now and start
