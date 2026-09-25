@@ -3045,7 +3045,7 @@ describe('per-device consent withdrawal over USB', () => {
   it('shows a withdrawal that only holds until restart as a plain outcome and refreshes the list', async () => {
     // heartwood-esp32 PR #197: the withdrawal is never rolled back, so a
     // storage_* NACK here must not read as "not confirmed" or "refresh and
-    // retry" — it already happened.
+    // retry": it already happened.
     const nack = (text: string) => ({ type: FrameType.NACK, payload: new TextEncoder().encode(text) })
     serialMock.sendAndReceive
       .mockResolvedValueOnce(nack(
