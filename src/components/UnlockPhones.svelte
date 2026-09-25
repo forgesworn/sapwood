@@ -3,19 +3,42 @@
   // signer after a restart with a tap. Add one by scanning the code Cambium
   // shows, list them, revoke one. No secret passes through Sapwood: the board
   // seals each phone's unlock secret to a key only that phone holds.
-  import { untrack } from 'svelte'
+  import { onDestroy, untrack } from 'svelte'
   import { SimplePool } from 'nostr-tools/pool'
+  import { encodeQR } from '@paulmillr/qr'
   import {
     device, listUnlockPhones, revokeUnlockPhone, setAnnounceOperator, enrolUnlockPhone,
     PhoneUnlockAuthRequired, supportsPhoneEnrolRelay,
   } from '../lib/device.svelte.js'
   import {
     parseEnrolmentCode, enrolPhone, HandOffUndelivered, markCodeSpent, isCodeSpent,
-    requestWords, fitLabel, friendlyEnrolRefusal, findOrphanedPhoneId,
+    requestWords, fitLabel, friendlyEnrolRefusal, findOrphanedPhoneId, openRelays,
+    HANDOFF_KIND,
     type EnrolmentCode, type EnrolResult, type UnlockPhoneList,
   } from '../lib/phone-unlock.js'
+  import {
+    createInvite, openInviteReply, reduceInvite, initialInviteState, zeroInviteSecret,
+    type Invite, type InviteCollectorState, type InviteReplyEvent,
+  } from '../lib/enrol-invite.js'
   import ConfirmButton from './ConfirmButton.svelte'
   import QrScanner from './QrScanner.svelte'
+
+  /** Fallback relays for a fresh invite: the ones Sapwood already uses for
+   *  this signer over the relay, its USB-reported WiFi relays, or failing
+   *  both the project relay (the same one Cambium's own enrolment code
+   *  defaults to). */
+  function defaultInviteRelays(): string[] {
+    if (device.mode === 'relay' && device.relayConfiguredRelays?.length) return [...device.relayConfiguredRelays]
+    if (device.mode === 'serial' && device.usbNetworkState?.relays?.length) return [...device.usbNetworkState.relays]
+    return ['wss://relay.trotters.cc']
+  }
+
+  function formatCountdown(totalSeconds: number): string {
+    const clamped = Math.max(0, totalSeconds)
+    const m = Math.floor(clamped / 60)
+    const s = clamped % 60
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
 
   interface Props {
     /** Enrolled phones, or null while unknown (for the mode chooser). */
@@ -132,7 +155,9 @@
   }
 
   // --- Add a phone ---
-  type Step = 'idle' | 'scan' | 'paste' | 'confirm' | 'working' | 'done' | 'failed' | 'orphan'
+  type Step =
+    | 'idle' | 'invite' | 'invite-expired' | 'invite-aborted'
+    | 'scan' | 'paste' | 'confirm' | 'working' | 'done' | 'failed' | 'orphan'
   let step = $state<Step>('idle')
   let pasted = $state('')
   let code = $state<EnrolmentCode | null>(null)
@@ -151,7 +176,92 @@
   const pastedSpent = $derived(pastedCode ? isCodeSpent(pastedCode) : false)
   let scanSpent = $state(false)
 
+  // --- Invite: Sapwood shows a QR, the phone scans it and replies over the
+  // relay (the default "Add a phone" path, see enrol-invite.ts). ---
+  // $state.raw, not $state: this holds a Uint8Array secret, and identity
+  // (not deep reactivity) is what the invite-superseded checks below rely on.
+  let invite = $state.raw<Invite | null>(null)
+  let inviteState = $state<InviteCollectorState>(initialInviteState)
+  let invitePool: SimplePool | null = null
+  let inviteCloser: { close: () => void } | null = null
+  let inviteTicker: ReturnType<typeof setInterval> | null = null
+  let inviteNow = $state(Date.now())
+
+  const inviteQr = $derived(invite ? encodeQR(invite.uri, 'svg') : '')
+  const inviteSecondsLeft = $derived(invite ? Math.ceil((invite.expiresAt * 1000 - inviteNow) / 1000) : 0)
+
+  /** Close the invite's subscription and pool, and zero its secret. Safe to
+   *  call at any time, including when no invite is open. */
+  function stopInvite(): void {
+    if (inviteTicker) { clearInterval(inviteTicker); inviteTicker = null }
+    try { inviteCloser?.close() } catch { /* already closed */ }
+    inviteCloser = null
+    try { invitePool?.destroy() } catch { /* already closed */ }
+    invitePool = null
+    if (invite) zeroInviteSecret(invite)
+    invite = null
+    inviteState = initialInviteState
+  }
+
+  function handleInviteEvent(event: InviteReplyEvent, forInvite: Invite): void {
+    if (invite !== forInvite) return // superseded or already closed
+    const parsed = openInviteReply(event, forInvite)
+    if (!parsed) return
+    inviteState = reduceInvite(inviteState, { type: 'reply', code: parsed })
+    if (inviteState.status === 'received' && step === 'invite') {
+      code = inviteState.code
+      step = 'confirm'
+    } else if (inviteState.status === 'aborted') {
+      addError = 'Two phones answered this code. Someone else may have seen it. Nothing was added; start again.'
+      stopInvite()
+      step = 'invite-aborted'
+    }
+  }
+
+  async function startInvite(): Promise<void> {
+    stopInvite()
+    step = 'invite'
+    pasted = ''
+    code = null
+    result = null
+    addError = null
+    codeSpent = false
+    scanSpent = false
+    orphanId = null
+    inviteState = initialInviteState
+
+    const relays = defaultInviteRelays()
+    const made = createInvite(relays)
+    const pool = new SimplePool()
+    invitePool = pool
+    await openRelays(pool, relays)
+    if (step !== 'invite' || invitePool !== pool) {
+      try { pool.destroy() } catch { /* already closed */ }
+      return // cancelled, or superseded by a newer invite, while opening
+    }
+    invite = made
+    const since = Math.floor(Date.now() / 1000) - 60
+    inviteCloser = pool.subscribe(
+      relays,
+      { kinds: [HANDOFF_KIND], '#h': [made.rendezvous], since },
+      { onevent: (event) => handleInviteEvent(event, made) },
+    )
+    inviteNow = Date.now()
+    inviteTicker = setInterval(() => {
+      inviteNow = Date.now()
+      if (invite !== made || inviteNow < made.expiresAt * 1000) return
+      inviteState = reduceInvite(inviteState, { type: 'expire' })
+      if (inviteState.status === 'expired') {
+        stopInvite()
+        step = 'invite-expired'
+      }
+    }, 1000)
+  }
+
+  onDestroy(stopInvite)
+
   function startAdd(mode: 'scan' | 'paste') {
+    stopInvite()
     step = mode
     pasted = ''
     code = null
@@ -211,6 +321,14 @@
     } finally {
       orphanBusy = false
     }
+  }
+
+  /** Continue from the confirm step: the invite (if this code came from one)
+   *  is single-use, so its subscription closes and its secret is zeroed
+   *  before the existing enrol path runs, unchanged. */
+  function continueFromConfirm() {
+    stopInvite()
+    void add()
   }
 
   async function add() {
@@ -305,11 +423,18 @@
     {#if step === 'idle'}
       {#if canAdd}
         <div class="inline-form">
-          <button class="btn btn-secondary btn-sm" disabled={list.phones.length >= list.max}
-            onclick={() => startAdd('scan')}>Add a phone</button>
-          <button class="btn btn-ghost btn-sm" disabled={list.phones.length >= list.max}
-            onclick={() => startAdd('paste')}>Paste a code instead</button>
+          <button class="btn btn-primary btn-sm" disabled={list.phones.length >= list.max}
+            onclick={startInvite}>Add a phone</button>
         </div>
+        <details class="disclosure">
+          <summary>Phone shows a code instead? Paste it</summary>
+          <div class="inline-form">
+            <button class="btn btn-secondary btn-sm" disabled={list.phones.length >= list.max}
+              onclick={() => startAdd('paste')}>Paste a code</button>
+            <button class="btn btn-ghost btn-sm" disabled={list.phones.length >= list.max}
+              onclick={() => startAdd('scan')}>Scan the phone's code</button>
+          </div>
+        </details>
       {:else}
         <p class="hint-sm">Adding a phone needs the signer on the USB cable, or over the relay once its firmware serves that, and a press on its button.</p>
       {/if}
@@ -335,7 +460,30 @@
 
   {#if step !== 'idle'}
     <div class="add card">
-      {#if step === 'scan' || step === 'paste'}
+      {#if step === 'invite'}
+        {#if !invite}
+          <p class="hint-sm">Opening the phone's relays…</p>
+        {:else}
+          <h4 class="invite-title">Scan this with Cambium</h4>
+          <p class="hint-sm">On the phone, open Cambium, go to this signer's screen, and tap
+            "Set up phone unlock", then "Scan Sapwood's code".</p>
+          <div class="qr invite-qr">{@html inviteQr}</div>
+          <p class="hint-sm countdown">Waiting for the phone. Expires in {formatCountdown(inviteSecondsLeft)}.</p>
+        {/if}
+        <button class="btn btn-ghost btn-sm" onclick={() => { stopInvite(); step = 'idle' }}>Cancel</button>
+      {:else if step === 'invite-expired'}
+        <p class="warn-text">Code expired, make a new one.</p>
+        <div class="inline-form">
+          <button class="btn btn-primary btn-sm" onclick={startInvite}>New code</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
+        </div>
+      {:else if step === 'invite-aborted'}
+        <p class="warn-text">{addError}</p>
+        <div class="inline-form">
+          <button class="btn btn-primary btn-sm" onclick={startInvite}>New code</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
+        </div>
+      {:else if step === 'scan' || step === 'paste'}
         <p class="hint-sm">On the phone, open Cambium and tap “Set up phone unlock” under this
           signer. It shows a code; nothing in it is secret. Its “Copy code” button gives the text
           to paste here.</p>
@@ -367,19 +515,19 @@
           </td></tr>
         </tbody></table>
         <p class="hint-sm">The signer shows ADD PHONE and five words, two at a time over about
-          12 seconds before it will accept a hold. Compare those five words with your phone's own
-          screen before holding the button: that is the check that matters, since whoever relayed
-          the request could have swapped the words shown here. A check code appears afterwards too,
-          but it only confirms the phone got the hand-off; it does not defend against a swapped
-          phone.</p>
+          12 seconds before it will accept a hold.</p>
         <div class="words-preview">
-          <p class="hint-sm">Sapwood's own copy, for reference only. Compare the words on your
-            signer with your phone, not with this page:</p>
+          <p class="words-headline">Check your phone shows these same five words</p>
           <p class="mono words">{requestWords(code.enrolPubkey).join(' ')}</p>
+          <p class="hint-sm">Compare them with your phone's own screen, and with the signer's
+            card, before holding the button: that is the check that matters, since whoever
+            relayed the request could have swapped the words shown here. A check code appears
+            afterwards too, but it only confirms the phone got the hand-off; it does not defend
+            against a swapped phone.</p>
         </div>
         <div class="inline-form">
-          <button class="btn btn-primary btn-sm" onclick={add}>Add {code.label}</button>
-          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick={continueFromConfirm}>Continue</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => { stopInvite(); step = 'idle' }}>Cancel</button>
         </div>
       {:else if step === 'working'}
         <p class="hint-sm">{working}</p>
@@ -431,9 +579,14 @@
   .code-input { width: 100%; box-sizing: border-box; font-size: 0.8rem; resize: vertical; }
   .check-code { font-size: 2rem; letter-spacing: 0.2em; color: var(--green); margin: 0.2rem 0; }
   .words-preview { border-top: 1px solid var(--border); padding-top: 0.6rem; margin-top: 0.2rem; }
-  .words { font-size: 1.1rem; letter-spacing: 0.05em; }
+  .words-headline { font-weight: 700; margin: 0 0 0.3rem; }
+  .words { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.05em; margin: 0 0 0.5rem; }
   .status { margin-top: 0.6rem; color: var(--text-dim); }
   .announce { margin-top: 1rem; }
   .lq-buttons { display: flex; gap: 0.5rem; margin: 0.4rem 0; }
   .lq-on { border-color: var(--green-dim); color: var(--green); background: #08130d; }
+  .invite-title { font-size: 1.1rem; font-weight: 700; margin: 0; color: var(--text); }
+  .qr { width: 220px; padding: 12px; background: #fff; border-radius: 6px; margin: 0.4rem 0; }
+  .qr :global(svg) { display: block; width: 100%; height: auto; }
+  .countdown { font-weight: 600; }
 </style>

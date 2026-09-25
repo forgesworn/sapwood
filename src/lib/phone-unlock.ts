@@ -1,8 +1,9 @@
 // Phones that can unlock the signer after a restart: the Sapwood side of
 // heartwood-esp32's phone-unlock design (firmware 0.18.0-beta.17, frame 0x64)
-// and Cambium's enrolment screen.
+// and Cambium's enrolment screen. Two ways for the phone's enrolment code to
+// reach this page, both ending at the same `add()` in UnlockPhones.svelte:
 //
-// Enrolment, end to end:
+// Phone-shows-a-code (paste or scan the phone's screen), end to end:
 //   1. Cambium shows a code: heartwood-unlock:enrol?v=1&p=<enrolment pubkey>
 //      &r=<rendezvous tag>&label=<phone label>&relay=<url>... Nothing in it is
 //      secret. It waits on those relays for the answer.
@@ -17,8 +18,23 @@
 //      spoken-token from the board's one-off hand-off key. A mismatch means
 //      someone else answered the phone first.
 //
+// Sapwood-shows-a-code (the invite, default path, `enrol-invite.ts`), reverses
+// the optical step for a desktop with no camera:
+//   1. Sapwood makes a one-off invite keypair and rendezvous, and shows a QR
+//      of heartwood-unlock:invite?v=1&k=<invite pubkey>&r=<rendezvous>
+//      &x=<expiry>&relay=<url>...
+//   2. Cambium scans it, builds the same enrolment code as above, and
+//      publishes it as ONE kind-24137 event from a throwaway key: tagged
+//      ["h", rendezvous] (the invite's, never the hand-off's), content is that
+//      enrolment code string, NIP-44 encrypted to the invite's public key.
+//   3. Sapwood decrypts the first valid reply (`openInviteReply`) and shows
+//      the phone's five request words for the owner to compare, then feeds
+//      the resulting `EnrolmentCode` into the exact same `enrolPhone` as
+//      above: from here on both paths are identical.
+//
 // Nothing here names the phone on the wire: the hand-off author is thrown
-// away, and the only tag is the one-off rendezvous value the phone chose.
+// away, and the only tag on either kind-24137 event is a one-off rendezvous
+// value, chosen by whichever side is waiting for the answer.
 
 import { deriveToken } from 'spoken-token'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'

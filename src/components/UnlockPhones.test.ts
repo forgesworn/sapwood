@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { getConversationKey, encrypt as nip44Encrypt } from 'nostr-tools/nip44'
+import { hexToBytes } from '@noble/hashes/utils.js'
 
 const P = 'a1'.repeat(32)
 const R = 'b2'.repeat(16)
@@ -27,6 +30,11 @@ const relays = vi.hoisted(() => ({
   ensureRelay: vi.fn(async () => ({})),
   publish: vi.fn((urls: string[]) => urls.map(() => Promise.resolve(''))),
   destroy: vi.fn(),
+  subscribe: vi.fn((
+    _relays: string[],
+    _filter: Record<string, unknown>,
+    _opts: { onevent: (event: unknown) => void },
+  ) => ({ close: vi.fn() })),
 }))
 
 vi.mock('nostr-tools/pool', () => ({
@@ -34,8 +42,23 @@ vi.mock('nostr-tools/pool', () => ({
     ensureRelay = relays.ensureRelay
     publish = relays.publish
     destroy = relays.destroy
+    subscribe = relays.subscribe
   },
 }))
+
+// A fixed invite keypair, so a test can build a genuine encrypted reply
+// without reading anything out of the rendered QR. Everything else
+// (openInviteReply, reduceInvite) is the real implementation.
+const INVITE_SECRET = hexToBytes('44'.repeat(32))
+const INVITE_PUBKEY = getPublicKey(INVITE_SECRET)
+const INVITE_RENDEZVOUS = '77'.repeat(16)
+
+const invite = vi.hoisted(() => ({ createInvite: vi.fn() }))
+
+vi.mock('../lib/enrol-invite.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/enrol-invite.js')>('../lib/enrol-invite.js')
+  return { ...actual, createInvite: invite.createInvite }
+})
 
 vi.mock('../lib/device.svelte.js', async () => {
   const { createSubscriber } = await import('svelte/reactivity')
@@ -87,7 +110,32 @@ beforeEach(() => {
   Object.assign(device, { connected: true, mode: 'serial', bridgeAuthed: true, awaitingButton: null, masters: [] })
   api.listUnlockPhones.mockResolvedValue(LIST)
   api.supportsPhoneEnrolRelay.mockReturnValue(false)
+  relays.subscribe.mockReturnValue({ close: vi.fn() })
+  invite.createInvite.mockImplementation((relayUrls: string[], now: number = Date.now()) => ({
+    uri: `heartwood-unlock:invite?v=1&k=${INVITE_PUBKEY}&r=${INVITE_RENDEZVOUS}&x=${Math.floor(now / 1000) + 600}`
+      + relayUrls.map((r) => `&relay=${encodeURIComponent(r)}`).join(''),
+    // A fresh copy each call: the component zeroes this in place on cancel,
+    // confirm and unmount, and the shared constant must survive that.
+    secret: INVITE_SECRET.slice(),
+    pubkey: INVITE_PUBKEY,
+    rendezvous: INVITE_RENDEZVOUS,
+    expiresAt: Math.floor(now / 1000) + 600,
+  }))
 })
+
+/** A genuine kind-24137 invite reply, as Cambium would publish it: signed by
+ *  a fresh throwaway key, encrypted to the fixed invite pubkey above. */
+function inviteReply(plaintext: string, rendezvous = INVITE_RENDEZVOUS) {
+  const throwaway = generateSecretKey()
+  const ck = getConversationKey(throwaway, INVITE_PUBKEY)
+  const content = nip44Encrypt(plaintext, ck)
+  return finalizeEvent({
+    kind: 24137,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [['h', rendezvous]],
+    content,
+  }, throwaway)
+}
 
 afterEach(() => cleanup())
 
@@ -122,10 +170,11 @@ describe('UnlockPhones', () => {
   it('adds a phone from a pasted code and shows the check code', async () => {
     api.enrolUnlockPhone.mockResolvedValue({ id: 77, ephemeral_pubkey: 'ab'.repeat(32), sealed: 'ciphertext' })
     render(UnlockPhones)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
     expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
@@ -137,7 +186,8 @@ describe('UnlockPhones', () => {
 
     // Finished, then the same code again: refused here, not sent twice.
     await fireEvent.click(screen.getByRole('button', { name: 'Finished' }))
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE } })
     expect(screen.getByText(/already used here/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Use this code' }) as HTMLButtonElement).disabled).toBe(true)
@@ -145,7 +195,8 @@ describe('UnlockPhones', () => {
 
   it('refuses text that is not an enrolment code', async () => {
     render(UnlockPhones)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'bunker://nope' } })
     expect(screen.getByText(/not a phone-unlock code/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Use this code' }) as HTMLButtonElement).disabled).toBe(true)
@@ -154,10 +205,11 @@ describe('UnlockPhones', () => {
   it('offers a new code, not a retry, once the board has seen the code', async () => {
     api.enrolUnlockPhone.mockRejectedValue(new Error('The signer refused: declined on the board.'))
     render(UnlockPhones)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE.replace(P, 'c3'.repeat(32)) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByText(/Each code works once/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Scan a new code' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -197,13 +249,14 @@ describe('UnlockPhones', () => {
     api.supportsPhoneEnrolRelay.mockReturnValue(true)
     api.enrolUnlockPhone.mockResolvedValue({ id: 77, ephemeral_pubkey: 'ab'.repeat(32), sealed: 'ciphertext' })
     render(UnlockPhones)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: codeWith(p) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
     // Sapwood's own copy of the request-code words: for reference only.
     expect(screen.getByText('release jar chimney acoustic depart')).toBeTruthy()
-    expect(screen.getByText(/Compare the words on your signer with your phone, not with this page/)).toBeTruthy()
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
+    expect(screen.getByText(/Compare them with your phone's own screen/)).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
     expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
@@ -225,10 +278,11 @@ describe('UnlockPhones', () => {
       phones: [...LIST.phones, { id: 99, label: 'phone' }],
     })
     render(UnlockPhones)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: codeWith(p) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByRole('button', { name: 'Revoke record 99' })).toBeTruthy()
     expect(screen.getByText(/nobody holds/)).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: 'Revoke record 99' }))
@@ -242,11 +296,85 @@ describe('UnlockPhones', () => {
     api.enrolUnlockPhone.mockRejectedValue(new Error('timeout waiting for device (enrol_unlock_phone)'))
     api.listUnlockPhones.mockResolvedValue(LIST)
     render(UnlockPhones)
-    await fireEvent.click(await screen.findByRole('button', { name: 'Paste a code instead' }))
+    await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: codeWith(p) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Add Pixel 8' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByText(/never answered in time/)).toBeTruthy()
     expect(screen.queryByText(/nobody holds/)).toBeNull()
+  })
+
+  describe('the invite (Sapwood shows a QR)', () => {
+    it('shows a QR, opens the phone\'s relays, and moves to confirm once the phone replies', async () => {
+      api.enrolUnlockPhone.mockResolvedValue({ id: 61, ephemeral_pubkey: 'ab'.repeat(32), sealed: 'ciphertext' })
+      render(UnlockPhones)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
+      await screen.findByText('Scan this with Cambium')
+      expect(relays.ensureRelay).toHaveBeenCalledWith('wss://relay.trotters.cc', expect.anything())
+      expect(relays.subscribe).toHaveBeenCalledOnce()
+      const [subRelays, filter, opts] = relays.subscribe.mock.calls[0]
+      expect(subRelays).toEqual(['wss://relay.trotters.cc'])
+      expect(filter).toMatchObject({ kinds: [24137], '#h': [INVITE_RENDEZVOUS] })
+
+      const p = '11'.repeat(32)
+      opts.onevent(inviteReply(codeWith(p)))
+
+      expect(await screen.findByText('Check your phone shows these same five words')).toBeTruthy()
+      expect(screen.getByText('Pixel 8')).toBeTruthy()
+      await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+      expect(await screen.findByText('9B6 164')).toBeTruthy()
+      expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
+    })
+
+    it('ignores a repeat of the identical reply', async () => {
+      render(UnlockPhones)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
+      await screen.findByText('Scan this with Cambium')
+      const opts = relays.subscribe.mock.calls[0][2]
+
+      const p = '22'.repeat(32)
+      opts.onevent(inviteReply(codeWith(p)))
+      await screen.findByText('Check your phone shows these same five words')
+      opts.onevent(inviteReply(codeWith(p)))
+      expect(screen.getByText('Check your phone shows these same five words')).toBeTruthy()
+      expect(screen.queryByText(/Two phones answered/)).toBeNull()
+    })
+
+    it('aborts when a second, different phone answers the same code', async () => {
+      render(UnlockPhones)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
+      await screen.findByText('Scan this with Cambium')
+      const opts = relays.subscribe.mock.calls[0][2]
+
+      opts.onevent(inviteReply(codeWith('33'.repeat(32))))
+      await screen.findByText('Check your phone shows these same five words')
+      opts.onevent(inviteReply(codeWith('44'.repeat(32))))
+
+      expect(await screen.findByText(/Two phones answered this code/)).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'New code' })).toBeTruthy()
+      expect(api.enrolUnlockPhone).not.toHaveBeenCalled()
+    })
+
+    it('closes the subscription and pool on cancel', async () => {
+      const closer = { close: vi.fn() }
+      relays.subscribe.mockReturnValue(closer)
+      render(UnlockPhones)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
+      await screen.findByText('Scan this with Cambium')
+      await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(closer.close).toHaveBeenCalledOnce()
+      expect(relays.destroy).toHaveBeenCalledOnce()
+      expect(await screen.findByRole('button', { name: 'Add a phone' })).toBeTruthy()
+    })
+
+    it('ignores a reply with the wrong rendezvous', async () => {
+      render(UnlockPhones)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
+      await screen.findByText('Scan this with Cambium')
+      const opts = relays.subscribe.mock.calls[0][2]
+      opts.onevent(inviteReply(codeWith('55'.repeat(32)), 'ff'.repeat(16)))
+      expect(screen.queryByText('Check your phone shows these same five words')).toBeNull()
+    })
   })
 })
