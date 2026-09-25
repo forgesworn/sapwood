@@ -273,7 +273,7 @@ describe('resolveUnlockMode', () => {
 
   it('lets a known session action override the firmware report until it resets to null', () => {
     // The signer just turned encryption off, but the last poll's `at_rest`
-    // has not caught up yet — the session's own action wins.
+    // has not caught up yet; the session's own action wins.
     expect(resolveUnlockMode('vault', 2, true, false)).toBe('none')
     expect(resolveUnlockMode('none', 0, false, true)).toBe('sapwood')
   })

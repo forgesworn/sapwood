@@ -103,7 +103,7 @@ export interface RelayStatus {
   at_rest?: string
   /** How many phones can unlock this board (plan G2; absent alongside
    *  `at_rest` on older firmware). `null` means a present phone record is
-   *  damaged, not that there are none — always `0` once `at_rest` is
+   *  damaged, not that there are none; always `0` once `at_rest` is
    *  `"none"`. Device operator only. */
   unlock_phone_count?: number | null
 }
@@ -842,7 +842,7 @@ function applyRelayStatus(raw: Record<string, unknown>) {
   appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
   // A truncated reply (low-heap fallback, `minimal_status_json` in
   // firmware/src/relay.rs) drops `capabilities` and `slots` to save the
-  // allocation their policy-engine calls would cost — it is not saying the
+  // allocation their policy-engine calls would cost; it is not saying the
   // signer has none. Carry the previous poll's values forward instead of
   // collapsing them to empty/zero, or a manager watching a fragmented-heap
   // signer sees pairing capability vanish and persona pairing breaks until
@@ -2822,7 +2822,7 @@ export interface FirmwareInfo {
   at_rest?: string
   /** How many phones can unlock this board (plan G2; absent alongside
    *  `at_rest` on older firmware). `null` means a present phone record is
-   *  damaged, not that there are none — always `0` once `at_rest` is
+   *  damaged, not that there are none; always `0` once `at_rest` is
    *  `"none"`. */
   unlock_phone_count?: number | null
 }

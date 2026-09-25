@@ -332,7 +332,7 @@ export type UnlockMode = 'none' | 'phone' | 'sapwood'
  * returns null, and says so rather than guess.
  *
  * Kept as the fallback for firmware that predates the `at_rest` report
- * (released beta.17) — see `resolveUnlockMode`, which callers should use
+ * (released beta.17); see `resolveUnlockMode`, which callers should use
  * instead.
  */
 export function inferUnlockMode(
@@ -359,11 +359,11 @@ function isKnownAtRest(value: string): value is AtRestReport {
 /**
  * The mode shown in "After a power cut". Firmware ≥ #192 reports `at_rest`
  * and `unlock_phone_count` directly, on both FIRMWARE_INFO and get_status
- * (device operator only there — a delegate never sees either field), so this
+ * (device operator only there; a delegate never sees either field), so this
  * reads those instead of guessing from side effects.
  *
- * `known` — what this page saw the signer accept moments ago (a seal, a PIN
- * set, or encryption turned off) — still wins when set: it reflects an
+ * `known`, what this page saw the signer accept moments ago (a seal, a PIN
+ * set, or encryption turned off), still wins when set: it reflects an
  * action this session just took, ahead of a firmware report that has not
  * been re-polled since. Once it resets to null, the firmware's own answer
  * takes over.
@@ -371,7 +371,7 @@ function isKnownAtRest(value: string): value is AtRestReport {
  * `atRest` absent (`undefined`) means older firmware that never sends the
  * field (released beta.17): fall back to `inferUnlockMode`'s guess. A
  * present but unrecognised value is reported as unknown (null) rather than
- * mapped to whatever meaning looks closest — a future wire value must never
+ * mapped to whatever meaning looks closest; a future wire value must never
  * be silently reinterpreted.
  */
 export function resolveUnlockMode(
