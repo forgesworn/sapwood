@@ -42,7 +42,9 @@ import {
   rememberDevice, replaceDeviceRelays, savePendingNetworkHandoff, npubShort,
 } from './known-devices.js'
 import { VaultAnnouncementWatcher, publishVaultDelivery, loadVaultKey } from './vault.js'
-import { PHONE_UNLOCK_CAPABILITY, parsePhoneList, type UnlockPhoneList } from './phone-unlock.js'
+import {
+  PHONE_UNLOCK_CAPABILITY, RELAY_ENROL_CAPABILITY, parsePhoneList, type UnlockPhoneList,
+} from './phone-unlock.js'
 import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
 import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
@@ -1505,6 +1507,14 @@ export function supportsPairingIdentity(): boolean {
   return device.relayStatus?.capabilities?.includes('pairing_identity_v1') ?? false
 }
 
+/** Whether the connected signer serves `enrol_unlock_phone` over the relay,
+ *  not only the cable. Older firmware NACKs it with "unknown method"; a panel
+ *  should keep offering the cable-only flow until this is true. Sync view for
+ *  the UI, same caveat as `supportsPairingIdentity`. */
+export function supportsPhoneEnrolRelay(): boolean {
+  return device.relayStatus?.capabilities?.includes(RELAY_ENROL_CAPABILITY) ?? false
+}
+
 /** The signer's capability list, probing `get_status` once when the
  *  background refresh has not populated it yet. */
 async function relayCapabilities(): Promise<string[]> {
@@ -1736,7 +1746,10 @@ export async function setDisplayFlip(flip: boolean): Promise<boolean> {
 // Phones enrolled with Cambium can unlock the signer after a restart
 // (src/lib/phone-unlock.ts). Listing, revoking and the operator-announcement
 // switch work over the cable (frame 0x64, authenticated bridge session) and
-// over the relay; adding a phone needs the cable and a press on the board.
+// over the relay. Adding a phone always needs a press on the board; over the
+// relay it also needs firmware advertising RELAY_ENROL_CAPABILITY (older
+// firmware has no route to it and refuses the method outright), so that
+// firmware keeps the cable-only flow.
 
 /** The signer asked for the bridge session before answering. */
 export class PhoneUnlockAuthRequired extends Error {
@@ -1746,6 +1759,13 @@ export class PhoneUnlockAuthRequired extends Error {
 // A card on the board waits 30 s for the press; the frame must outlast a
 // person reaching for it, and a timeout closes the serial session.
 const PHONE_ENROL_TIMEOUT_MS = 75_000
+
+// Over the relay the request waits behind the deferred-card queue (up to 90 s
+// behind another card) and then up to 30 s on the board's own screen; give it
+// comfortably more than both, and never retry it automatically (the signer
+// refuses a reused enrolment key, and a second card could not be raised until
+// the first resolves anyway).
+const PHONE_ENROL_RELAY_TIMEOUT_MS = 150_000
 
 async function usbPhoneCommand(command: Record<string, unknown>, timeoutMs = SERIAL_RTT_MS): Promise<unknown | null> {
   const resp = await serialTransport.sendAndReceive(
@@ -1806,13 +1826,27 @@ export async function setAnnounceOperator(on: boolean): Promise<void> {
 }
 
 /**
- * Ask the signer to add a phone: USB only, and the board shows a card that
- * must be pressed. Sent exactly once (the signer refuses a reused enrolment
- * key anyway). Resolves with the board's raw answer, which holds only the
- * hand-off key and ciphertext sealed to the phone.
+ * Ask the signer to add a phone: over USB, or over the relay when the signer
+ * advertises RELAY_ENROL_CAPABILITY. Either way the board shows a card that
+ * must be pressed, and this is sent exactly once with no automatic retry (the
+ * signer refuses a reused enrolment key anyway, and a stray retry over the
+ * relay would raise a second card behind the first, or be refused outright
+ * while one is pending). Resolves with the board's raw answer, which holds
+ * only the hand-off key and ciphertext sealed to the phone.
  */
 export async function enrolUnlockPhone(enrolPubkey: string, label: string, prompt?: string): Promise<unknown> {
-  if (device.mode !== 'serial') throw new Error('Adding a phone needs the signer on the USB cable.')
+  if (device.mode === 'relay') {
+    if (!relayTransport) throw new Error('not connected over relay')
+    if (!(await relayCapabilities()).includes(RELAY_ENROL_CAPABILITY)) {
+      throw new Error('Adding a phone over the relay needs newer signer firmware. Use the USB cable, or update the signer.')
+    }
+    return await relayTransport.request(
+      'enrol_unlock_phone',
+      { enrol_pubkey: enrolPubkey, label },
+      PHONE_ENROL_RELAY_TIMEOUT_MS,
+    )
+  }
+  if (device.mode !== 'serial') throw new Error('Adding a phone needs the signer on the USB cable, or over the relay on newer firmware.')
   // Authenticate first: a first-time pairing shows (and then clears) its own
   // button prompt, which must not replace the one for the enrol card.
   await ensureBridgeAuth()

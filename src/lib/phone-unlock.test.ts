@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { verifyEvent } from 'nostr-tools/pure'
 import {
-  HANDOFF_KIND, HandOffUndelivered, buildHandOffEvent, checkCode, enrolPhone, inferUnlockMode,
-  parseEnrolAnswer, parseEnrolmentCode, parsePhoneList,
+  HANDOFF_KIND, HandOffUndelivered, buildHandOffEvent, checkCode, decoyHandOffDelayMs, enrolPhone,
+  findOrphanedPhoneId, fitLabel, friendlyEnrolRefusal, inferUnlockMode, parseEnrolAnswer,
+  parseEnrolmentCode, parsePhoneList, requestCode, requestWords, scheduleDecoyHandOff,
 } from './phone-unlock.js'
 
 const P = 'a1'.repeat(32)
@@ -154,5 +155,119 @@ describe('inferUnlockMode', () => {
     expect(inferUnlockMode(2, true, false)).toBe('none')
     expect(inferUnlockMode(0, false, true)).toBe('sapwood')
     expect(inferUnlockMode(1, false, true)).toBe('phone')
+  })
+})
+
+describe('requestWords / requestCode', () => {
+  // The vectors the board, Cambium and Sapwood are all held to (spoken-token 2.1.0).
+  it('matches the shared vectors', () => {
+    expect(requestWords('ab'.repeat(32))).toEqual(['swim', 'behind', 'stand', 'bugle', 'female'])
+    expect(requestCode('ab'.repeat(32))).toBe('swim behind stand bugle female')
+    expect(requestWords('00'.repeat(32))).toEqual(['talent', 'humble', 'reform', 'admit', 'narrow'])
+    expect(requestCode('00'.repeat(32))).toBe('talent humble reform admit narrow')
+  })
+
+  it('refuses a key that is not 32 bytes of hex', () => {
+    expect(() => requestWords('ab')).toThrow()
+  })
+})
+
+describe('fitLabel', () => {
+  it('leaves an already-fitting ASCII label alone', () => {
+    expect(fitLabel('Pixel 8 Pro')).toBe('Pixel 8 Pro')
+  })
+
+  it('transliterates common accented Latin letters rather than refusing them', () => {
+    expect(fitLabel('Café Ém')).toBe('Cafe Em')
+  })
+
+  it('strips characters transliteration cannot fix', () => {
+    expect(fitLabel('日本語 phone')).toBe('phone')
+  })
+
+  it('falls back to "phone" once nothing printable is left', () => {
+    expect(fitLabel('日本語')).toBe('phone')
+    expect(fitLabel('')).toBe('phone')
+  })
+
+  it('truncates to the byte cap', () => {
+    expect(fitLabel('Sixteen chars 16', 8)).toBe('Sixteen')
+    expect(fitLabel('Sixteen chars 16', 8).length).toBeLessThanOrEqual(8)
+  })
+})
+
+describe('friendlyEnrolRefusal', () => {
+  it.each([
+    ['enrol_unlock_phone is a device-level operation and requires the device operator', /only the device operator/i],
+    ['another phone is already waiting for a press on the board', /another phone is already waiting/i],
+    ['label longer than 16 bytes', /too long/i],
+    ['16 phones already enrolled; revoke one first', /revoke one before adding another/i],
+    ['the device operator changed while the card was up: nothing was added', /device operator changed/i],
+    ['no relay was live to carry the answer: nothing was added', /no relay was live/i],
+    ['device low on memory: nothing was added, retry shortly', /low on memory/i],
+    ['signer is busy with another approval; retry shortly', /busy with another approval/i],
+  ])('rewords %s', (reason, expected) => {
+    expect(friendlyEnrolRefusal(reason)).toMatch(expected)
+  })
+
+  it('passes an unrecognised reason through unchanged', () => {
+    expect(friendlyEnrolRefusal('some future refusal')).toBe('some future refusal')
+  })
+})
+
+describe('findOrphanedPhoneId', () => {
+  const A = { id: 1, label: 'a' }
+  const B = { id: 2, label: 'b' }
+  const C = { id: 3, label: 'c' }
+
+  it('finds the single new record', () => {
+    expect(findOrphanedPhoneId([A], [A, B])).toBe(2)
+  })
+
+  it('returns null when nothing new appeared', () => {
+    expect(findOrphanedPhoneId([A, B], [A, B])).toBeNull()
+  })
+
+  it('returns null when more than one record is new (ambiguous)', () => {
+    expect(findOrphanedPhoneId([A], [A, B, C])).toBeNull()
+  })
+})
+
+describe('scheduleDecoyHandOff', () => {
+  const answer = { id: 9, ephemeralPubkey: E, sealed: 'ciphertext' }
+  const event = buildHandOffEvent(answer, R, 1_700_000_000_000)
+
+  it('waits a few seconds of jitter by default', () => {
+    expect(decoyHandOffDelayMs(() => 0)).toBe(2_000)
+    expect(decoyHandOffDelayMs(() => 1)).toBe(5_000)
+  })
+
+  it('publishes the same event again from the supplied pool after the delay, then reports done', async () => {
+    vi.useFakeTimers()
+    try {
+      const pool = fakePool(['wss://relay.example'], ['wss://relay.example'])
+      const onDone = vi.fn()
+      scheduleDecoyHandOff(['wss://relay.example'], event, { pool, onDone, delayMs: 1_000 })
+      expect(pool.order).toEqual([])
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(pool.order).toEqual(['open wss://relay.example'])
+      expect(pool.published).toEqual([event])
+      expect(onDone).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never throws when every relay is unreachable', async () => {
+    vi.useFakeTimers()
+    try {
+      const pool = fakePool([], [])
+      const onDone = vi.fn()
+      scheduleDecoyHandOff(['wss://relay.example'], event, { pool, onDone, delayMs: 0 })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onDone).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
