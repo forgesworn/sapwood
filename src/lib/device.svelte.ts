@@ -840,14 +840,26 @@ function isNvsStats(
 
 function applyRelayStatus(raw: Record<string, unknown>) {
   appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
+  // A truncated reply (low-heap fallback, `minimal_status_json` in
+  // firmware/src/relay.rs) drops `capabilities` and `slots` to save the
+  // allocation their policy-engine calls would cost — it is not saying the
+  // signer has none. Carry the previous poll's values forward instead of
+  // collapsing them to empty/zero, or a manager watching a fragmented-heap
+  // signer sees pairing capability vanish and persona pairing breaks until
+  // the heap recovers and a full poll lands. `at_rest`/`unlock_phone_count`
+  // need no such carry-forward: the truncated reply still sends them fresh.
+  const truncated = raw.truncated === true
+  const previous = device.relayStatus
   const status: RelayStatus = {
     master_count: Number(raw.master_count ?? 0),
-    slots: Number(raw.slots ?? 0),
+    slots: typeof raw.slots === 'number'
+      ? raw.slots
+      : truncated && previous ? previous.slots : Number(raw.slots ?? 0),
     mode: String(raw.mode ?? 'wifi-standalone'),
     relay: String(raw.relay ?? ''),
     capabilities: Array.isArray(raw.capabilities)
       ? raw.capabilities.filter((value): value is string => typeof value === 'string')
-      : [],
+      : truncated && previous ? previous.capabilities : [],
     ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
     ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
     ...(typeof raw.crashed_during === 'string' ? { crashed_during: raw.crashed_during } : {}),
