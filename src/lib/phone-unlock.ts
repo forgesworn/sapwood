@@ -32,6 +32,15 @@ export const LABEL_MAX_BYTES = 16
 export const CHECK_CONTEXT = 'heartwood-unlock:enrol-check'
 /** The capability a signer lists in get_status when it serves phone unlock. */
 export const PHONE_UNLOCK_CAPABILITY = 'phone_unlock_v1'
+/** The capability a signer lists in get_status when `enrol_unlock_phone`
+ *  works over the relay, not only the cable. */
+export const RELAY_ENROL_CAPABILITY = 'phone_enrol_relay_v1'
+/** spoken-token context for the board's request-code words, derived from the
+ *  phone's one-off enrolment key. The owner holds only if these match the
+ *  phone that made the key, never a copy this page shows as a convenience. */
+export const REQUEST_CODE_CONTEXT = 'heartwood-unlock:enrol-request'
+/** How many words the board's enrol card leads with. */
+export const REQUEST_CODE_WORDS = 5
 
 const CODE_PREFIX = 'heartwood-unlock:enrol?'
 const HEX64 = /^[0-9a-f]{64}$/
@@ -70,6 +79,95 @@ function utf8Length(text: string): number {
 
 function isRelayUrl(url: string): boolean {
   return /^wss?:\/\/\S+$/.test(url) && url.length <= 256
+}
+
+/**
+ * Fit a label the board will accept: printable ASCII (0x20-0x7E) only, and at
+ * most `maxBytes`. Sapwood transliterates common accented Latin letters (so
+ * "Café" becomes "Cafe" rather than being refused outright), strips anything
+ * else the board's fonts could not draw as itself, then truncates. A label
+ * that becomes empty falls back to "phone", matching the board's own default
+ * for an empty label.
+ */
+export function fitLabel(label: string, maxBytes = LABEL_MAX_BYTES): string {
+  const transliterated = label.normalize('NFKD').replace(/[̀-ͯ]/g, '')
+  const ascii = Array.from(transliterated)
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0
+      return code >= 0x20 && code <= 0x7e
+    })
+    .join('')
+    .trim()
+  if (!ascii) return 'phone'
+  let bytes = new TextEncoder().encode(ascii)
+  if (bytes.length <= maxBytes) return ascii
+  bytes = bytes.slice(0, maxBytes)
+  // Never split a multi-byte sequence: ASCII is single-byte, so this only
+  // matters if maxBytes lands mid-surrogate for input this function already
+  // restricted to ASCII, which it cannot.
+  return new TextDecoder().decode(bytes).trimEnd()
+}
+
+/**
+ * Plain wording for a refusal the board sends back for `enrol_unlock_phone`
+ * (over the cable or the relay), mirroring `EnrolRefusal::message` in
+ * `common/src/phone_unlock.rs`. Anything not recognised is shown as the board
+ * sent it.
+ */
+export function friendlyEnrolRefusal(reason: string): string {
+  if (/set a PIN or vault key first/i.test(reason)) {
+    return 'Phone unlock opens encrypted storage, and this signer is not encrypted. Turn on Encrypt at rest (Security, below) or set a boot PIN, then add the phone with a new code.'
+  }
+  if (/declined on the board/i.test(reason)) {
+    return 'Declined on the signer, so nothing was added. Each code works once: start again on the phone for a new one.'
+  }
+  if (/already used/i.test(reason)) {
+    return 'The signer has already seen this code. Start again on the phone for a new one.'
+  }
+  if (/relays configured/i.test(reason)) {
+    return 'The signer has no WiFi relays set, so it could never reach a phone. Set its network up first (Network, above).'
+  }
+  if (/unlock the board first/i.test(reason)) {
+    return 'The signer is locked or holds no identity yet. Unlock it, or add an identity, first.'
+  }
+  if (/requires the device operator/i.test(reason)) {
+    return 'Only the device operator can add a phone remotely.'
+  }
+  if (/another phone is already waiting/i.test(reason)) {
+    return 'Another phone is already waiting for a press on the signer. Wait for that to resolve, then try again.'
+  }
+  if (/^label longer than/i.test(reason)) {
+    return 'That label is too long for the signer to store. Shorten it and try again.'
+  }
+  if (/phones already enrolled/i.test(reason)) {
+    return 'This signer already holds as many phones as it can. Revoke one before adding another.'
+  }
+  if (/device operator changed while the card was up/i.test(reason)) {
+    return 'The device operator changed while the signer\'s card was up, so nothing was added. Try again.'
+  }
+  if (/no relay was live to carry the answer/i.test(reason)) {
+    return 'No relay was live when the signer tried to answer, so nothing was added. Check the signer\'s WiFi and try again.'
+  }
+  if (/device low on memory/i.test(reason)) {
+    return 'The signer is low on memory right now. Nothing was added: wait a moment and try again.'
+  }
+  if (/signer is busy with another approval/i.test(reason)) {
+    return 'The signer is busy with another approval. Wait for it to finish, then try again.'
+  }
+  return reason
+}
+
+/**
+ * The one phone id present in `after` but not `before`, when there is
+ * exactly one: the record `enrol_unlock_phone` left behind after its request
+ * timed out with no reply, so nobody holds its secret ("Not sent / revoke id
+ * N" on the board's own screen). Ambiguous (none, or more than one new
+ * record) returns null, since nothing here can tell those apart safely.
+ */
+export function findOrphanedPhoneId(before: UnlockPhone[], after: UnlockPhone[]): number | null {
+  const known = new Set(before.map((phone) => phone.id))
+  const added = after.filter((phone) => !known.has(phone.id))
+  return added.length === 1 ? added[0].id : null
 }
 
 /**
@@ -115,6 +213,24 @@ export function checkCode(ephemeralPubkeyHex: string): string {
   if (!HEX64.test(ephemeralPubkeyHex)) throw new Error('hand-off key must be 64 hex characters')
   const hex = deriveToken(ephemeralPubkeyHex, CHECK_CONTEXT, 0, { format: 'hex', length: 6 }).toUpperCase()
   return `${hex.slice(0, 3)} ${hex.slice(3)}`
+}
+
+/**
+ * The five words the board's enrol card leads with, from the phone's one-off
+ * enrolment key P: `deriveToken(P, 'heartwood-unlock:enrol-request', 0,
+ * {format:'words', count:5})`. Sapwood may show this too, but only as a
+ * convenience: the owner's compare is the BOARD against the PHONE (Cambium's
+ * own screen), never against this page, since whoever relayed the request
+ * could have swapped P for one of their own.
+ */
+export function requestWords(enrolPubkeyHex: string): string[] {
+  if (!HEX64.test(enrolPubkeyHex)) throw new Error('enrolment key must be 64 hex characters')
+  return deriveToken(enrolPubkeyHex, REQUEST_CODE_CONTEXT, 0, { format: 'words', count: REQUEST_CODE_WORDS }).split(' ')
+}
+
+/** The request-code words, space-joined, as the board's card shows them. */
+export function requestCode(enrolPubkeyHex: string): string {
+  return requestWords(enrolPubkeyHex).join(' ')
 }
 
 /** Read the board's list answer, failing closed on anything malformed. */
@@ -243,6 +359,12 @@ export async function enrolPhone(
   }
   deps.onBoard?.()
   const answer = parseEnrolAnswer(await deps.enrol(code.enrolPubkey, code.label))
+  // Residual (documented in heartwood-esp32's SECURITY-MODEL.md): the
+  // enrolment request and this hand-off both leave from this browser at
+  // about the same moment, so a relay that sees both can link them to this
+  // enrolment. Publishing the hand-off again later, or from elsewhere, would
+  // not remove that link, since the first publish already happened alongside
+  // the request; it would only add a second, equally correlatable event.
   const accepted = await publishHandOff(deps.pool, live, buildHandOffEvent(answer, code.rendezvous))
   if (!accepted.length) throw new HandOffUndelivered(answer.id)
   return { id: answer.id, checkCode: checkCode(answer.ephemeralPubkey), accepted }

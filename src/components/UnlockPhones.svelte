@@ -7,10 +7,11 @@
   import { SimplePool } from 'nostr-tools/pool'
   import {
     device, listUnlockPhones, revokeUnlockPhone, setAnnounceOperator, enrolUnlockPhone,
-    PhoneUnlockAuthRequired,
+    PhoneUnlockAuthRequired, supportsPhoneEnrolRelay,
   } from '../lib/device.svelte.js'
   import {
     parseEnrolmentCode, enrolPhone, HandOffUndelivered, markCodeSpent, isCodeSpent,
+    requestWords, fitLabel, friendlyEnrolRefusal, findOrphanedPhoneId,
     type EnrolmentCode, type EnrolResult, type UnlockPhoneList,
   } from '../lib/phone-unlock.js'
   import ConfirmButton from './ConfirmButton.svelte'
@@ -26,6 +27,11 @@
   let { count = $bindable(null), refresh = 0 }: Props = $props()
 
   const overUsb = $derived(device.mode === 'serial')
+  // Older firmware has no route to enrol_unlock_phone over the relay at all
+  // (a NIP-46 client, and every management method, is refused before the
+  // capability check even runs), so this stays cable-only until it does.
+  const overRelay = $derived(device.mode === 'relay' && supportsPhoneEnrolRelay())
+  const canAdd = $derived(overUsb || overRelay)
   // A locked signer answers almost nothing, and its empty refusal would read
   // as firmware without phone unlock.
   const locked = $derived(device.masters.some((m) => m.locked === true))
@@ -126,7 +132,7 @@
   }
 
   // --- Add a phone ---
-  type Step = 'idle' | 'scan' | 'paste' | 'confirm' | 'working' | 'done' | 'failed'
+  type Step = 'idle' | 'scan' | 'paste' | 'confirm' | 'working' | 'done' | 'failed' | 'orphan'
   let step = $state<Step>('idle')
   let pasted = $state('')
   let code = $state<EnrolmentCode | null>(null)
@@ -135,6 +141,10 @@
   let addError = $state<string | null>(null)
   /** Set once the board has been asked: its enrolment key is then spent. */
   let codeSpent = $state(false)
+  /** A record the board may have kept with nobody holding its secret: the
+   *  relay request timed out with no reply (see `add`'s catch). */
+  let orphanId = $state<number | null>(null)
+  let orphanBusy = $state(false)
 
   const pastedCode = $derived(pasted.trim() ? parseEnrolmentCode(pasted) : null)
 
@@ -149,6 +159,7 @@
     addError = null
     codeSpent = false
     scanSpent = false
+    orphanId = null
   }
 
   function accept(text: string): boolean {
@@ -163,23 +174,43 @@
     return true
   }
 
-  function friendly(reason: string): string {
-    if (/set a PIN or vault key first/i.test(reason)) {
-      return 'Phone unlock opens encrypted storage, and this signer is not encrypted. Turn on Encrypt at rest (Security, below) or set a boot PIN, then add the phone with a new code.'
+  /**
+   * Look for a phone id the enrolment left behind: the relay timed out with
+   * no reply, but the board may still have written a record before its
+   * answer failed to reach any live session. Nobody holds that record's
+   * secret, so it unlocks nothing; offering to revoke it is the only useful
+   * next step ("Not sent / revoke id N" on the board's own screen).
+   */
+  async function checkOrphan(before: UnlockPhoneList['phones']): Promise<void> {
+    try {
+      const after = await listUnlockPhones({ authenticate: true })
+      if (after) list = after
+      const id = after ? findOrphanedPhoneId(before, after.phones) : null
+      if (id !== null) {
+        orphanId = id
+        step = 'orphan'
+      } else {
+        addError = 'The signer never answered in time. It may not have added anything: check the list above, then start again with a new code.'
+        step = 'failed'
+      }
+    } catch {
+      addError = 'The signer never answered in time, and Sapwood could not re-check its phones. Refresh this page, check the list above for a stray record, then start again with a new code.'
+      step = 'failed'
     }
-    if (/declined on the board/i.test(reason)) {
-      return 'Declined on the signer, so nothing was added. Each code works once: start again on the phone for a new one.'
+  }
+
+  async function revokeOrphan(id: number): Promise<void> {
+    orphanBusy = true
+    try {
+      await revokeUnlockPhone(id)
+      await load(true)
+      step = 'idle'
+      orphanId = null
+    } catch (e) {
+      addError = e instanceof Error ? e.message : 'Revoking failed.'
+    } finally {
+      orphanBusy = false
     }
-    if (/already used/i.test(reason)) {
-      return 'The signer has already seen this code. Start again on the phone for a new one.'
-    }
-    if (/relays configured/i.test(reason)) {
-      return 'The signer has no WiFi relays set, so it could never reach a phone. Set its network up first (Network, above).'
-    }
-    if (/unlock the board first/i.test(reason)) {
-      return 'The signer is locked or holds no identity yet. Unlock it, or add an identity, first.'
-    }
-    return reason
   }
 
   async function add() {
@@ -188,23 +219,34 @@
     addError = null
     working = 'Reaching the phone\'s relays…'
     const pool = new SimplePool()
+    const isRelay = overRelay
+    const before = list?.phones ?? []
+    const label = fitLabel(code.label)
     try {
       result = await enrolPhone(code, {
         pool,
-        enrol: async (enrolPubkey, label) => {
+        enrol: async (enrolPubkey) => {
           codeSpent = true
           if (code) markCodeSpent(code)
           return enrolUnlockPhone(enrolPubkey, label,
-            `Confirm on your signer: it shows “Add unlock phone?” and ${label}. Hold its button within 30 seconds.`)
+            `Check the signer: it shows ADD PHONE and five words, two at a time over about 12 seconds before it will accept a hold. Compare the five words with your phone, then hold its button.`)
         },
-        onBoard: () => { working = 'Waiting for the signer\'s button…' },
+        onBoard: () => {
+          working = isRelay
+            ? 'Waiting on the signer\'s card. This can take up to about two and a half minutes: it queues behind any other approval, then holds on screen for a press.'
+            : 'Waiting for the signer\'s button…'
+        },
       })
       step = 'done'
     } catch (e) {
-      addError = e instanceof HandOffUndelivered
-        ? e.message
-        : friendly(e instanceof Error ? e.message : 'Adding the phone failed.')
-      step = 'failed'
+      if (isRelay && /timeout waiting for device/i.test(e instanceof Error ? e.message : '')) {
+        await checkOrphan(before)
+      } else {
+        addError = e instanceof HandOffUndelivered
+          ? e.message
+          : friendlyEnrolRefusal(e instanceof Error ? e.message : 'Adding the phone failed.')
+        step = 'failed'
+      }
     } finally {
       working = null
       try { pool.destroy() } catch { /* already closed */ }
@@ -261,7 +303,7 @@
     {#if revokeStatus}<p class="hint-sm status">{revokeStatus}</p>{/if}
 
     {#if step === 'idle'}
-      {#if overUsb}
+      {#if canAdd}
         <div class="inline-form">
           <button class="btn btn-secondary btn-sm" disabled={list.phones.length >= list.max}
             onclick={() => startAdd('scan')}>Add a phone</button>
@@ -269,7 +311,7 @@
             onclick={() => startAdd('paste')}>Paste a code instead</button>
         </div>
       {:else}
-        <p class="hint-sm">Adding a phone needs the signer on the USB cable and a press on its button.</p>
+        <p class="hint-sm">Adding a phone needs the signer on the USB cable, or over the relay once its firmware serves that, and a press on its button.</p>
       {/if}
     {/if}
 
@@ -324,9 +366,17 @@
             {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
           </td></tr>
         </tbody></table>
-        <p class="hint-sm">The signer will show “Add unlock phone?” with this name. Hold its button
-          to agree. The signer then seals the phone's unlock secret to the phone, and Sapwood passes
-          it on without being able to read it.</p>
+        <p class="hint-sm">The signer shows ADD PHONE and five words, two at a time over about
+          12 seconds before it will accept a hold. Compare those five words with your phone's own
+          screen before holding the button: that is the check that matters, since whoever relayed
+          the request could have swapped the words shown here. A check code appears afterwards too,
+          but it only confirms the phone got the hand-off; it does not defend against a swapped
+          phone.</p>
+        <div class="words-preview">
+          <p class="hint-sm">Sapwood's own copy, for reference only. Compare the words on your
+            signer with your phone, not with this page:</p>
+          <p class="mono words">{requestWords(code.enrolPubkey).join(' ')}</p>
+        </div>
         <div class="inline-form">
           <button class="btn btn-primary btn-sm" onclick={add}>Add {code.label}</button>
           <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
@@ -335,12 +385,22 @@
         <p class="hint-sm">{working}</p>
       {:else if step === 'done' && result}
         <p class="success-text">The signer added {code?.label} as record {result.id}.</p>
-        <p class="hint-sm">The phone should now show these six characters:</p>
+        <p class="hint-sm">This check code confirms the phone got it: the five words you compared
+          before holding the button are what defended against a swapped phone. The phone should show
+          the same six characters:</p>
         <p class="check-code mono">{result.checkCode}</p>
         <p class="hint-sm">If they match, confirm on the phone with its screen lock. If they do
           not, someone else answered the phone first: revoke record {result.id} now and start
           again.</p>
         <button class="btn btn-secondary btn-sm" onclick={() => { step = 'idle' }}>Finished</button>
+      {:else if step === 'orphan' && orphanId !== null}
+        <p class="warn-text">{addError ?? `The signer never answered in time, but it may have kept a record nobody holds (record ${orphanId}): its secret never reached this browser, so it cannot reach the phone either.`}</p>
+        <p class="hint-sm">Revoke it, then start again with a new code from the phone.</p>
+        <div class="inline-form">
+          <button class="btn btn-secondary btn-sm" disabled={orphanBusy}
+            onclick={() => revokeOrphan(orphanId!)}>{orphanBusy ? 'Revoking…' : `Revoke record ${orphanId}`}</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle'; orphanId = null }}>Close</button>
+        </div>
       {:else if step === 'failed'}
         <p class="warn-text">{addError}</p>
         <div class="inline-form">
@@ -370,6 +430,8 @@
   .add { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.8rem; align-items: flex-start; }
   .code-input { width: 100%; box-sizing: border-box; font-size: 0.8rem; resize: vertical; }
   .check-code { font-size: 2rem; letter-spacing: 0.2em; color: var(--green); margin: 0.2rem 0; }
+  .words-preview { border-top: 1px solid var(--border); padding-top: 0.6rem; margin-top: 0.2rem; }
+  .words { font-size: 1.1rem; letter-spacing: 0.05em; }
   .status { margin-top: 0.6rem; color: var(--text-dim); }
   .announce { margin-top: 1rem; }
   .lq-buttons { display: flex; gap: 0.5rem; margin: 0.4rem 0; }
