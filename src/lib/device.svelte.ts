@@ -1756,16 +1756,18 @@ export class PhoneUnlockAuthRequired extends Error {
   constructor() { super('The signer wants this browser to authenticate over USB before it lists its phones.') }
 }
 
-// A card on the board waits 30 s for the press; the frame must outlast a
-// person reaching for it, and a timeout closes the serial session.
-const PHONE_ENROL_TIMEOUT_MS = 75_000
+// A card on the board waits 45 s for the press, and will not accept a hold
+// in its first 12 s; the frame must outlast a person reaching for it, and a
+// timeout closes the serial session.
+const PHONE_ENROL_TIMEOUT_MS = 90_000
 
 // Over the relay the request waits behind the deferred-card queue (up to 90 s
-// behind another card) and then up to 30 s on the board's own screen; give it
-// comfortably more than both, and never retry it automatically (the signer
-// refuses a reused enrolment key, and a second card could not be raised until
-// the first resolves anyway).
-const PHONE_ENROL_RELAY_TIMEOUT_MS = 150_000
+// behind another card) and then up to 45 s on the board's own screen, which
+// will not accept a hold in its first 12 s; give it comfortably more than
+// both, and never retry it automatically (the signer refuses a reused
+// enrolment key, and a second card could not be raised until the first
+// resolves anyway).
+const PHONE_ENROL_RELAY_TIMEOUT_MS = 180_000
 
 async function usbPhoneCommand(command: Record<string, unknown>, timeoutMs = SERIAL_RTT_MS): Promise<unknown | null> {
   const resp = await serialTransport.sendAndReceive(

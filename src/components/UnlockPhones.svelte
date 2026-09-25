@@ -229,11 +229,11 @@
           codeSpent = true
           if (code) markCodeSpent(code)
           return enrolUnlockPhone(enrolPubkey, label,
-            `Check the signer: it shows ADD PHONE and five words. Compare the five words with your phone, then hold its button.`)
+            `Check the signer: it shows ADD PHONE and five words, two at a time over about 12 seconds before it will accept a hold. Compare the five words with your phone, then hold its button.`)
         },
         onBoard: () => {
           working = isRelay
-            ? 'Waiting on the signer\'s card. This can take up to about two minutes: it queues behind any other approval, then holds on screen for a press.'
+            ? 'Waiting on the signer\'s card. This can take up to about two and a half minutes: it queues behind any other approval, then holds on screen for a press.'
             : 'Waiting for the signer\'s button…'
         },
       })
@@ -366,11 +366,12 @@
             {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
           </td></tr>
         </tbody></table>
-        <p class="hint-sm">The signer shows ADD PHONE and five words. Compare those five words
-          with your phone's own screen before holding the button: that is the check that matters,
-          since whoever relayed the request could have swapped the words shown here. A check code
-          appears afterwards too, but it only confirms the phone got the hand-off; it does not
-          defend against a swapped phone.</p>
+        <p class="hint-sm">The signer shows ADD PHONE and five words, two at a time over about
+          12 seconds before it will accept a hold. Compare those five words with your phone's own
+          screen before holding the button: that is the check that matters, since whoever relayed
+          the request could have swapped the words shown here. A check code appears afterwards too,
+          but it only confirms the phone got the hand-off; it does not defend against a swapped
+          phone.</p>
         <div class="words-preview">
           <p class="hint-sm">Sapwood's own copy, for reference only. Compare the words on your
             signer with your phone, not with this page:</p>
