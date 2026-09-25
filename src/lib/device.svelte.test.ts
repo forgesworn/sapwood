@@ -1938,6 +1938,39 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
+  it('shows a client revocation held only until restart as a plain outcome, not a generic error', async () => {
+    // heartwood-esp32 PR #197: revoke_client is never rolled back on a
+    // storage NACK, so the plain message must say it already applied, and
+    // the slot list must refresh so the UI does not still show it paired.
+    const { pubHex } = freshMaster()
+    let clientReads = 0
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+      }
+      if (method === 'get_network_config') return remoteNetworkResponse()
+      if (method === 'list_clients') {
+        clientReads += 1
+        return { clients: [{ slot_index: 1, label: 'kithmoot', allowed_methods: [], allowed_kinds: [] }] }
+      }
+      if (method === 'revoke_client') {
+        throw new Error(
+          'storage_unavailable: client revocation holds until the next restart only; it could not be saved, try again',
+        )
+      }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtRevokeClient(1, SLOT_FP)).rejects.toThrow(/applied now/i)
+      expect(clientReads).toBeGreaterThanOrEqual(1)
+    } finally {
+      await disconnect()
+    }
+  })
+
   it('refreshes the slot list before surfacing a cross-manager mutation conflict', async () => {
     const { pubHex } = freshMaster()
     let clientReads = 0
@@ -3007,6 +3040,49 @@ describe('per-device consent withdrawal over USB', () => {
       return { type: FrameType.SESSION_ACK, payload: new Uint8Array([0]) }
     })
     await expect(mgmtWithdrawConsent(consentSlot(), client)).rejects.toThrow('Connection changed')
+    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
+  })
+  it('shows a withdrawal that only holds until restart as a plain outcome and refreshes the list', async () => {
+    // heartwood-esp32 PR #197: the withdrawal is never rolled back, so a
+    // storage_* NACK here must not read as "not confirmed" or "refresh and
+    // retry" — it already happened.
+    const nack = (text: string) => ({ type: FrameType.NACK, payload: new TextEncoder().encode(text) })
+    serialMock.sendAndReceive
+      .mockResolvedValueOnce(nack(
+        'storage_unavailable: consent withdrawal holds until the next restart only; it could not be saved, try again',
+      ))
+      .mockResolvedValueOnce({ type: FrameType.CONNSLOT_LIST_RESP, payload: new TextEncoder().encode(JSON.stringify([consentSlot()])) })
+    await expect(mgmtWithdrawConsent(consentSlot(), client, identity)).rejects.toThrow(/applied now/i)
+    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(2)
+    expect(device.slots).toEqual([consentSlot()])
+  })
+})
+
+describe('CONNSLOT_REVOKE / CONNSLOT_UPDATE storage outcomes over USB', () => {
+  beforeEach(() => {
+    device.mode = 'serial'; device.connected = true; device.bridgeAuthed = true; device.selectedSlot = 0
+  })
+  const nack = (text: string) => ({ type: FrameType.NACK, payload: new TextEncoder().encode(text) })
+
+  it('reports a pairing revocation that already applied, and refreshes the slot list', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(nack(
+      'storage_full: pairing revocation is saved, but every pairing of this identity is gone after a restart; restart the device before making any other change, then re-pair or restore a backup',
+    ))
+    await expect(mgmtRevokeClient(3)).rejects.toThrow(/gone after a restart/i)
+    // refreshSlots fires CONNSLOT_LIST as a write; the UI must not still show
+    // this pairing as live.
+    expect(serialMock.write).toHaveBeenCalled()
+  })
+
+  it('never counts an unrecognised NACK as applied (older firmware keeps its generic refusal)', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(nack(''))
+    await expect(mgmtRevokeClient(3)).rejects.toThrow('Revoke rejected')
+    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a permission change that was rolled back for want of storage, unchanged', async () => {
+    serialMock.sendAndReceive.mockResolvedValueOnce(nack('storage_unavailable: permissions were not saved'))
+    await expect(mgmtUpdateClient(3, { auto_approve: false })).rejects.toThrow(/out of storage/i)
     expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(1)
   })
 })
