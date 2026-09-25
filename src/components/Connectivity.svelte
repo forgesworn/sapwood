@@ -407,10 +407,16 @@
       message = e instanceof Error ? e.message : String(e)
     }
   }
+
+  interface Props {
+    /** False when nested under a parent heading (e.g. a collapsible section summary). */
+    heading?: boolean
+  }
+  let { heading = true }: Props = $props()
 </script>
 
 <div class="connectivity">
-  <h2 class="section-title">Network</h2>
+  {#if heading}<h2 class="section-title">Network</h2>{/if}
   <p class="hint"><strong>WiFi-standalone</strong> is the standard setup: the signer sits on your
     network and works from anywhere. <strong>USB-only (radio off)</strong> is the hardened tier:
     no network stack runs on the key-holding chip, and Nostr apps reach it through the bridge
