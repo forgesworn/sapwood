@@ -184,10 +184,16 @@
       importing = false
     }
   }
+
+  interface Props {
+    /** False when nested under a parent heading (e.g. a collapsible section summary). */
+    heading?: boolean
+  }
+  let { heading = true }: Props = $props()
 </script>
 
 <section class="backup-restore">
-  <h2 class="section-title">Backup and restore</h2>
+  {#if heading}<h2 class="section-title">Backup and restore</h2>{/if}
   <p class="hint">
     Save this signer's app pairings and bridge secret so they survive a factory reset or a reflash.
     Without a backup, every connected app has to pair again. The signer asks you to confirm on its

@@ -243,10 +243,13 @@ test.describe('mobile', () => {
     await advancedToggle(page).click()
     await page.getByRole('button', { name: 'Device', exact: true }).click()
 
-    await expect(page.getByRole('heading', { name: 'Network', exact: true })).toBeVisible()
+    // Network and Security are collapsible, closed by default; open both.
+    await page.getByText('Network', { exact: true }).click()
     await expect(page.getByLabel('WiFi SSID')).toBeVisible()
     await expect(page.getByLabel('WiFi password')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save to device', exact: true })).toBeVisible()
+
+    await page.getByText('Security', { exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Boot PIN', exact: true })).toBeVisible()
     const unattendedWarning = page.getByText(/A boot PIN is typed over the USB cable/)
     await expect(unattendedWarning).toBeVisible()

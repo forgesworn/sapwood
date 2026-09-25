@@ -233,10 +233,16 @@
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
+
+  interface Props {
+    /** False when nested under a parent heading (e.g. a collapsible section summary). */
+    heading?: boolean
+  }
+  let { heading = true }: Props = $props()
 </script>
 
 <section class="ota" aria-label="Update firmware">
-  <h2 class="section-title">Update firmware</h2>
+  {#if heading}<h2 class="section-title">Update firmware</h2>{/if}
 
   {#if !canUpdate}
     <!-- Version state is knowable over WiFi (get_status carries the running
