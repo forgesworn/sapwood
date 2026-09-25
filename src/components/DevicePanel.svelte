@@ -517,6 +517,7 @@
     lastExportAt: pairingBackup.lastExportAt,
     crash: !!lastReset?.crash,
     fragmented,
+    recovering: !!recoveryReason,
     storageState: storage?.state ?? null,
     modeLabel: modeLabel(),
   })
@@ -561,7 +562,10 @@
     <div class="summary-rows">
       {#each summaryRows as row (row.id)}
         <div class="summary-row">
-          <span class="dot dot-{row.dot}" aria-hidden="true"></span>
+          <span class="summary-lead">
+            <span class="dot dot-{row.dot}" aria-hidden="true"></span>
+            <span class="summary-label">{row.label}</span>
+          </span>
           <span class="summary-text">{row.text}</span>
           {#if row.actionLabel}
             <button class="btn btn-secondary btn-sm summary-action" onclick={() => handleSummaryAction(row.id)}>
@@ -1110,22 +1114,36 @@
   .pairing-backup-warning { border-color: var(--amber); background: #1a1508; }
   .pairing-backup-warning .section-title { color: var(--amber); }
 
-  /* "Your signer": bold, spaced-out rows, worst concern first. */
+  /* "Your signer": bold, spaced-out rows, worst concern first. The heading
+     reads as the headline: same weight as a section summary, a touch bigger. */
   .your-signer { display: flex; flex-direction: column; gap: 0.25rem; }
+  .your-signer > .section-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 1rem; }
   .summary-rows { display: flex; flex-direction: column; gap: 1rem; }
   .summary-row {
-    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 0.75rem;
     padding: 0.9rem 1rem;
     background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   }
+  .summary-lead { flex: 0 0 13.5rem; display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
   .dot {
     flex: none; width: 0.7rem; height: 0.7rem; border-radius: 50%;
   }
   .dot-ok { background: var(--green); }
+  .dot-unknown { background: var(--text-muted); }
   .dot-attention { background: var(--amber); }
   .dot-problem { background: var(--red); }
+  .summary-label { font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .summary-text { flex: 1 1 auto; min-width: 0; font-size: 1rem; font-weight: 600; color: var(--text); }
   .summary-action { flex: none; margin-left: auto; }
+
+  /* Phone width: dot+label on their own line, then the state text, then a
+     full-width button. The dot never sits alone on a line. */
+  @media (max-width: 480px) {
+    .summary-row { flex-direction: column; align-items: stretch; gap: 0.4rem; }
+    .summary-lead { flex: none; }
+    .summary-text { flex: none; }
+    .summary-action { margin-left: 0; width: 100%; }
+  }
 
   /* Collapsible sections: bold, roomy summaries with a state word docked right. */
   .device-section {
@@ -1192,7 +1210,6 @@
     .danger-row { flex-wrap: wrap; }
     .inline-form .pw-wrap { width: 100%; }
     .summary-row { padding: 0.8rem 0.85rem; }
-    .summary-action { margin-left: 0; flex: 1 1 100%; }
     .device-section { padding: 0 0.85rem; }
   }
 </style>
