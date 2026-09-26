@@ -338,8 +338,9 @@
   .handoff { margin-top: 1.5rem; }
   .handoff .section-title { font-size: 0.95rem; color: var(--green); }
   .field { margin-bottom: 0.9rem; }
-  .qr { width: 184px; padding: 12px; background: #fff; border-radius: 6px; margin-bottom: 0.9rem; }
+  .qr { width: 220px; padding: 12px; background: #fff; border-radius: 6px; margin-bottom: 0.9rem; }
   .qr :global(svg) { display: block; width: 100%; height: auto; }
+  @media (max-height: 500px) { .qr { width: 180px; } }
   .handoff-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
   .plain-link {
     display: block; margin: 0.9rem 0 0; padding: 0; width: 100%;

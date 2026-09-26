@@ -145,6 +145,7 @@ body {
 }
 .field-input::placeholder { color: #555; }
 .field-input:focus { outline: none; border-color: var(--green-dim); }
+.field-input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
 .field-input:disabled { opacity: 0.4; }
 select.field-input { cursor: pointer; }
 .field-hint { font-size: 0.8rem; color: var(--text-dim); line-height: 1.5; }

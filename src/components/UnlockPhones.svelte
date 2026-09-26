@@ -3,7 +3,7 @@
   // signer after a restart with a tap. Add one by scanning the code Cambium
   // shows, list them, revoke one. No secret passes through Sapwood: the board
   // seals each phone's unlock secret to a key only that phone holds.
-  import { onDestroy, untrack } from 'svelte'
+  import { onDestroy, tick, untrack } from 'svelte'
   import { SimplePool } from 'nostr-tools/pool'
   import { encodeQR } from '@paulmillr/qr'
   import {
@@ -22,6 +22,8 @@
   } from '../lib/enrol-invite.js'
   import ConfirmButton from './ConfirmButton.svelte'
   import QrScanner from './QrScanner.svelte'
+  import WordPairs from './WordPairs.svelte'
+  import TogglePair from './TogglePair.svelte'
 
   /** Fallback relays for a fresh invite: the ones Sapwood already uses for
    *  this signer over the relay, its USB-reported WiFi relays, or failing
@@ -164,6 +166,9 @@
   let working = $state<string | null>(null)
   let result = $state<EnrolResult | null>(null)
   let addError = $state<string | null>(null)
+  /** Which of the two "invite-aborted" stories to tell: someone else answered,
+   *  or nobody did. */
+  let abortReason = $state<'two-phones' | 'no-relays' | null>(null)
   /** Set once the board has been asked: its enrolment key is then spent. */
   let codeSpent = $state(false)
   /** A record the board may have kept with nobody holding its secret: the
@@ -212,7 +217,8 @@
       code = inviteState.code
       step = 'confirm'
     } else if (inviteState.status === 'aborted') {
-      addError = 'Two phones answered this code. Someone else may have seen it. Nothing was added; start again.'
+      addError = 'Someone else may have seen the code. Nothing was added. Cancel on your phone, then make a new code.'
+      abortReason = 'two-phones'
       stopInvite()
       step = 'invite-aborted'
     }
@@ -225,6 +231,7 @@
     code = null
     result = null
     addError = null
+    abortReason = null
     codeSpent = false
     scanSpent = false
     orphanId = null
@@ -243,6 +250,7 @@
       zeroInviteSecret(made)
       stopInvite()
       addError = 'None of the relays answered, so the phone could not reply. Check this computer\'s connection and try again.'
+      abortReason = 'no-relays'
       step = 'invite-aborted'
       return
     }
@@ -274,6 +282,7 @@
     code = null
     result = null
     addError = null
+    abortReason = null
     codeSpent = false
     scanSpent = false
     orphanId = null
@@ -353,8 +362,7 @@
         enrol: async (enrolPubkey) => {
           codeSpent = true
           if (code) markCodeSpent(code)
-          return enrolUnlockPhone(enrolPubkey, label,
-            `Check the signer: it shows ADD PHONE and five words, two at a time over about 12 seconds before it will accept a hold. Compare the five words with your phone, then hold its button.`)
+          return enrolUnlockPhone(enrolPubkey, label, 'Signer: compare the five words, then hold its button.')
         },
         onBoard: () => {
           working = isRelay
@@ -378,13 +386,55 @@
       if (codeSpent) void load(true)
     }
   }
+
+  // --- 7.2 Add a phone: the constant enrolment card ---
+  // The heading and live region exist from the first render of the card (any
+  // step but 'idle'). Every step change sets both and moves focus to the
+  // heading, so the compare-and-confirm bench flow announces itself to
+  // assistive tech without the owner hunting for what changed.
+  const confirmWords = $derived(code ? requestWords(code.enrolPubkey) : [])
+
+  const phase = $derived(
+    step === 'invite' ? (invite ? 'invite-ready' : 'invite-opening') : step,
+  )
+
+  let cardHeadingEl = $state<HTMLHeadingElement | null>(null)
+  let cardHeadingText = $state('')
+  let liveText = $state('')
+
+  $effect(() => {
+    const p = phase
+    const label = code?.label ?? 'The phone'
+    if (p === 'invite-opening') { cardHeadingText = 'Add a phone'; liveText = 'Opening relays.' }
+    else if (p === 'invite-ready') { cardHeadingText = 'Scan this with Cambium'; liveText = 'Code ready. It expires in 10 minutes.' }
+    else if (p === 'invite-expired') { cardHeadingText = 'Code expired'; liveText = 'Code expired.' }
+    else if (p === 'invite-aborted') {
+      cardHeadingText = abortReason === 'no-relays' ? 'Could not reach the relays' : 'Two phones answered'
+      liveText = abortReason === 'no-relays' ? 'Could not reach the relays.' : 'Stopped: two phones answered.'
+    } else if (p === 'scan' || p === 'paste') { cardHeadingText = 'Add a phone'; liveText = '' }
+    else if (p === 'confirm') { cardHeadingText = `${label} wants to unlock this signer`; liveText = `${label} answered. Compare the five words.` }
+    else if (p === 'working') { cardHeadingText = 'Check the signer'; liveText = 'Sent to the signer. Hold its button when the words match.' }
+    else if (p === 'done') { cardHeadingText = `${label} added`; liveText = result ? `${label} added. Check code ${result.checkCode}.` : '' }
+    else if (p === 'orphan') { cardHeadingText = 'A stray record may be left'; liveText = '' }
+    else if (p === 'failed') { cardHeadingText = 'Not added'; liveText = '' }
+    if (p !== 'idle') void tick().then(() => cardHeadingEl?.focus())
+  })
+
+  // Announce the countdown only at its two milestones and at expiry (the
+  // heading effect above covers expiry): a live region that spoke every
+  // second would be unusable.
+  $effect(() => {
+    const s = inviteSecondsLeft
+    if (phase !== 'invite-ready') return
+    if (s === 300) liveText = 'Five minutes left to scan the code.'
+    else if (s === 60) liveText = 'One minute left to scan the code.'
+  })
 </script>
 
 <div class="unlock-phones">
   <h3 class="sub-title">Phones that can unlock</h3>
-  <p class="hint">A phone running Cambium can unlock this signer after a power cut: it shows
-    a notification, and one tap plus the phone's screen lock sends the unlock. Nothing on the
-    wire names the phone. A lost phone is revoked here without changing anything else.</p>
+  <p class="hint">A phone running Cambium can unlock this signer after a power cut. Nothing on the
+    wire names the phone. Revoking a lost phone changes nothing else.</p>
 
   {#if support === 'checking'}
     <p class="hint-sm">Asking the signer…</p>
@@ -421,16 +471,17 @@
           </li>
         {/each}
       </ul>
-      <p class="hint-sm">{list.phones.length} of {list.max}.{#if list.phones.length === 1}
+      <p class="hint-sm">{list.phones.length} of {list.max} phones.{#if list.phones.length === 1}
         Add a second device (a spare, or a family member's phone) so losing this one abroad does not
-        leave the signer locked.{/if}</p>
+        leave the signer locked.{:else if list.phones.length >= list.max}
+        This signer holds {list.max} phones, its limit. Revoke one to add another.{/if}</p>
     {/if}
     {#if revokeStatus}<p class="hint-sm status">{revokeStatus}</p>{/if}
 
     {#if step === 'idle'}
       {#if canAdd}
         <div class="inline-form">
-          <button class="btn btn-primary btn-sm" disabled={list.phones.length >= list.max}
+          <button class="btn btn-primary add-phone-btn" disabled={list.phones.length >= list.max}
             onclick={startInvite}>Add a phone</button>
         </div>
         <details class="disclosure">
@@ -447,6 +498,138 @@
       {/if}
     {/if}
 
+    {#if step !== 'idle'}
+      <div class="enrol card">
+        <h4 class="enrol-heading" tabindex="-1" bind:this={cardHeadingEl}>{cardHeadingText}</h4>
+        <p role="status" aria-live="polite" class="hint-sm enrol-live">{liveText}</p>
+
+        {#if step === 'invite'}
+          {#if !invite}
+            <p class="hint-sm">Opening relays…</p>
+          {:else}
+            <div class="invite-layout">
+              <div class="qr invite-qr">{@html inviteQr}</div>
+              <div class="invite-steps">
+                <ol class="hint-sm">
+                  <li>Open Cambium on the phone.</li>
+                  <li>Open this signer's screen.</li>
+                  <li>Tap Set up phone unlock, then Scan Sapwood's code.</li>
+                </ol>
+                <p class="hint-sm countdown">Expires in {formatCountdown(inviteSecondsLeft)}</p>
+                <button class="btn btn-secondary btn-sm" onclick={() => { stopInvite(); step = 'idle' }}>Cancel</button>
+              </div>
+            </div>
+          {/if}
+        {:else if step === 'invite-expired'}
+          <p class="hint-sm">Codes last 10 minutes. Cancel on the phone, then make a new code.</p>
+          <div class="inline-form">
+            <button class="btn btn-primary btn-sm" onclick={startInvite}>New code</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
+          </div>
+        {:else if step === 'invite-aborted'}
+          <p class="warn-text">{addError}</p>
+          <div class="inline-form">
+            <button class="btn btn-primary btn-sm" onclick={startInvite}>New code</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
+          </div>
+        {:else if step === 'scan' || step === 'paste'}
+          <p class="hint-sm">On the phone, open Cambium and tap “Set up phone unlock” under this
+            signer. It shows a code; nothing in it is secret. Its “Copy code” button gives the text
+            to paste here.</p>
+          {#if step === 'scan'}
+            <QrScanner onresult={accept} oncancel={() => { step = 'paste' }} />
+            {#if scanSpent}
+              <p class="warn-text">That code was already used here. Start again on the phone for a new one.</p>
+            {/if}
+          {:else}
+            <textarea class="field-input code-input" rows="3" spellcheck="false" autocomplete="off"
+              placeholder="heartwood-unlock:enrol?v=1&amp;…" bind:value={pasted}></textarea>
+            {#if pasted.trim() && !pastedCode}
+              <p class="warn-text">That is not a phone-unlock code from Cambium.</p>
+            {:else if pastedSpent}
+              <p class="warn-text">This code was already used here. Start again on the phone for a new one.</p>
+            {/if}
+            <div class="inline-form">
+              <button class="btn btn-secondary btn-sm" disabled={!pastedCode || pastedSpent}
+                onclick={() => accept(pasted)}>Use this code</button>
+              <button class="btn btn-ghost btn-sm" onclick={() => startAdd('scan')}>Scan instead</button>
+            </div>
+          {/if}
+          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
+        {:else if step === 'confirm' && code}
+          <p class="hint-sm">Check Cambium shows these five words, in this order.</p>
+          <WordPairs words={confirmWords} />
+          <p class="hint-sm">Next, the signer shows the same words, two at a time. Hold its button
+            only if all three screens match.</p>
+          <div class="inline-form">
+            <button class="btn btn-primary btn-sm" onclick={continueFromConfirm}>Send to the signer</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => { stopInvite(); step = 'idle' }}>Cancel</button>
+          </div>
+          <details class="disclosure">
+            <summary>Why compare with the phone, not only this page?</summary>
+            <p class="hint-sm">Whoever relayed the request could have swapped the words shown here.
+              The phone and the signer cannot both be swapped, so their match is the check that
+              counts. The check code afterwards only confirms the phone received the hand-off.</p>
+            <table class="kv-table"><tbody>
+              <tr><td class="label">Phone</td><td>{code.label}</td></tr>
+              <tr><td class="label">Relays</td><td>
+                {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
+              </td></tr>
+            </tbody></table>
+          </details>
+        {:else if step === 'working'}
+          <p class="hint-sm">Wait for ADD PHONE. When its five words match these and the phone, hold
+            its button.</p>
+          <WordPairs words={confirmWords} />
+          {#if overRelay}
+            <p class="hint-sm">This can take up to about two and a half minutes: the card queues
+              behind any other approval.</p>
+          {/if}
+          {#if working}<p class="hint-sm status">{working}</p>{/if}
+        {:else if step === 'done' && result}
+          <p class="hint-sm">Check code</p>
+          <p class="check-code mono">{result.checkCode}</p>
+          <p class="hint-sm">Cambium and the signer show the same code. If all three match, confirm
+            on the phone with its screen lock.</p>
+          <div class="inline-form">
+            <button class="btn btn-secondary btn-sm" onclick={() => { step = 'idle' }}>Done</button>
+            <ConfirmButton
+              label="Codes don't match: revoke"
+              question={`Revoke record ${result.id}? The phone that answered can no longer unlock this signer.`}
+              confirmLabel="Yes, revoke"
+              busyLabel="Revoking…"
+              busy={revoking === result.id}
+              buttonClass="btn btn-secondary btn-sm"
+              onconfirm={() => {
+                const r = result
+                const label = code?.label ?? 'the phone'
+                if (r) void revoke(r.id, label)
+                step = 'idle'
+              }}
+            />
+          </div>
+        {:else if step === 'orphan' && orphanId !== null}
+          <p class="warn-text">{addError ?? `The signer never answered in time, but it may have kept a record nobody holds (record ${orphanId}): its secret never reached this browser, so it cannot reach the phone either.`}</p>
+          <p class="hint-sm">Revoke it, then start again with a new code from the phone.</p>
+          <div class="inline-form">
+            <button class="btn btn-secondary btn-sm" disabled={orphanBusy}
+              onclick={() => revokeOrphan(orphanId!)}>{orphanBusy ? 'Revoking…' : `Revoke record ${orphanId}`}</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle'; orphanId = null }}>Close</button>
+          </div>
+        {:else if step === 'failed'}
+          <p class="warn-text">{addError}</p>
+          <div class="inline-form">
+            {#if codeSpent}
+              <button class="btn btn-secondary btn-sm" onclick={() => startAdd('scan')}>Scan a new code</button>
+            {:else}
+              <button class="btn btn-secondary btn-sm" onclick={add}>Try again</button>
+            {/if}
+            <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <details class="disclosure announce">
       <summary>Sapwood's own unlock message</summary>
       <p class="hint-sm">When it is locked, the signer also posts a message tagged with your operator
@@ -454,120 +637,17 @@
         can link the signer's restarts. Phone messages carry no such tag. If your phones are enough,
         turn it off; Sapwood can still unlock over USB. It stays on while no phone is set up, or a
         locked signer could only be unlocked over the cable.</p>
-      <div class="lq-buttons">
-        <button class="btn btn-sm" class:btn-secondary={!list.announceOperator} class:lq-on={list.announceOperator}
-          disabled={announcePending || list.announceOperator} onclick={() => changeAnnounce(true)}>On</button>
-        <button class="btn btn-sm" class:btn-secondary={list.announceOperator} class:lq-on={!list.announceOperator}
-          disabled={announcePending || !list.announceOperator || list.phones.length === 0}
-          onclick={() => changeAnnounce(false)}>Off</button>
-      </div>
+      <TogglePair
+        label="Sapwood's own unlock message"
+        onLabel="On"
+        offLabel="Off"
+        value={list.announceOperator}
+        pending={announcePending}
+        onDisabled={list.phones.length === 0}
+        onchange={changeAnnounce}
+      />
       {#if announceStatus}<p class="hint-sm status">{announceStatus}</p>{/if}
     </details>
-  {/if}
-
-  {#if step !== 'idle'}
-    <div class="add card">
-      {#if step === 'invite'}
-        {#if !invite}
-          <p class="hint-sm">Opening relays…</p>
-        {:else}
-          <h4 class="invite-title">Scan this with Cambium</h4>
-          <p class="hint-sm">On the phone, open Cambium, go to this signer's screen, and tap
-            "Set up phone unlock", then "Scan Sapwood's code".</p>
-          <div class="qr invite-qr">{@html inviteQr}</div>
-          <p class="hint-sm countdown">Waiting for the phone. Expires in {formatCountdown(inviteSecondsLeft)}.</p>
-        {/if}
-        <button class="btn btn-ghost btn-sm" onclick={() => { stopInvite(); step = 'idle' }}>Cancel</button>
-      {:else if step === 'invite-expired'}
-        <p class="warn-text">Code expired, make a new one.</p>
-        <div class="inline-form">
-          <button class="btn btn-primary btn-sm" onclick={startInvite}>New code</button>
-          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
-        </div>
-      {:else if step === 'invite-aborted'}
-        <p class="warn-text">{addError}</p>
-        <div class="inline-form">
-          <button class="btn btn-primary btn-sm" onclick={startInvite}>New code</button>
-          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
-        </div>
-      {:else if step === 'scan' || step === 'paste'}
-        <p class="hint-sm">On the phone, open Cambium and tap “Set up phone unlock” under this
-          signer. It shows a code; nothing in it is secret. Its “Copy code” button gives the text
-          to paste here.</p>
-        {#if step === 'scan'}
-          <QrScanner onresult={accept} oncancel={() => { step = 'paste' }} />
-          {#if scanSpent}
-            <p class="warn-text">That code was already used here. Start again on the phone for a new one.</p>
-          {/if}
-        {:else}
-          <textarea class="field-input code-input" rows="3" spellcheck="false" autocomplete="off"
-            placeholder="heartwood-unlock:enrol?v=1&amp;…" bind:value={pasted}></textarea>
-          {#if pasted.trim() && !pastedCode}
-            <p class="warn-text">That is not a phone-unlock code from Cambium.</p>
-          {:else if pastedSpent}
-            <p class="warn-text">This code was already used here. Start again on the phone for a new one.</p>
-          {/if}
-          <div class="inline-form">
-            <button class="btn btn-secondary btn-sm" disabled={!pastedCode || pastedSpent}
-              onclick={() => accept(pasted)}>Use this code</button>
-            <button class="btn btn-ghost btn-sm" onclick={() => startAdd('scan')}>Scan instead</button>
-          </div>
-        {/if}
-        <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Cancel</button>
-      {:else if step === 'confirm' && code}
-        <table class="kv-table"><tbody>
-          <tr><td class="label">Phone</td><td>{code.label}</td></tr>
-          <tr><td class="label">Waiting on</td><td>
-            {#each code.relays as relay}<div class="mono">{relay}</div>{/each}
-          </td></tr>
-        </tbody></table>
-        <p class="hint-sm">The signer shows ADD PHONE and five words, two at a time over about
-          12 seconds before it will accept a hold.</p>
-        <div class="words-preview">
-          <p class="words-headline">Check your phone shows these same five words</p>
-          <p class="mono words">{requestWords(code.enrolPubkey).join(' ')}</p>
-          <p class="hint-sm">Compare them with your phone's own screen, and with the signer's
-            card, before holding the button: that is the check that matters, since whoever
-            relayed the request could have swapped the words shown here. A check code appears
-            afterwards too, but it only confirms the phone got the hand-off; it does not defend
-            against a swapped phone.</p>
-        </div>
-        <div class="inline-form">
-          <button class="btn btn-primary btn-sm" onclick={continueFromConfirm}>Continue</button>
-          <button class="btn btn-ghost btn-sm" onclick={() => { stopInvite(); step = 'idle' }}>Cancel</button>
-        </div>
-      {:else if step === 'working'}
-        <p class="hint-sm">{working}</p>
-      {:else if step === 'done' && result}
-        <p class="success-text">The signer added {code?.label} as record {result.id}.</p>
-        <p class="hint-sm">This check code confirms the phone got it: the five words you compared
-          before holding the button are what defended against a swapped phone. The phone should show
-          the same six characters:</p>
-        <p class="check-code mono">{result.checkCode}</p>
-        <p class="hint-sm">If they match, confirm on the phone with its screen lock. If they do
-          not, someone else answered the phone first: revoke record {result.id} now and start
-          again.</p>
-        <button class="btn btn-secondary btn-sm" onclick={() => { step = 'idle' }}>Finished</button>
-      {:else if step === 'orphan' && orphanId !== null}
-        <p class="warn-text">{addError ?? `The signer never answered in time, but it may have kept a record nobody holds (record ${orphanId}): its secret never reached this browser, so it cannot reach the phone either.`}</p>
-        <p class="hint-sm">Revoke it, then start again with a new code from the phone.</p>
-        <div class="inline-form">
-          <button class="btn btn-secondary btn-sm" disabled={orphanBusy}
-            onclick={() => revokeOrphan(orphanId!)}>{orphanBusy ? 'Revoking…' : `Revoke record ${orphanId}`}</button>
-          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle'; orphanId = null }}>Close</button>
-        </div>
-      {:else if step === 'failed'}
-        <p class="warn-text">{addError}</p>
-        <div class="inline-form">
-          {#if codeSpent}
-            <button class="btn btn-secondary btn-sm" onclick={() => startAdd('scan')}>Scan a new code</button>
-          {:else}
-            <button class="btn btn-secondary btn-sm" onclick={add}>Try again</button>
-          {/if}
-          <button class="btn btn-ghost btn-sm" onclick={() => { step = 'idle' }}>Close</button>
-        </div>
-      {/if}
-    </div>
   {/if}
 </div>
 
@@ -582,18 +662,23 @@
   .phone-name { font-weight: 600; color: var(--text); }
   .phone-id { color: var(--text-dim); font-size: 0.8rem; flex: 1; }
   .inline-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
-  .add { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.8rem; align-items: flex-start; }
+  .add-phone-btn { width: 100%; }
+  .enrol { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.8rem; align-items: flex-start; }
+  .enrol-heading { font-size: 1.1rem; font-weight: 700; margin: 0; color: var(--text); }
+  .enrol-heading:focus { outline: 2px solid var(--green); outline-offset: 2px; }
+  .enrol-live:empty { display: none; }
   .code-input { width: 100%; box-sizing: border-box; font-size: 0.8rem; resize: vertical; }
-  .check-code { font-size: 2rem; letter-spacing: 0.2em; color: var(--green); margin: 0.2rem 0; }
-  .words-preview { border-top: 1px solid var(--border); padding-top: 0.6rem; margin-top: 0.2rem; }
-  .words-headline { font-weight: 700; margin: 0 0 0.3rem; }
-  .words { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.05em; margin: 0 0 0.5rem; }
+  .check-code { font-size: 2rem; font-weight: 600; letter-spacing: 0.2em; color: var(--green); margin: 0.2rem 0; font-variant-numeric: slashed-zero; }
   .status { margin-top: 0.6rem; color: var(--text-dim); }
   .announce { margin-top: 1rem; }
-  .lq-buttons { display: flex; gap: 0.5rem; margin: 0.4rem 0; }
-  .lq-on { border-color: var(--green-dim); color: var(--green); background: #08130d; }
-  .invite-title { font-size: 1.1rem; font-weight: 700; margin: 0; color: var(--text); }
-  .qr { width: 220px; padding: 12px; background: #fff; border-radius: 6px; margin: 0.4rem 0; }
+  .qr { width: 220px; padding: 12px; background: #fff; border-radius: 6px; margin: 0.4rem 0; flex: none; }
   .qr :global(svg) { display: block; width: 100%; height: auto; }
   .countdown { font-weight: 600; }
+  .invite-layout { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+  .invite-steps { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; min-width: 12rem; flex: 1; }
+  .invite-steps ol { margin: 0; padding-left: 1.1rem; }
+
+  @media (max-height: 500px) {
+    .qr { width: 180px; }
+  }
 </style>

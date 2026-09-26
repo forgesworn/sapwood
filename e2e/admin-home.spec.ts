@@ -243,17 +243,17 @@ test.describe('mobile', () => {
     await advancedToggle(page).click()
     await page.getByRole('button', { name: 'Device', exact: true }).click()
 
-    // Network and Security are collapsible, closed by default; open both.
+    // Network and After a power cut are collapsible, closed by default; open both.
     await page.getByText('Network', { exact: true }).click()
     await expect(page.getByLabel('WiFi SSID')).toBeVisible()
     await expect(page.getByLabel('WiFi password')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save to device', exact: true })).toBeVisible()
 
-    await page.getByText('Security', { exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Boot PIN', exact: true })).toBeVisible()
-    const unattendedWarning = page.getByText(/A boot PIN is typed over the USB cable/)
+    await page.getByText('After a power cut', { exact: true }).click()
+    await page.locator('summary', { hasText: 'Boot PIN' }).click()
+    const unattendedWarning = page.getByText(/a signer with a boot PIN stays locked/)
     await expect(unattendedWarning).toBeVisible()
-    await expect(unattendedWarning).toContainText('signing and remote management cannot resume')
+    await expect(unattendedWarning).toContainText('Signing and remote management stop')
     await expect(unattendedWarning).toContainText('use a vault key with phone unlock instead')
 
     const overflow = await page.evaluate(
