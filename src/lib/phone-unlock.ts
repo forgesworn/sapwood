@@ -386,6 +386,18 @@ export function resolveUnlockMode(
   return phones !== null && phones > 0 ? 'phone' : 'sapwood'
 }
 
+/**
+ * Whether a session's `known` override (see `resolveUnlockMode`) has done its
+ * job and should stand down. `baseline` is the firmware's `at_rest` value at
+ * the moment the override was set (possibly still undefined, on firmware that
+ * sends none); once a later report differs from that baseline, either a relay
+ * poll caught up or a fresh USB read landed, and the firmware's own answer
+ * should take over again rather than the override blocking it indefinitely.
+ */
+export function shouldRetireEncryptionKnown(atRest: string | undefined, baseline: string | undefined): boolean {
+  return atRest !== undefined && atRest !== baseline
+}
+
 /** The board kept a record, but no relay took the hand-off to the phone. */
 export class HandOffUndelivered extends Error {
   constructor(readonly id: number) {

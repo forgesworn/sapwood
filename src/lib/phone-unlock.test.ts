@@ -4,6 +4,7 @@ import {
   HANDOFF_KIND, HandOffUndelivered, buildHandOffEvent, checkCode, enrolPhone,
   findOrphanedPhoneId, fitLabel, friendlyEnrolRefusal, inferUnlockMode, parseEnrolAnswer,
   parseEnrolmentCode, parsePhoneList, requestCode, requestWords, resolveUnlockMode,
+  shouldRetireEncryptionKnown,
 } from './phone-unlock.js'
 
 const P = 'a1'.repeat(32)
@@ -276,5 +277,24 @@ describe('resolveUnlockMode', () => {
     // has not caught up yet; the session's own action wins.
     expect(resolveUnlockMode('vault', 2, true, false)).toBe('none')
     expect(resolveUnlockMode('none', 0, false, true)).toBe('sapwood')
+  })
+})
+
+describe('shouldRetireEncryptionKnown', () => {
+  it('keeps the override while no fresh report has arrived', () => {
+    expect(shouldRetireEncryptionKnown(undefined, undefined)).toBe(false)
+    expect(shouldRetireEncryptionKnown(undefined, 'none')).toBe(false)
+  })
+
+  it('keeps the override while the report still matches the baseline seen when it was set', () => {
+    expect(shouldRetireEncryptionKnown('none', 'none')).toBe(false)
+  })
+
+  it('retires the override once a report differs from the baseline, whichever way', () => {
+    // A relay poll catching up with an action just taken this session.
+    expect(shouldRetireEncryptionKnown('vault', 'none')).toBe(true)
+    // A report that changed for some other reason entirely (e.g. another
+    // session, or the board itself) also retires a now-stale override.
+    expect(shouldRetireEncryptionKnown('none', 'vault')).toBe(true)
   })
 })
