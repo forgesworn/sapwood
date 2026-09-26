@@ -8,6 +8,7 @@ function base(overrides: Partial<DeviceSummaryInput> = {}): DeviceSummaryInput {
     runningVersion: '0.18.0',
     unlockMode: 'sapwood',
     phoneCount: null,
+    atRestUnrecognised: false,
     overUsb: true,
     needsBackup: false,
     lastExportAt: Date.parse('2026-09-01T00:00:00Z'),
@@ -71,6 +72,16 @@ describe('deviceSummaryRows', () => {
     const row = rows.find((r) => r.id === 'power-cut')!
     expect(row.dot).toBe('unknown')
     expect(row.text).toBe('Unknown: no vault key held here')
+  })
+
+  it('names an unrecognised firmware report distinctly, over USB or WiFi', () => {
+    const usb = deviceSummaryRows(base({ unlockMode: null, overUsb: true, atRestUnrecognised: true }))
+    const wifi = deviceSummaryRows(base({ unlockMode: null, overUsb: false, modeLabel: 'WiFi', atRestUnrecognised: true }))
+    for (const rows of [usb, wifi]) {
+      const row = rows.find((r) => r.id === 'power-cut')!
+      expect(row.dot).toBe('unknown')
+      expect(row.text).toBe("Your signer reported a setting this version of Sapwood doesn't know. Update Sapwood.")
+    }
   })
 
   it('reads a fresh backup with its date, green', () => {
