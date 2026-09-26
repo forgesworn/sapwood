@@ -23,7 +23,7 @@
   import {
     PAIRING_BACKUP_EVENT, pairingBackupStatus, type PairingBackupStatus,
   } from '../lib/pairing-backup.js'
-  import { inferUnlockMode, type UnlockMode } from '../lib/phone-unlock.js'
+  import { resolveUnlockMode, shouldRetireEncryptionKnown, type UnlockMode } from '../lib/phone-unlock.js'
   import Connectivity from './Connectivity.svelte'
   import UnlockPhones from './UnlockPhones.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
@@ -74,6 +74,7 @@
     max_sign_bytes?: number; max_sign_bytes_object?: number
     free_heap?: number; largest_block?: number
     nvs_used_entries?: number; nvs_free_entries?: number; nvs_total_entries?: number
+    at_rest?: string; unlock_phone_count?: number | null
   } | null>(null)
   $effect(() => {
     if (device.connected && device.mode === 'serial') {
@@ -196,11 +197,15 @@
         ? (pinValue ? 'PIN set.' : 'PIN cleared. The signer stores its keys in plaintext again, and no phone can unlock it.')
         : 'The device rejected the PIN change.'
       if (frame.type === FrameType.ACK) {
-        encryptionKnown = !!pinValue
+        setEncryptionKnown(!!pinValue)
         // Clearing turns encryption off whichever secret held it, so a vault
         // key this browser kept no longer opens anything.
         if (!pinValue && vaultDeviceKey) { removeVaultKey(vaultDeviceKey); vaultStored = null }
         phonesRefresh++
+        // FIRMWARE_INFO is only fetched at connect, so re-read it now: without
+        // this, usbHealth's at_rest would stay stale until the next reconnect
+        // and the override above would never get to stand down.
+        void getFirmwareVersion().then((info) => { if (info) usbHealth = info })
       }
       pinValue = ''
       clearPinAck = false
@@ -307,7 +312,11 @@
       vaultStored = key
       vaultEscrowKey = null
       vaultShowKey = true
-      encryptionKnown = true
+      setEncryptionKnown(true)
+      // FIRMWARE_INFO is only fetched at connect, so re-read it now: without
+      // this, usbHealth's at_rest would stay stale until the next reconnect
+      // and the override above would never get to stand down.
+      void getFirmwareVersion().then((info) => { if (info) usbHealth = info })
       vaultStatus = 'Encryption at rest is on. The key stays in this browser — keep your off-site copy safe.'
     } catch (e) {
       // The key is already stored (and visible below) whatever happened; a
@@ -333,8 +342,9 @@
       removeVaultKey(vaultDeviceKey)
       vaultStored = null
       vaultShowKey = false
-      encryptionKnown = false
+      setEncryptionKnown(false)
       phonesRefresh++
+      void getFirmwareVersion().then((info) => { if (info) usbHealth = info })
       vaultStatus = 'Encryption at rest is off. The signer stores its keys in plaintext again.'
     } catch (e) {
       vaultStatus = e instanceof Error ? e.message : 'Failed'
@@ -372,16 +382,52 @@
   }
 
   // --- After a power cut: the three modes ---
-  // The signer does not report whether it is encrypted, so the current mode
-  // is inferred (inferUnlockMode) and left unmarked when it cannot be told.
-  // "No encryption" is never a default: turning encryption off, by either
-  // route, waits for the owner to confirm the sentence that says what it costs.
+  // Firmware ≥ #192 reports `at_rest`/`unlock_phone_count` directly (over USB
+  // on FIRMWARE_INFO, over the relay on get_status), so the mode is read
+  // rather than inferred where a signer sends it. Older firmware (released
+  // beta.17) sends neither: resolveUnlockMode falls back to its side-effect
+  // guess (inferUnlockMode) and the mode is left unmarked when even that
+  // cannot tell. "No encryption" is never a default: turning encryption off,
+  // by either route, waits for the owner to confirm the sentence that says
+  // what it costs.
+  const atRestReport = $derived(
+    device.mode === 'relay' ? device.relayStatus?.at_rest
+      : device.mode === 'serial' ? usbHealth?.at_rest
+        : undefined,
+  )
+  // The firmware's own phone count is available even while locked (before
+  // any PIN/vault secret is entered), unlike the enumerated list below, which
+  // needs an authenticated session. Prefer it when the signer sends it.
+  const unlockPhoneCountReport = $derived(
+    device.mode === 'relay' ? device.relayStatus?.unlock_phone_count
+      : device.mode === 'serial' ? usbHealth?.unlock_phone_count
+        : undefined,
+  )
   let phoneCount = $state<number | null>(null)
+  const effectivePhoneCount = $derived(unlockPhoneCountReport !== undefined ? unlockPhoneCountReport : phoneCount)
   /** Bumped when this page changed encryption: turning it off drops every phone. */
   let phonesRefresh = $state(0)
   /** What this session saw the signer accept; null until then. */
   let encryptionKnown = $state<boolean | null>(null)
-  const currentMode = $derived(inferUnlockMode(phoneCount, !!vaultStored, encryptionKnown))
+  /** The firmware's `at_rest` value at the moment `encryptionKnown` was set,
+   *  so a later report that differs (a relay poll catching up, or a fresh USB
+   *  read) can retire the override rather than have it block the firmware's
+   *  own answer indefinitely. */
+  let encryptionKnownBaseline = $state<string | undefined>(undefined)
+  function setEncryptionKnown(value: boolean | null) {
+    encryptionKnown = value
+    encryptionKnownBaseline = atRestReport
+  }
+  $effect(() => {
+    if (encryptionKnown !== null && shouldRetireEncryptionKnown(atRestReport, encryptionKnownBaseline)) {
+      encryptionKnown = null
+      encryptionKnownBaseline = undefined
+    }
+  })
+  const currentMode = $derived(resolveUnlockMode(atRestReport, effectivePhoneCount, !!vaultStored, encryptionKnown))
+  /** The mode is unknown specifically because the firmware sent an `at_rest`
+   *  value this build does not recognise, not for lack of any report. */
+  const atRestUnrecognised = $derived(currentMode === null && encryptionKnown === null && atRestReport !== undefined)
   let chosenMode = $state<UnlockMode | null>(null)
   let modesSection = $state<HTMLElement | null>(null)
   let noEncryptionAck = $state(false)
@@ -511,7 +557,11 @@
     updateVersion: updateInfo?.latest ?? null,
     runningVersion,
     unlockMode: currentMode,
-    phoneCount,
+    // The firmware's own count (available even while locked) beats the
+    // enumerated list, which needs an authenticated session and is null until
+    // then: a locked signer with phones enrolled must not report "0 phones".
+    phoneCount: effectivePhoneCount,
+    atRestUnrecognised,
     overUsb,
     needsBackup: pairingBackup.needsBackup,
     lastExportAt: pairingBackup.lastExportAt,
@@ -615,7 +665,7 @@
                     <p class="hint-sm">Add a phone below{overUsb ? '' : ', with the signer on the USB cable'}. Encryption is already on.</p>
                   {/if}
                 {:else if mode.id === 'sapwood'}
-                  {#if (phoneCount ?? 0) > 0}
+                  {#if (effectivePhoneCount ?? 0) > 0}
                     <p class="hint-sm">Revoke each phone below. Encryption stays on.</p>
                   {:else}
                     <p class="hint-sm">Turn on Encrypt at rest (Security{overUsb ? ', below' : ', over the USB cable'}), or set a boot PIN.</p>
@@ -626,7 +676,7 @@
                   {:else}
                     <label class="hint-sm ack">
                       <input type="checkbox" bind:checked={noEncryptionAck} disabled={vaultPending} />
-                      {NO_ENCRYPTION_RISK}{#if (phoneCount ?? 0) > 0}&#32;Every phone stops being able to unlock it.{/if}
+                      {NO_ENCRYPTION_RISK}{#if (effectivePhoneCount ?? 0) > 0}&#32;Every phone stops being able to unlock it.{/if}
                     </label>
                     {#if vaultStored}
                       <button class="btn btn-danger btn-sm" disabled={!noEncryptionAck || vaultPending}
@@ -651,7 +701,10 @@
         {/each}
       </div>
       {#if currentMode === null}
-        {#if overUsb}
+        {#if atRestUnrecognised}
+          <p class="hint-sm">Your signer reported a setting this version of Sapwood doesn't know.
+            Update Sapwood.</p>
+        {:else if overUsb}
           <p class="hint-sm">This browser holds no vault key for the signer, and the signer does not
             say whether it has a boot PIN. With neither, it runs without encryption.</p>
         {:else}

@@ -330,6 +330,10 @@ export type UnlockMode = 'none' | 'phone' | 'sapwood'
  * encryption turned off), and outranks a vault key this browser merely
  * holds. Anything else might be a boot PIN, or nothing: Sapwood cannot tell,
  * returns null, and says so rather than guess.
+ *
+ * Kept as the fallback for firmware that predates the `at_rest` report
+ * (released beta.17); see `resolveUnlockMode`, which callers should use
+ * instead.
  */
 export function inferUnlockMode(
   phones: number | null,
@@ -340,6 +344,58 @@ export function inferUnlockMode(
   if (phones !== null && phones > 0) return 'phone'
   if (known === true || vaultKeyHeld) return 'sapwood'
   return null
+}
+
+/** Wire values for the firmware's own at-rest report (FIRMWARE_INFO and
+ *  get_status's `at_rest`, plan G2). Any other string is unknown to this
+ *  build and must never be guessed at. */
+const KNOWN_AT_REST_VALUES = ['none', 'pin', 'vault', 'encrypted'] as const
+export type AtRestReport = (typeof KNOWN_AT_REST_VALUES)[number]
+
+function isKnownAtRest(value: string): value is AtRestReport {
+  return (KNOWN_AT_REST_VALUES as readonly string[]).includes(value)
+}
+
+/**
+ * The mode shown in "After a power cut". Firmware ≥ #192 reports `at_rest`
+ * and `unlock_phone_count` directly, on both FIRMWARE_INFO and get_status
+ * (device operator only there; a delegate never sees either field), so this
+ * reads those instead of guessing from side effects.
+ *
+ * `known`, what this page saw the signer accept moments ago (a seal, a PIN
+ * set, or encryption turned off), still wins when set: it reflects an
+ * action this session just took, ahead of a firmware report that has not
+ * been re-polled since. Once it resets to null, the firmware's own answer
+ * takes over.
+ *
+ * `atRest` absent (`undefined`) means older firmware that never sends the
+ * field (released beta.17): fall back to `inferUnlockMode`'s guess. A
+ * present but unrecognised value is reported as unknown (null) rather than
+ * mapped to whatever meaning looks closest; a future wire value must never
+ * be silently reinterpreted.
+ */
+export function resolveUnlockMode(
+  atRest: string | undefined,
+  phones: number | null,
+  vaultKeyHeld: boolean,
+  known: boolean | null = null,
+): UnlockMode | null {
+  if (known !== null || atRest === undefined) return inferUnlockMode(phones, vaultKeyHeld, known)
+  if (!isKnownAtRest(atRest)) return null
+  if (atRest === 'none') return 'none'
+  return phones !== null && phones > 0 ? 'phone' : 'sapwood'
+}
+
+/**
+ * Whether a session's `known` override (see `resolveUnlockMode`) has done its
+ * job and should stand down. `baseline` is the firmware's `at_rest` value at
+ * the moment the override was set (possibly still undefined, on firmware that
+ * sends none); once a later report differs from that baseline, either a relay
+ * poll caught up or a fresh USB read landed, and the firmware's own answer
+ * should take over again rather than the override blocking it indefinitely.
+ */
+export function shouldRetireEncryptionKnown(atRest: string | undefined, baseline: string | undefined): boolean {
+  return atRest !== undefined && atRest !== baseline
 }
 
 /** The board kept a record, but no relay took the hand-off to the phone. */

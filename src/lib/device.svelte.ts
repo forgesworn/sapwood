@@ -96,6 +96,16 @@ export interface RelayStatus {
   nvs?: { used_entries: number; free_entries: number; total_entries: number } | null
   /** Persona registry ceiling for this board (absent on older firmware). */
   max_personas?: number
+  /** How the signer's seeds are protected at rest (plan G2; absent on
+   *  firmware before #192, released beta.17 does not send it). `"encrypted"`
+   *  means sealed, but which secret (PIN or vault) is unknown. Device
+   *  operator only: never sent to a per-identity delegate. */
+  at_rest?: string
+  /** How many phones can unlock this board (plan G2; absent alongside
+   *  `at_rest` on older firmware). `null` means a present phone record is
+   *  damaged, not that there are none; always `0` once `at_rest` is
+   *  `"none"`. Device operator only. */
+  unlock_phone_count?: number | null
 }
 
 /** Network state returned by relay management. Password material is never
@@ -830,14 +840,26 @@ function isNvsStats(
 
 function applyRelayStatus(raw: Record<string, unknown>) {
   appendRelayAudit(Array.isArray(raw.audit) ? raw.audit as RelayAuditEntry[] : [])
+  // A truncated reply (low-heap fallback, `minimal_status_json` in
+  // firmware/src/relay.rs) drops `capabilities` and `slots` to save the
+  // allocation their policy-engine calls would cost; it is not saying the
+  // signer has none. Carry the previous poll's values forward instead of
+  // collapsing them to empty/zero, or a manager watching a fragmented-heap
+  // signer sees pairing capability vanish and persona pairing breaks until
+  // the heap recovers and a full poll lands. `at_rest`/`unlock_phone_count`
+  // need no such carry-forward: the truncated reply still sends them fresh.
+  const truncated = raw.truncated === true
+  const previous = device.relayStatus
   const status: RelayStatus = {
     master_count: Number(raw.master_count ?? 0),
-    slots: Number(raw.slots ?? 0),
+    slots: typeof raw.slots === 'number'
+      ? raw.slots
+      : truncated && previous ? previous.slots : Number(raw.slots ?? 0),
     mode: String(raw.mode ?? 'wifi-standalone'),
     relay: String(raw.relay ?? ''),
     capabilities: Array.isArray(raw.capabilities)
       ? raw.capabilities.filter((value): value is string => typeof value === 'string')
-      : [],
+      : truncated && previous ? previous.capabilities : [],
     ...(typeof raw.uptime_s === 'number' ? { uptime_s: raw.uptime_s } : {}),
     ...(typeof raw.last_reset === 'string' ? { last_reset: raw.last_reset } : {}),
     ...(typeof raw.crashed_during === 'string' ? { crashed_during: raw.crashed_during } : {}),
@@ -850,6 +872,10 @@ function applyRelayStatus(raw: Record<string, unknown>) {
     ...(raw.truncated === true ? { truncated: true } : {}),
     ...(isNvsStats(raw.nvs) ? { nvs: raw.nvs } : {}),
     ...(typeof raw.max_personas === 'number' ? { max_personas: raw.max_personas } : {}),
+    ...(typeof raw.at_rest === 'string' ? { at_rest: raw.at_rest } : {}),
+    ...('unlock_phone_count' in raw
+      ? { unlock_phone_count: typeof raw.unlock_phone_count === 'number' ? raw.unlock_phone_count : null }
+      : {}),
   }
   device.relayStatus = status
   const masterHex = String(raw.master_npub_hex ?? '')
@@ -2789,6 +2815,16 @@ export interface FirmwareInfo {
   nvs_total_entries?: number
   /** Persona registry ceiling for this board (absent on older firmware). */
   max_personas?: number
+  /** How the signer's seeds are protected at rest (plan G2; absent on
+   *  firmware before #192, released beta.17 does not send it). `"encrypted"`
+   *  means sealed, but which secret (PIN or vault) is unknown. Answered even
+   *  while locked, before any PIN or vault key is entered. */
+  at_rest?: string
+  /** How many phones can unlock this board (plan G2; absent alongside
+   *  `at_rest` on older firmware). `null` means a present phone record is
+   *  damaged, not that there are none; always `0` once `at_rest` is
+   *  `"none"`. */
+  unlock_phone_count?: number | null
 }
 
 /**
@@ -2820,6 +2856,10 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
       ...(typeof info.nvs_free_entries === 'number' ? { nvs_free_entries: info.nvs_free_entries } : {}),
       ...(typeof info.nvs_total_entries === 'number' ? { nvs_total_entries: info.nvs_total_entries } : {}),
       ...(typeof info.max_personas === 'number' ? { max_personas: info.max_personas } : {}),
+      ...(typeof info.at_rest === 'string' ? { at_rest: info.at_rest } : {}),
+      ...('unlock_phone_count' in info
+        ? { unlock_phone_count: typeof info.unlock_phone_count === 'number' ? info.unlock_phone_count : null }
+        : {}),
     }
   } catch {
     return null // older firmware, or no response — treat as unknown

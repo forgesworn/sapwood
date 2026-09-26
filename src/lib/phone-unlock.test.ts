@@ -3,7 +3,8 @@ import { verifyEvent } from 'nostr-tools/pure'
 import {
   HANDOFF_KIND, HandOffUndelivered, buildHandOffEvent, checkCode, enrolPhone,
   findOrphanedPhoneId, fitLabel, friendlyEnrolRefusal, inferUnlockMode, parseEnrolAnswer,
-  parseEnrolmentCode, parsePhoneList, requestCode, requestWords,
+  parseEnrolmentCode, parsePhoneList, requestCode, requestWords, resolveUnlockMode,
+  shouldRetireEncryptionKnown,
 } from './phone-unlock.js'
 
 const P = 'a1'.repeat(32)
@@ -230,5 +231,70 @@ describe('findOrphanedPhoneId', () => {
 
   it('returns null when more than one record is new (ambiguous)', () => {
     expect(findOrphanedPhoneId([A], [A, B, C])).toBeNull()
+  })
+})
+
+describe('resolveUnlockMode', () => {
+  it('reads "none" from the firmware report directly, whatever the phone count', () => {
+    expect(resolveUnlockMode('none', 0, false)).toBe('none')
+    expect(resolveUnlockMode('none', 5, false)).toBe('none')
+    expect(resolveUnlockMode('none', null, true)).toBe('none')
+  })
+
+  it('reads "pin" as sapwood-or-pin unless phones are enrolled', () => {
+    expect(resolveUnlockMode('pin', 0, false)).toBe('sapwood')
+    expect(resolveUnlockMode('pin', 2, false)).toBe('phone')
+  })
+
+  it('reads "vault" as sapwood-or-pin unless phones are enrolled', () => {
+    expect(resolveUnlockMode('vault', 0, false)).toBe('sapwood')
+    expect(resolveUnlockMode('vault', 3, false)).toBe('phone')
+  })
+
+  it('reads "encrypted" (sealed, kind unknown) the same as pin/vault', () => {
+    expect(resolveUnlockMode('encrypted', 0, false)).toBe('sapwood')
+    expect(resolveUnlockMode('encrypted', 1, false)).toBe('phone')
+  })
+
+  it('treats a null phone count (damaged blob) as no known phone, never a guessed phone mode', () => {
+    expect(resolveUnlockMode('vault', null, false)).toBe('sapwood')
+    expect(resolveUnlockMode('pin', null, true)).toBe('sapwood')
+  })
+
+  it('falls back to inferUnlockMode when the firmware sends no at_rest field at all', () => {
+    expect(resolveUnlockMode(undefined, 2, false)).toBe('phone')
+    expect(resolveUnlockMode(undefined, 0, true)).toBe('sapwood')
+    expect(resolveUnlockMode(undefined, 0, false)).toBeNull()
+  })
+
+  it('reports an unrecognised at_rest value as unknown, never a guess', () => {
+    expect(resolveUnlockMode('quantum', 2, true)).toBeNull()
+    expect(resolveUnlockMode('', 0, false)).toBeNull()
+  })
+
+  it('lets a known session action override the firmware report until it resets to null', () => {
+    // The signer just turned encryption off, but the last poll's `at_rest`
+    // has not caught up yet; the session's own action wins.
+    expect(resolveUnlockMode('vault', 2, true, false)).toBe('none')
+    expect(resolveUnlockMode('none', 0, false, true)).toBe('sapwood')
+  })
+})
+
+describe('shouldRetireEncryptionKnown', () => {
+  it('keeps the override while no fresh report has arrived', () => {
+    expect(shouldRetireEncryptionKnown(undefined, undefined)).toBe(false)
+    expect(shouldRetireEncryptionKnown(undefined, 'none')).toBe(false)
+  })
+
+  it('keeps the override while the report still matches the baseline seen when it was set', () => {
+    expect(shouldRetireEncryptionKnown('none', 'none')).toBe(false)
+  })
+
+  it('retires the override once a report differs from the baseline, whichever way', () => {
+    // A relay poll catching up with an action just taken this session.
+    expect(shouldRetireEncryptionKnown('vault', 'none')).toBe(true)
+    // A report that changed for some other reason entirely (e.g. another
+    // session, or the board itself) also retires a now-stale override.
+    expect(shouldRetireEncryptionKnown('none', 'vault')).toBe(true)
   })
 })

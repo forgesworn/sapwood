@@ -1534,6 +1534,73 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
+  it('keeps capabilities and slots from the last full poll when a reply is truncated', async () => {
+    const { pubHex } = freshMaster()
+    const activeRelays = ['wss://active.example']
+    let truncated = false
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        if (truncated) {
+          // A trimmed low-heap reply (minimal_status_json in relay.rs): no
+          // capabilities/slots, but at_rest/unlock_phone_count still ride it.
+          return {
+            master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: activeRelays[0],
+            at_rest: 'vault', unlock_phone_count: 2, truncated: true,
+          }
+        }
+        return {
+          master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: activeRelays[0],
+          capabilities: ['phone_unlock_v1'], slots: 3, at_rest: 'vault', unlock_phone_count: 2,
+        }
+      }
+      if (method === 'get_network_config') return remoteNetworkResponse(activeRelays)
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, activeRelays)
+    try {
+      expect(device.relayStatus?.truncated).toBeUndefined()
+      expect(device.relayStatus?.capabilities).toEqual(['phone_unlock_v1'])
+      expect(device.relayStatus?.slots).toBe(3)
+
+      truncated = true
+      await refreshRelayAudit()
+
+      expect(device.relayStatus?.truncated).toBe(true)
+      expect(device.relayStatus?.capabilities).toEqual(['phone_unlock_v1'])
+      expect(device.relayStatus?.slots).toBe(3)
+      expect(device.relayStatus?.at_rest).toBe('vault')
+      expect(device.relayStatus?.unlock_phone_count).toBe(2)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('reports a damaged phone blob as null, not zero, over the relay', async () => {
+    const { pubHex } = freshMaster()
+    const activeRelays = ['wss://active.example']
+    relayRequestMock.mockImplementation(async (method: unknown) => {
+      if (method === 'get_status') {
+        return {
+          master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: activeRelays[0],
+          at_rest: 'pin', unlock_phone_count: null,
+        }
+      }
+      if (method === 'get_network_config') return remoteNetworkResponse(activeRelays)
+      if (method === 'list_clients') return { clients: [] }
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, activeRelays)
+    try {
+      expect(device.relayStatus?.at_rest).toBe('pin')
+      expect(device.relayStatus?.unlock_phone_count).toBeNull()
+    } finally {
+      await disconnect()
+    }
+  })
+
   it('ignores a configured-route completion from an obsolete connection generation', async () => {
     const { pubHex } = freshMaster()
     const relayA = ['wss://country-a.example']

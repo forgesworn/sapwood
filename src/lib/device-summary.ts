@@ -27,9 +27,15 @@ export interface DeviceSummaryInput {
   updateAvailable: boolean
   updateVersion: string | null
   runningVersion: string | null
-  /** The inferred after-a-power-cut mode; null when it cannot be told. */
+  /** The after-a-power-cut mode: read from the firmware's own `at_rest`
+   *  report when it sends one, otherwise inferred from side effects; null
+   *  when it cannot be told either way. */
   unlockMode: UnlockMode | null
   phoneCount: number | null
+  /** The firmware sent an `at_rest` value this build does not recognise, so
+   *  `unlockMode` is null for that reason rather than for lack of any report
+   *  at all. Distinguishes "update Sapwood" from "connect by USB to check". */
+  atRestUnrecognised: boolean
   overUsb: boolean
   needsBackup: boolean
   lastExportAt: number | null
@@ -84,9 +90,11 @@ function powerCutRow(input: DeviceSummaryInput): SummaryRow {
       actionLabel: 'Change',
     }
   }
-  const text = input.overUsb
-    ? 'Unknown: no vault key held here'
-    : `Unknown over ${input.modeLabel}. Connect by USB to check`
+  const text = input.atRestUnrecognised
+    ? "Your signer reported a setting this version of Sapwood doesn't know. Update Sapwood."
+    : input.overUsb
+      ? 'Unknown: no vault key held here'
+      : `Unknown over ${input.modeLabel}. Connect by USB to check`
   return { id: 'power-cut', label, dot: 'unknown', text, actionLabel: 'Change' }
 }
 
