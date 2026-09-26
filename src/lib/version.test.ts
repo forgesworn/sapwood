@@ -16,9 +16,22 @@ describe('compareVersions', () => {
     expect(compareVersions('v0.14.0', '0.14.0')).toBe(0)
   })
 
-  it('ignores a pre-release suffix for ordering', () => {
-    expect(compareVersions('0.14.0-rc1', '0.14.0')).toBe(0)
+  it('orders a pre-release below its own release (SemVer 2.0 §11)', () => {
+    expect(compareVersions('0.14.0-rc1', '0.14.0')).toBeLessThan(0)
+    expect(compareVersions('0.14.0', '0.14.0-rc1')).toBeGreaterThan(0)
     expect(compareVersions('0.14.0-rc1', '0.13.9')).toBeGreaterThan(0)
+  })
+
+  it('orders pre-release identifiers numerically, not lexically', () => {
+    expect(compareVersions('0.18.0-beta.17', '0.18.0-beta.19')).toBeLessThan(0)
+    expect(compareVersions('0.18.0-beta.9', '0.18.0-beta.10')).toBeLessThan(0)
+    expect(compareVersions('0.18.0-beta.19', '0.18.0-beta.19')).toBe(0)
+  })
+
+  it('ignores build metadata, with or without a pre-release', () => {
+    expect(compareVersions('0.14.0+abc123', '0.14.0')).toBe(0)
+    expect(compareVersions('0.18.0-beta.19+abc123', '0.18.0-beta.19')).toBe(0)
+    expect(compareVersions('0.18.0-beta.17+abc123', '0.18.0-beta.19')).toBeLessThan(0)
   })
 
   it('returns null rather than guessing at unparseable input', () => {
@@ -47,5 +60,17 @@ describe('isUpgrade', () => {
     expect(isUpgrade(null, '0.14.0')).toBe(false)
     expect(isUpgrade('0.14.0', null)).toBe(false)
     expect(isUpgrade('unknown', '0.14.0')).toBe(false)
+  })
+
+  it('treats a newer beta as an upgrade over an older beta on the same release', () => {
+    expect(isUpgrade('0.18.0-beta.17', '0.18.0-beta.19')).toBe(true)
+  })
+
+  it('treats the final release as an upgrade over its own beta', () => {
+    expect(isUpgrade('0.18.0-beta.19', '0.18.0')).toBe(true)
+  })
+
+  it('does not offer a beta as an upgrade over its own final release', () => {
+    expect(isUpgrade('0.18.0', '0.18.0-beta.19')).toBe(false)
   })
 })

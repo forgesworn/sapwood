@@ -21,6 +21,7 @@ vi.mock('../lib/device.svelte.js', async () => {
   const state: Record<string, unknown> = {
     connected: true, mode: 'relay', error: null, masters: [], slots: [],
     relayStatus: null, bridgeAuthed: false, connectionGeneration: 0,
+    vaultRelayTarget: null, vaultUnlockRequest: null, vaultReconnect: null,
   }
   const device = new Proxy(state, {
     get(target, property, receiver) {
@@ -45,6 +46,9 @@ vi.mock('../lib/device.svelte.js', async () => {
     usbDisplayFlip: vi.fn().mockResolvedValue(null),
     setDisplayFlip: vi.fn(),
     getFirmwareVersion: vi.fn().mockResolvedValue(null),
+    refreshMasters: vi.fn().mockResolvedValue(undefined),
+    sendVaultKeyOverRelay: vi.fn().mockResolvedValue(undefined),
+    vaultRelayDevicePub: vi.fn(() => ''),
     listUnlockPhones: vi.fn(),
     revokeUnlockPhone: vi.fn(),
     setAnnounceOperator: vi.fn(),
@@ -111,6 +115,7 @@ describe('DevicePanel: the session override on a fresh firmware report', () => {
     // Without the fix, the session's own "PIN set" snapshot would win forever
     // and this would stay "Waits for Sapwood" even once FIRMWARE_INFO
     // disagreed; the retired override lets the fresh report show through.
-    await waitFor(() => expect(screen.getByText('Not encrypted: anyone holding it can read the keys')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Not encrypted').length).toBeGreaterThan(0))
+    expect(screen.getByText('Anyone holding it can read the keys.')).toBeTruthy()
   })
 })

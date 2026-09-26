@@ -1,7 +1,7 @@
-// "Your signer" summary rows: the handful of plain-English lines at the top
-// of the Device panel, one per concern, ordered so anything needing
-// attention comes first. Pure so the ordering and wording are unit-tested
-// without a rendered component.
+// Device tab summary logic: the section-row status words (always shown, one
+// per section) and the Needs-attention cards (0 to n, shown only for the
+// handful of concerns that need a decision). Pure so the wording and ordering
+// are unit-tested without a rendered component.
 
 import type { UnlockMode } from './phone-unlock.js'
 
@@ -10,15 +10,27 @@ import type { UnlockMode } from './phone-unlock.js'
  *  state). It must never read as green. */
 export type SummaryDot = 'ok' | 'unknown' | 'attention' | 'problem'
 
-export type SummaryRowId = 'firmware' | 'power-cut' | 'backup' | 'connection' | 'storage'
+export type SummaryRowId = 'firmware' | 'power-cut' | 'backup'
 
+/** A section row's status word, shown beside its title whether the section
+ *  is open or not. */
 export interface SummaryRow {
   id: SummaryRowId
   /** The fixed, bold concern label shown before the state text, e.g. "Firmware". */
   label: string
   dot: SummaryDot
   text: string
-  /** Label for the row's one primary button, or null when there is nothing to do. */
+}
+
+export type AttentionRowId = 'not-encrypted' | 'firmware' | 'backup' | 'storage' | 'health' | 'status-lost'
+
+/** A Needs-attention card: only ever `problem` or `attention`. */
+export interface AttentionRow {
+  id: AttentionRowId
+  dot: SummaryDot
+  label: string
+  text: string
+  /** Label for the card's one button, or null when there is nothing to press. */
   actionLabel: string | null
 }
 
@@ -37,6 +49,9 @@ export interface DeviceSummaryInput {
    *  at all. Distinguishes "update Sapwood" from "connect by USB to check". */
   atRestUnrecognised: boolean
   overUsb: boolean
+  /** The signer is locked over USB (VaultUnlock owns the unlock itself; this
+   *  only changes the After-a-power-cut row's status). */
+  locked: boolean
   needsBackup: boolean
   lastExportAt: number | null
   /** The signer's last restart was a crash. */
@@ -46,109 +61,152 @@ export interface DeviceSummaryInput {
   /** The signer restarted itself to recover from a wedged relay service. */
   recovering: boolean
   storageState: 'ok' | 'warn' | 'full' | null
-  /** "USB cable" / "WiFi" / "Bridge" / "Disconnected". */
-  modeLabel: string
+  storagePct: number | null
+  /** A relay signer stopped answering status polls: what is on screen may be
+   *  stale. Never true over USB or bridge, where a dropped connection is
+   *  obvious immediately. */
+  statusLost: boolean
 }
 
 function severityRank(dot: SummaryDot): number {
   return dot === 'problem' ? 0 : dot === 'attention' ? 1 : dot === 'unknown' ? 2 : 3
 }
 
+function formatDate(at: number): string {
+  return new Date(at).toLocaleDateString(undefined, { dateStyle: 'medium' })
+}
+
 function firmwareRow(input: DeviceSummaryInput): SummaryRow {
   if (input.updateAvailable && input.updateVersion) {
-    return {
-      id: 'firmware', label: 'Firmware', dot: 'attention',
-      text: `Update available: v${input.updateVersion}`, actionLabel: 'Update',
-    }
+    return { id: 'firmware', label: 'Firmware', dot: 'attention', text: `Update available: v${input.updateVersion}` }
   }
   if (input.runningVersion) {
-    return {
-      id: 'firmware', label: 'Firmware', dot: 'ok',
-      text: `Up to date (v${input.runningVersion})`, actionLabel: null,
-    }
+    return { id: 'firmware', label: 'Firmware', dot: 'ok', text: `Up to date (v${input.runningVersion})` }
   }
-  return { id: 'firmware', label: 'Firmware', dot: 'ok', text: 'Version unknown', actionLabel: null }
+  // Unknown must never read green (F7): nothing here has been confirmed up to date.
+  return { id: 'firmware', label: 'Firmware', dot: 'unknown', text: 'Version unknown' }
 }
 
 function powerCutRow(input: DeviceSummaryInput): SummaryRow {
   const label = 'After a power cut'
+  if (input.locked) {
+    return { id: 'power-cut', label, dot: 'problem', text: 'Locked' }
+  }
   if (input.unlockMode === 'phone') {
     const n = input.phoneCount ?? 0
-    return {
-      id: 'power-cut', label, dot: 'ok',
-      text: `Unlocks from your phone (${n} phone${n === 1 ? '' : 's'})`,
-      actionLabel: 'Change',
-    }
+    return { id: 'power-cut', label, dot: 'ok', text: `Unlocks from your phone (${n} phone${n === 1 ? '' : 's'})` }
   }
   if (input.unlockMode === 'sapwood') {
-    return { id: 'power-cut', label, dot: 'ok', text: 'Waits for Sapwood', actionLabel: 'Change' }
+    return { id: 'power-cut', label, dot: 'ok', text: 'Waits for Sapwood or its PIN' }
   }
   if (input.unlockMode === 'none') {
-    return {
-      id: 'power-cut', label, dot: 'problem',
-      text: 'Not encrypted: anyone holding it can read the keys',
-      actionLabel: 'Change',
-    }
+    return { id: 'power-cut', label, dot: 'problem', text: 'Not encrypted' }
   }
-  const text = input.atRestUnrecognised
-    ? "Your signer reported a setting this version of Sapwood doesn't know. Update Sapwood."
-    : input.overUsb
-      ? 'Unknown: no vault key held here'
-      : `Unknown over ${input.modeLabel}. Connect by USB to check`
-  return { id: 'power-cut', label, dot: 'unknown', text, actionLabel: 'Change' }
-}
-
-function backupDate(at: number): string {
-  return new Date(at).toLocaleDateString()
+  if (input.atRestUnrecognised) {
+    return { id: 'power-cut', label, dot: 'unknown', text: 'Update Sapwood to read this setting' }
+  }
+  if (input.overUsb) {
+    return { id: 'power-cut', label, dot: 'unknown', text: 'Unknown: no vault key held here' }
+  }
+  return { id: 'power-cut', label, dot: 'unknown', text: 'Unknown: connect by USB to check' }
 }
 
 function backupRow(input: DeviceSummaryInput): SummaryRow {
   const label = 'Backup'
   if (!input.overUsb) {
     return input.needsBackup
-      ? { id: 'backup', label, dot: 'attention', text: 'Back up needed: connect by USB', actionLabel: null }
-      : { id: 'backup', label, dot: 'unknown', text: 'Connect by USB to back up', actionLabel: null }
+      ? { id: 'backup', label, dot: 'attention', text: 'Backup needed' }
+      : { id: 'backup', label, dot: 'unknown', text: 'Connect by USB to back up' }
   }
   if (!input.needsBackup && input.lastExportAt) {
-    return { id: 'backup', label, dot: 'ok', text: `Backed up ${backupDate(input.lastExportAt)}`, actionLabel: 'Back up' }
+    return { id: 'backup', label, dot: 'ok', text: `Backed up ${formatDate(input.lastExportAt)}` }
   }
-  return { id: 'backup', label, dot: 'attention', text: 'Back up needed', actionLabel: 'Back up' }
+  return { id: 'backup', label, dot: 'attention', text: 'Backup needed' }
 }
 
-function connectionRow(input: DeviceSummaryInput): SummaryRow {
-  const label = 'Connection'
-  if (input.modeLabel === 'Disconnected') {
-    return { id: 'connection', label, dot: 'problem', text: 'Disconnected', actionLabel: null }
-  }
-  // Storage has its own row when it needs attention; naming it here too would
-  // repeat the same fact twice on the page.
-  const reasons: string[] = []
-  if (input.crash) reasons.push('last restart was a crash')
-  if (input.fragmented) reasons.push('memory is fragmented')
-  if (input.recovering) reasons.push('recovering from a restart')
-  const text = reasons.length
-    ? `Connected over ${input.modeLabel}: ${reasons.join(', ')}`
-    : `Connected over ${input.modeLabel}`
-  return { id: 'connection', label, dot: reasons.length ? 'attention' : 'ok', text, actionLabel: 'Details' }
+/**
+ * The section-row status words, in the tab's fixed display order (After a
+ * power cut, Firmware, Backup). Network, Display and Diagnostics compute
+ * their own row words directly in the component; they carry no attention
+ * cards of their own.
+ */
+export function deviceSummaryRows(input: DeviceSummaryInput): SummaryRow[] {
+  return [powerCutRow(input), firmwareRow(input), backupRow(input)]
 }
 
-function storageRow(input: DeviceSummaryInput): SummaryRow | null {
+function notEncryptedAttention(input: DeviceSummaryInput): AttentionRow | null {
+  // A locked signer's encryption mode cannot be read, so it is reported as
+  // "Locked" (via the row, and via VaultUnlock's own banner), never as "Not
+  // encrypted": the two are different problems needing different actions.
+  if (input.locked || input.unlockMode !== 'none') return null
+  return {
+    id: 'not-encrypted', dot: 'problem', label: 'Not encrypted',
+    text: 'Anyone holding it can read the keys.', actionLabel: 'Choose how it unlocks',
+  }
+}
+
+function firmwareAttention(input: DeviceSummaryInput): AttentionRow | null {
+  if (!input.updateAvailable || !input.updateVersion) return null
+  return input.overUsb
+    ? { id: 'firmware', dot: 'attention', label: 'Update available', text: `v${input.updateVersion} is ready to install.`, actionLabel: 'Update' }
+    : { id: 'firmware', dot: 'attention', label: 'Update available', text: `v${input.updateVersion} is ready. Updates need the USB cable.`, actionLabel: 'How to update' }
+}
+
+function backupAttention(input: DeviceSummaryInput): AttentionRow | null {
+  if (!input.needsBackup) return null
+  if (!input.overUsb) {
+    return {
+      id: 'backup', dot: 'attention', label: 'Back up your app pairings',
+      text: 'Connect by USB to back up. The signer asks for a button press.', actionLabel: null,
+    }
+  }
+  const text = input.lastExportAt
+    ? `Pairings changed since your last backup on ${formatDate(input.lastExportAt)}.`
+    : 'Pairings changed and this browser has no backup on record.'
+  return { id: 'backup', dot: 'attention', label: 'Back up your app pairings', text, actionLabel: 'Back up' }
+}
+
+function storageAttention(input: DeviceSummaryInput): AttentionRow | null {
   if (input.storageState !== 'warn' && input.storageState !== 'full') return null
+  const pct = input.storagePct ?? 0
   return {
     id: 'storage',
-    label: 'Storage',
     dot: input.storageState === 'full' ? 'problem' : 'attention',
-    text: input.storageState === 'full' ? 'Nearly full' : 'Filling up',
+    label: `Storage ${pct}% full`,
+    text: 'Remove an unused persona or app pairing to free space.',
     actionLabel: 'Details',
   }
 }
 
+function healthAttention(input: DeviceSummaryInput): AttentionRow | null {
+  const reasons: string[] = []
+  if (input.crash) reasons.push('The last restart was a crash.')
+  if (input.fragmented) reasons.push('Memory is fragmented.')
+  if (input.recovering) reasons.push('It restarted itself to recover.')
+  if (!reasons.length) return null
+  return { id: 'health', dot: 'attention', label: 'Health', text: reasons.join(' '), actionLabel: 'Details' }
+}
+
+function statusLostAttention(input: DeviceSummaryInput): AttentionRow | null {
+  if (!input.statusLost) return null
+  return {
+    id: 'status-lost', dot: 'problem', label: 'Not answering',
+    text: 'The signer stopped answering over WiFi. What you see may be out of date.', actionLabel: null,
+  }
+}
+
 /**
- * The "Your signer" rows, in display order: anything needing attention
- * (problem, then attention, then unknown) comes before rows that are simply ok.
+ * The Needs-attention cards, worst first (problem, then attention). Absent
+ * entirely when nothing needs a decision.
  */
-export function deviceSummaryRows(input: DeviceSummaryInput): SummaryRow[] {
-  const rows = [firmwareRow(input), powerCutRow(input), backupRow(input), connectionRow(input), storageRow(input)]
-    .filter((row): row is SummaryRow => row !== null)
+export function attentionRows(input: DeviceSummaryInput): AttentionRow[] {
+  const rows = [
+    notEncryptedAttention(input),
+    statusLostAttention(input),
+    firmwareAttention(input),
+    backupAttention(input),
+    storageAttention(input),
+    healthAttention(input),
+  ].filter((row): row is AttentionRow => row !== null)
   return [...rows].sort((a, b) => severityRank(a.dot) - severityRank(b.dot))
 }

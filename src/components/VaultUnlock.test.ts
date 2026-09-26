@@ -144,7 +144,7 @@ describe('VaultUnlock banner', () => {
     state.vaultUnlockRequest = { unlockPub: UNLOCK_PUB, lastSeen: Date.now() }
     storeVaultKey(HEX, VAULT_KEY)
     render(VaultUnlock)
-    expect(screen.getByText(/Only do this if you know it just rebooted/)).toBeTruthy()
+    expect(screen.getByText(/Unlock it only if you know it just restarted/)).toBeTruthy()
     await fireEvent.click(screen.getByText('Unlock'))
     expect(vi.mocked(sendVaultKeyOverRelay)).toHaveBeenCalledWith(undefined)
   })

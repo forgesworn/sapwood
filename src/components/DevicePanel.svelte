@@ -1,14 +1,17 @@
 <script lang="ts">
-  // Device — everything about the hardware and how it's reached: connection
-  // details, network mode, firmware, security (PIN, bridge secret), the bridge,
-  // and the danger zone. Replaces the old Connectivity, Firmware and Danger
-  // tabs plus the device half of Settings.
+  // Device — one question answered first ("is my signer all right, and if
+  // not, what do I do?"), then everything else grouped into one list:
+  // after-a-power-cut recovery (modes, phones, vault key, boot PIN), firmware,
+  // backup, network (incl. the bridge secret), display and light, diagnostics,
+  // bridge, and the danger zone.
   import { tick } from 'svelte'
   import {
     device, serialTransport, httpTransport, bridgeRestart, mgmtRevokeClient,
     relaySetLogQuiet, ensureBridgeAuth, usbDisplayFlip, setDisplayFlip,
   } from '../lib/device.svelte.js'
-  import { deviceSummaryRows, type DeviceSummaryInput, type SummaryRowId } from '../lib/device-summary.js'
+  import {
+    deviceSummaryRows, attentionRows, type DeviceSummaryInput, type AttentionRowId,
+  } from '../lib/device-summary.js'
   import { FrameType, buildSetPin, buildSetBridgeSecret, buildFactoryReset } from '../lib/frame.js'
   import { getFirmwareVersion } from '../lib/device.svelte.js'
   import { storageGauge } from '../lib/storage-gauge.js'
@@ -30,6 +33,8 @@
   import Backup from './Backup.svelte'
   import PasswordReveal from './PasswordReveal.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
+  import VaultUnlock from './VaultUnlock.svelte'
+  import TogglePair from './TogglePair.svelte'
 
   const overUsb = $derived(device.mode === 'serial')
   const overBridge = $derived(device.mode === 'http')
@@ -53,10 +58,6 @@
     window.addEventListener(PAIRING_BACKUP_EVENT, refresh)
     return () => window.removeEventListener(PAIRING_BACKUP_EVENT, refresh)
   })
-
-  function backupTime(at: number): string {
-    return new Date(at).toLocaleString()
-  }
 
   function modeLabel(): string {
     if (device.mode === 'serial') return 'USB cable'
@@ -108,7 +109,7 @@
   }
   // Update nudge: firmware updating shouldn't rely on the owner scrolling to
   // the Firmware section unprompted. When the bundle is newer than what the
-  // connected signer reports, a banner at the top points them there.
+  // connected signer reports, a Needs-attention card points them there.
   let updateInfo = $state<UpdateCheck | null>(null)
   let firmwareSection = $state<HTMLElement | null>(null)
   const runningVersion = $derived(device.mode === 'relay'
@@ -164,6 +165,10 @@
   const trimmed = $derived(device.mode === 'relay' && device.relayStatus?.truncated === true)
   const kb = (n: number) => `${Math.round(n / 1024)} KB`
 
+  // A relay signer that stopped answering status polls: what's on screen may
+  // be stale, and the global status card already offers Retry/Disconnect.
+  const statusLost = $derived(device.mode === 'relay' && device.relayStatus === null && !!device.error)
+
   // Quiet logging: warnings only, which also calms activity LEDs wired to the
   // log UART (the T-Display's blue light flashes with every log line).
   let logQuietPending = $state(false)
@@ -179,6 +184,7 @@
   let pinStatus = $state<string | null>(null)
   let pinPending = $state(false)
   let showPin = $state(false)
+  const pinValid = $derived(pinValue.length >= 4 && pinValue.length <= 8 && /^\d+$/.test(pinValue))
 
   async function handleSetPin() {
     if (pinValue && (pinValue.length < 4 || pinValue.length > 8 || !/^\d+$/.test(pinValue))) {
@@ -262,7 +268,7 @@
     finally { bridgeBusy = false }
   }
 
-  // --- Encrypt at rest / vault key (USB only) ---
+  // --- Vault key (Encrypt at rest, USB only) ---
   // The vault key encrypts the signer's stored seeds and lives only with the
   // host (this browser), never on the device. The firmware gives no read-back
   // of "encrypted but unlocked", so the card goes by what this browser holds:
@@ -303,7 +309,7 @@
     vaultStatus = null
     try {
       await ensureBridgeAuth()
-      device.awaitingButton = 'Confirm on your signer: it shows “Encrypt at rest?” — press its button within 30 seconds.'
+      device.awaitingButton = 'Confirm on your signer: it shows “Encrypt at rest?”. Press its button within 30 seconds.'
       try {
         await serialVaultSet(serialTransport, key)
       } finally {
@@ -317,11 +323,11 @@
       // this, usbHealth's at_rest would stay stale until the next reconnect
       // and the override above would never get to stand down.
       void getFirmwareVersion().then((info) => { if (info) usbHealth = info })
-      vaultStatus = 'Encryption at rest is on. The key stays in this browser — keep your off-site copy safe.'
+      vaultStatus = 'Encryption at rest is on. The key stays in this browser, so keep your off-site copy safe.'
     } catch (e) {
       // The key is already stored (and visible below) whatever happened; a
       // missed ACK after the signer re-encrypted its seeds cannot orphan it.
-      vaultStatus = `${e instanceof Error ? e.message : 'Failed'} — your vault key is shown above and kept in this browser. If the signer sealed itself anyway, it will ask for this key on next boot.`
+      vaultStatus = `${e instanceof Error ? e.message : 'Failed'}. Your vault key is shown above and kept in this browser. If the signer sealed itself anyway, it will ask for this key on next boot.`
     } finally {
       vaultPending = false
     }
@@ -333,7 +339,7 @@
     vaultStatus = null
     try {
       await ensureBridgeAuth()
-      device.awaitingButton = 'Confirm on your signer: it shows “Disable encryption?” — press its button within 30 seconds.'
+      device.awaitingButton = 'Confirm on your signer: it shows “Disable encryption?”. Press its button within 30 seconds.'
       try {
         await serialVaultSet(serialTransport, null)
       } finally {
@@ -429,38 +435,57 @@
    *  value this build does not recognise, not for lack of any report. */
   const atRestUnrecognised = $derived(currentMode === null && encryptionKnown === null && atRestReport !== undefined)
   let chosenMode = $state<UnlockMode | null>(null)
-  let modesSection = $state<HTMLElement | null>(null)
+  let howItUnlocksHeading = $state<HTMLElement | null>(null)
+  let switchButtonEls = $state<(HTMLButtonElement | null)[]>([null, null, null])
   let noEncryptionAck = $state(false)
   let clearPinAck = $state(false)
   let clearPinConfirming = $state(false)
 
   const NO_ENCRYPTION_RISK = 'Anyone who takes the board can copy every key off it over USB in minutes. If it is taken, I treat every identity on it as stolen.'
+  const noEncryptionRiskText = $derived(
+    NO_ENCRYPTION_RISK + ((effectivePhoneCount ?? 0) > 0 ? ' Every phone stops being able to unlock it.' : ''),
+  )
 
   const MODES: { id: UnlockMode; name: string; after: string; taken: string }[] = [
     {
-      id: 'none',
-      name: 'No encryption',
-      after: 'Signs again straight away.',
-      taken: 'They can copy every key off it over USB in minutes. Treat every identity on it as stolen.',
-    },
-    {
       id: 'phone',
       name: 'Phone unlock',
-      after: 'Your phone shows a notification: one tap and its screen lock.',
+      after: 'Your phone shows a notification. One tap and its screen lock.',
       taken: 'Keys stay sealed unless you tap a prompt you were not expecting.',
     },
     {
       id: 'sapwood',
       name: 'Sapwood or PIN only',
-      after: 'Unlock from Sapwood, or type the PIN on the cable. The slowest recovery.',
+      after: 'Unlock from Sapwood, or type the PIN over the cable. The slowest recovery.',
       taken: 'Keys stay sealed.',
     },
+    {
+      id: 'none',
+      name: 'No encryption',
+      after: 'Signs again straight away.',
+      taken: 'Every key can be copied off it.',
+    },
   ]
+
+  function switchToMode(i: number) {
+    chosenMode = MODES[i].id
+    noEncryptionAck = false
+    void tick().then(() => {
+      const container = document.getElementById(`mode-steps-${MODES[i].id}`)
+      const focusable = container?.querySelector<HTMLElement>('input, button, [tabindex="-1"]')
+      focusable?.focus()
+    })
+  }
+
+  function cancelSwitch(i: number) {
+    chosenMode = null
+    void tick().then(() => switchButtonEls[i]?.focus())
+  }
 
   function showNoEncryption() {
     chosenMode = 'none'
     noEncryptionAck = false
-    void openAndScroll(() => { modesOpen = true }, () => modesSection)
+    void openAndScroll(() => { modesOpen = true }, () => howItUnlocksHeading)
   }
 
   // --- Danger zone ---
@@ -504,7 +529,7 @@
   async function handleReset() {
     resetPending = true
     resetResult = null
-    device.awaitingButton = 'Hold the signer’s button to confirm the wipe — it then erases and verifies every region, which can take up to a minute.'
+    device.awaitingButton = 'Hold the signer’s button to confirm the wipe. It then erases and verifies every region, which can take up to a minute.'
     try {
       const frame = overBridge
         ? await httpTransport.factoryReset()
@@ -524,14 +549,13 @@
     }
   }
 
-  // --- "Your signer" summary: one row per concern, worst first. Each row's
-  // button opens the matching section below and scrolls to it. ---
+  // --- Needs attention + section open state: each card's action opens and
+  // scrolls to the matching section below. ---
   let backupSection = $state<HTMLElement | null>(null)
   let diagnosticsSection = $state<HTMLElement | null>(null)
 
   let firmwareOpen = $state(false)
   let modesOpen = $state(false)
-  let securityOpen = $state(false)
   let backupOpen = $state(false)
   let networkOpen = $state(false)
   let displayOpen = $state(false)
@@ -539,18 +563,33 @@
   let bridgeOpen = $state(false)
   let dangerOpen = $state(false)
 
+  // The bench job's own section starts open when there is nothing to unlock
+  // with yet and the mode calls for a phone: the owner's very next action is
+  // "Add a phone", so do not make them click twice to see it.
+  let modesOpenInit = false
+  $effect(() => {
+    if (modesOpenInit) return
+    if ((effectivePhoneCount ?? null) === 0 && (currentMode === 'phone' || currentMode === 'sapwood')) {
+      modesOpen = true
+      modesOpenInit = true
+    }
+  })
+
   async function openAndScroll(open: () => void, target: () => HTMLElement | null) {
     open()
     await tick()
-    target()?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    target()?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
   }
 
-  function handleSummaryAction(id: SummaryRowId) {
+  function handleAttentionAction(id: AttentionRowId) {
     if (id === 'firmware') void openAndScroll(() => { firmwareOpen = true }, () => firmwareSection)
-    else if (id === 'power-cut') void openAndScroll(() => { modesOpen = true }, () => modesSection)
+    else if (id === 'not-encrypted') void openAndScroll(() => { modesOpen = true }, () => howItUnlocksHeading)
     else if (id === 'backup') void openAndScroll(() => { backupOpen = true }, () => backupSection)
-    else void openAndScroll(() => { diagnosticsOpen = true }, () => diagnosticsSection)
+    else void openAndScroll(() => { diagnosticsOpen = true }, () => diagnosticsSection) // storage, health
   }
+
+  const locked = $derived(overUsb && device.masters.some((m) => m.locked === true))
 
   const summaryInput = $derived<DeviceSummaryInput>({
     updateAvailable: !!updateInfo?.upgrade,
@@ -563,531 +602,553 @@
     phoneCount: effectivePhoneCount,
     atRestUnrecognised,
     overUsb,
+    locked,
     needsBackup: pairingBackup.needsBackup,
     lastExportAt: pairingBackup.lastExportAt,
     crash: !!lastReset?.crash,
     fragmented,
     recovering: !!recoveryReason,
     storageState: storage?.state ?? null,
-    modeLabel: modeLabel(),
+    storagePct: storage?.pct ?? null,
+    statusLost,
   })
   const summaryRows = $derived(deviceSummaryRows(summaryInput))
+  const attention = $derived(attentionRows(summaryInput))
 
-  const powerCutStateWord = $derived(
-    currentMode === 'phone' ? 'Phone unlock'
-      : currentMode === 'sapwood' ? 'Sapwood or PIN only'
-        : currentMode === 'none' ? 'No encryption'
-          : 'Unknown',
-  )
-  const securityStateWord = $derived(!overUsb ? 'USB only' : vaultStored ? 'Encrypted' : 'Not encrypted')
-  const backupStateWord = $derived(!overUsb ? 'USB only' : pairingBackup.needsBackup ? 'Needed' : 'Backed up')
+  const powerCutStateWord = $derived(summaryRows.find((r) => r.id === 'power-cut')?.text ?? '')
+  const powerCutDot = $derived(summaryRows.find((r) => r.id === 'power-cut')?.dot ?? 'unknown')
+  const firmwareStateWord = $derived(summaryRows.find((r) => r.id === 'firmware')?.text ?? '')
+  const firmwareDot = $derived(summaryRows.find((r) => r.id === 'firmware')?.dot ?? 'unknown')
+  const backupStateWord = $derived(summaryRows.find((r) => r.id === 'backup')?.text ?? '')
+  const backupDot = $derived(summaryRows.find((r) => r.id === 'backup')?.dot ?? 'unknown')
   const networkStateWord = $derived(
     device.mode === 'relay' ? 'WiFi' : device.mode === 'serial' ? 'USB cable' : device.mode === 'http' ? 'Bridge' : '',
   )
   const displayStateWord = $derived(screenFlip === null ? '' : screenFlip ? 'Flipped' : 'Upright')
   const diagnosticsStateWord = $derived(
-    lastReset?.crash || fragmented || (storage && storage.state !== 'ok') ? 'Attention' : 'OK',
+    lastReset?.crash || fragmented || (storage && storage.state !== 'ok') ? 'Needs a look' : 'OK',
   )
   const bridgeStateWord = $derived(typeof device.bridgeInfo?.mode === 'string' ? device.bridgeInfo.mode : '')
 </script>
 
 <div class="device-panel">
-  {#if pairingBackup.needsBackup}
-    <section class="card pairing-backup-warning" aria-live="polite">
-      <h2 class="section-title">Pairing backup required</h2>
-      <p class="hint">
-        {#if pairingBackup.lastExportAt}
-          App pairings changed after this browser's recorded encrypted backup ({backupTime(pairingBackup.lastExportAt)}).
-        {:else}
-          App pairings changed and this browser has not recorded a completed encrypted pairing backup.
-        {/if}
-        A reset or reflash would make the affected apps pair again. {#if overUsb}Export a fresh backup below and keep its passphrase separately.{:else}Connect this signer by USB to export a fresh backup; the signer will ask for a physical button confirmation.{/if}
-      </p>
-    </section>
-  {/if}
+  <VaultUnlock />
 
-  <!-- Your signer: one bold row per concern, worst first. -->
-  <section class="your-signer">
-    <h2 class="section-title">Your signer</h2>
-    <div class="summary-rows">
-      {#each summaryRows as row (row.id)}
-        <div class="summary-row">
-          <span class="summary-lead">
+  {#if attention.length}
+    <section class="attention-block" aria-label="Needs attention">
+      {#each attention as row, i (row.id)}
+        <div class="card attention-card attention-{row.dot}">
+          <div class="attention-lead">
             <span class="dot dot-{row.dot}" aria-hidden="true"></span>
-            <span class="summary-label">{row.label}</span>
-          </span>
-          <span class="summary-text">{row.text}</span>
+            <span class="attention-label">{row.label}</span>
+          </div>
+          <p class="attention-text">{row.text}</p>
           {#if row.actionLabel}
-            <button class="btn btn-secondary btn-sm summary-action" onclick={() => handleSummaryAction(row.id)}>
-              {row.actionLabel}
-            </button>
+            <button
+              class={i === 0 ? 'btn btn-primary btn-sm attention-action' : 'btn btn-secondary btn-sm attention-action'}
+              onclick={() => handleAttentionAction(row.id)}
+            >{row.actionLabel}</button>
           {/if}
         </div>
       {/each}
-    </div>
-  </section>
-
-  <!-- Firmware -->
-  <details class="device-section" bind:this={firmwareSection} bind:open={firmwareOpen}>
-    <summary><span class="summary-title">Firmware</span><span class="summary-state">{updateInfo?.upgrade ? 'Update available' : 'Up to date'}</span></summary>
-    <OtaUpdate heading={false} />
-  </details>
-
-  <!-- After a power cut: modes and phones -->
-  {#if overUsb || device.mode === 'relay'}
-    <details class="device-section" bind:this={modesSection} bind:open={modesOpen}>
-      <summary><span class="summary-title">After a power cut</span><span class="summary-state">{powerCutStateWord}</span></summary>
-      <p class="hint">How this signer recovers its keys after a restart. Pick the option that suits
-        where it lives.</p>
-      <div class="modes">
-        {#each MODES as mode (mode.id)}
-          <div class="card mode" class:mode-current={currentMode === mode.id}>
-            <div class="mode-head">
-              <span class="mode-name">{mode.name}</span>
-              {#if currentMode === mode.id}<span class="tag tag--green">current</span>{/if}
-            </div>
-            <p class="hint-sm"><span class="mode-label">After a power cut:</span> {mode.after}</p>
-            <p class="hint-sm"><span class="mode-label">If someone takes the board:</span> {mode.taken}</p>
-            {#if currentMode !== mode.id && chosenMode !== mode.id}
-              <button class="btn btn-ghost btn-sm" onclick={() => { chosenMode = mode.id; noEncryptionAck = false }}>
-                Switch to this
-              </button>
-            {/if}
-            {#if chosenMode === mode.id && currentMode !== mode.id}
-              <div class="mode-steps">
-                {#if mode.id === 'phone'}
-                  {#if currentMode === null}
-                    <p class="hint-sm">Phone unlock needs encryption on. Turn on Encrypt at rest
-                      (Security{overUsb ? ', below' : ', over the USB cable'}), then add a phone
-                      below over the cable. Add two if you can, so one lost abroad does not leave
-                      the signer locked.</p>
-                  {:else}
-                    <p class="hint-sm">Add a phone below{overUsb ? '' : ', with the signer on the USB cable'}. Encryption is already on.</p>
-                  {/if}
-                {:else if mode.id === 'sapwood'}
-                  {#if (effectivePhoneCount ?? 0) > 0}
-                    <p class="hint-sm">Revoke each phone below. Encryption stays on.</p>
-                  {:else}
-                    <p class="hint-sm">Turn on Encrypt at rest (Security{overUsb ? ', below' : ', over the USB cable'}), or set a boot PIN.</p>
-                  {/if}
-                {:else}
-                  {#if !overUsb}
-                    <p class="hint-sm">Turning encryption off needs the signer on the USB cable.</p>
-                  {:else}
-                    <label class="hint-sm ack">
-                      <input type="checkbox" bind:checked={noEncryptionAck} disabled={vaultPending} />
-                      {NO_ENCRYPTION_RISK}{#if (effectivePhoneCount ?? 0) > 0}&#32;Every phone stops being able to unlock it.{/if}
-                    </label>
-                    {#if vaultStored}
-                      <button class="btn btn-danger btn-sm" disabled={!noEncryptionAck || vaultPending}
-                        onclick={async () => {
-                          await handleVaultDisable()
-                          if (!vaultStored) chosenMode = null
-                          noEncryptionAck = false
-                        }}>
-                        {vaultPending ? 'Waiting for the button…' : 'Turn encryption off'}
-                      </button>
-                      {#if vaultStatus}<p class="hint-sm status">{vaultStatus}</p>{/if}
-                    {:else}
-                      <p class="hint-sm">This browser holds no vault key for the signer. If it has a
-                        boot PIN, clear the PIN in Security, below.</p>
-                    {/if}
-                  {/if}
-                {/if}
-                <button class="btn btn-ghost btn-sm" onclick={() => { chosenMode = null }}>Cancel</button>
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-      {#if currentMode === null}
-        {#if atRestUnrecognised}
-          <p class="hint-sm">Your signer reported a setting this version of Sapwood doesn't know.
-            Update Sapwood.</p>
-        {:else if overUsb}
-          <p class="hint-sm">This browser holds no vault key for the signer, and the signer does not
-            say whether it has a boot PIN. With neither, it runs without encryption.</p>
-        {:else}
-          <p class="hint-sm">Over WiFi, Sapwood can tell only from the phones listed below. Connect
-            by USB to see whether this browser holds the signer's vault key.</p>
-        {/if}
-      {/if}
-      <details class="disclosure">
-        <summary>Why is there no automatic phone unlock?</summary>
-        <p class="hint-sm">Anyone holding the board can make it ask for its key, and a phone that
-          answered by itself would hand it over: no safer than no encryption, while looking safer.</p>
-      </details>
-      <div class="phones">
-        <UnlockPhones bind:count={phoneCount} refresh={phonesRefresh} />
-      </div>
-    </details>
+    </section>
   {/if}
 
-  <!-- Security (USB only) -->
-  <details class="device-section" bind:open={securityOpen}>
-    <summary><span class="summary-title">Security</span><span class="summary-state">{securityStateWord}</span></summary>
-    {#if !overUsb}
-      <p class="hint">The boot PIN, bridge secret and encryption at rest are changed over USB.
-        Plug the signer into this computer and connect by cable.</p>
-    {:else}
-      <h3 class="sub-title">Boot PIN</h3>
-      <p class="hint">Locks the device at boot. It must be unlocked before it signs anything.
-        The device asks for its button to confirm.</p>
-      <p class="warn-text">A boot PIN is typed over the USB cable, so after any reboot or power cut
-        a signer in another location stays locked until someone reaches it: signing and remote
-        management cannot resume, and the signer refuses remote network activation in this mode.
-        For an unattended signer, use a vault key with phone unlock instead (After a power cut,
-        above).</p>
-      <div class="inline-form">
-        <div class="pw-wrap">
-          <input
-            type={showPin ? 'text' : 'password'}
-            class="field-input"
-            bind:value={pinValue}
-            oninput={() => { clearPinAck = false; clearPinConfirming = false }}
-            placeholder="4–8 digits (empty to clear)"
-            maxlength="8"
-            disabled={pinPending}
-          />
-          <PasswordReveal bind:shown={showPin} disabled={pinPending} />
-        </div>
-        {#if pinValue || !clearPinConfirming}
-          <button class="btn btn-secondary" disabled={pinPending}
-            onclick={() => { if (pinValue) void handleSetPin(); else { clearPinConfirming = true; clearPinAck = false } }}>
-            {pinPending ? 'Waiting…' : pinValue ? 'Set PIN' : 'Clear PIN'}
-          </button>
-        {/if}
-      </div>
-      {#if !pinValue && clearPinConfirming}
-        <label class="hint-sm ack">
-          <input type="checkbox" bind:checked={clearPinAck} disabled={pinPending} />
-          Clearing a PIN turns encryption off and stops every phone unlocking it. {NO_ENCRYPTION_RISK}
-        </label>
-        <div class="inline-form">
-          <button class="btn btn-danger btn-sm" disabled={pinPending || !clearPinAck} onclick={handleSetPin}>
-            {pinPending ? 'Waiting…' : 'Clear the PIN'}
-          </button>
-          <button class="btn btn-ghost btn-sm" disabled={pinPending}
-            onclick={() => { clearPinConfirming = false; clearPinAck = false }}>Cancel</button>
-        </div>
-      {/if}
-      {#if pinStatus}<p class="hint-sm status">{pinStatus}</p>{/if}
+  <div class="section-group">
+    <!-- After a power cut: modes, phones, vault key, boot PIN -->
+    {#if overUsb || device.mode === 'relay'}
+      <details class="section-row" bind:open={modesOpen}>
+        <summary>
+          <h3 class="section-row-title">After a power cut</h3>
+          <span class="section-row-state"><span class="dot dot-{powerCutDot}" aria-hidden="true"></span>{powerCutStateWord}</span>
+        </summary>
+        <p class="hint">How this signer gets its keys back after a restart.</p>
+        <div class="power-cut-grid">
+          <div class="power-cut-left">
+            <UnlockPhones bind:count={phoneCount} refresh={phonesRefresh} />
+          </div>
+          <div class="power-cut-right">
+            <h4 class="sub-title" bind:this={howItUnlocksHeading} tabindex="-1">How it unlocks</h4>
+            <div class="mode-list">
+              {#each MODES as mode, i (mode.id)}
+                <div class="mode-row">
+                  <div class="mode-row-head">
+                    <span class="mode-name">{mode.name}</span>
+                    {#if currentMode === mode.id}<span class="tag tag--green">Current</span>{/if}
+                    {#if currentMode !== mode.id && chosenMode !== mode.id}
+                      <button class="btn btn-secondary btn-sm mode-switch" bind:this={switchButtonEls[i]}
+                        onclick={() => switchToMode(i)}>
+                        Switch
+                      </button>
+                    {/if}
+                  </div>
+                  <p class="hint-sm"><span class="mode-label">After a power cut:</span> {mode.after}</p>
+                  <p class="hint-sm"><span class="mode-label">If someone takes the board:</span> {mode.taken}</p>
+                  {#if chosenMode === mode.id && currentMode !== mode.id}
+                    <div class="mode-steps" id={`mode-steps-${mode.id}`}>
+                      {#if mode.id === 'phone'}
+                        {#if currentMode === null}
+                          <p class="hint-sm" tabindex="-1">Phone unlock needs encryption on.
+                            {#if overUsb}Turn it on under Vault key, below,{:else}Connect by USB to turn encryption on, then{/if}
+                            then add a phone over the cable. Add two if you can, so losing one does
+                            not leave the signer locked.</p>
+                        {:else}
+                          <p class="hint-sm" tabindex="-1">Add a phone above{overUsb ? '' : ', with the signer on the USB cable'}. Encryption is already on.</p>
+                        {/if}
+                      {:else if mode.id === 'sapwood'}
+                        {#if (effectivePhoneCount ?? 0) > 0}
+                          <p class="hint-sm" tabindex="-1">Revoke each phone above. Encryption stays on.</p>
+                        {:else}
+                          <p class="hint-sm" tabindex="-1">Turn on encryption under Vault key, below, or set a boot PIN.</p>
+                        {/if}
+                      {:else}
+                        {#if !overUsb}
+                          <p class="hint-sm" tabindex="-1">Turning encryption off needs the signer on the USB cable.</p>
+                        {:else}
+                          <label class="hint-sm ack">
+                            <input type="checkbox" bind:checked={noEncryptionAck} disabled={vaultPending} />
+                            {noEncryptionRiskText}
+                          </label>
+                          {#if vaultStored}
+                            <button class="btn btn-danger btn-sm" disabled={!noEncryptionAck || vaultPending}
+                              onclick={async () => {
+                                await handleVaultDisable()
+                                if (!vaultStored) chosenMode = null
+                                noEncryptionAck = false
+                              }}>
+                              {vaultPending ? 'Waiting for the button…' : 'Turn encryption off'}
+                            </button>
+                            {#if vaultStatus}<p class="hint-sm status">{vaultStatus}</p>{/if}
+                          {:else}
+                            <p class="hint-sm">This browser holds no vault key for the signer. If it
+                              has a boot PIN, clear the PIN below.</p>
+                          {/if}
+                        {/if}
+                      {/if}
+                      <button class="btn btn-ghost btn-sm" onclick={() => cancelSwitch(i)}>Cancel</button>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            {#if currentMode === null}
+              {#if atRestUnrecognised}
+                <p class="hint-sm">Your signer reported a setting this version of Sapwood doesn't
+                  know. Update Sapwood.</p>
+              {:else if overUsb}
+                <p class="hint-sm">This browser holds no vault key for the signer, and the signer
+                  does not say whether it has a boot PIN. With neither, it runs without encryption.</p>
+              {:else}
+                <p class="hint-sm">Over WiFi, Sapwood can tell only from the phones listed to the
+                  side. Connect by USB to see whether this browser holds the signer's vault key.</p>
+              {/if}
+            {/if}
+            <details class="disclosure">
+              <summary>Why is there no automatic phone unlock?</summary>
+              <p class="hint-sm">Anyone holding the board can make it ask for its key, and a phone
+                that answered by itself would hand it over: no safer than no encryption, while
+                looking safer.</p>
+            </details>
 
-      <h3 class="sub-title">Encrypt at rest</h3>
-      <p class="hint">Encrypts the signer's stored keys with a vault key held by this browser, never
-        by the device: a stolen device yields only ciphertext.</p>
-      {#if vaultLocked}
-        <p class="warn-text">This signer is locked. Unlock it from the banner on Home before
-          changing encryption.</p>
-      {:else if !vaultDeviceKey}
-        <p class="hint-sm">Add an identity to the signer first.</p>
-      {:else if vaultEscrowKey}
-        <div class="vault-escrow">
-          <p class="warn-text">Your vault key: store it somewhere safe off this browser
-            (password manager, printed) <strong>before</strong> the signer is sealed. Without it,
-            a sealed signer cannot be unlocked.</p>
-          <div class="uri-box"><code>{vaultEscrowKey}</code></div>
-          <div class="inline-form">
-            <button class="btn btn-secondary btn-sm" disabled={vaultPending}
-              onclick={async () => { vaultCopied = await copyText(vaultEscrowKey ?? '') }}>
-              {vaultCopied ? 'Copied ✓' : 'Copy'}
-            </button>
-            <button class="btn btn-secondary btn-sm" disabled={vaultPending}
-              onclick={() => {
-                const url = URL.createObjectURL(new Blob([`${vaultEscrowKey}\n`], { type: 'text/plain' }))
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `heartwood-vault-key-${vaultDeviceKey?.slice(0, 8) ?? 'signer'}.txt`
-                a.click()
-                URL.revokeObjectURL(url)
-              }}>
-              Download
-            </button>
-          </div>
-          <label class="hint-sm vault-escrow-tick">
-            <input type="checkbox" bind:checked={vaultEscrowTick} disabled={vaultPending} />
-            I have stored this key outside this browser
-          </label>
-          <div class="inline-form">
-            <button class="btn btn-primary btn-sm"
-              disabled={vaultPending || !vaultEscrowTick}
-              onclick={handleVaultSeal}>
-              {vaultPending ? 'Waiting for the button…' : 'Seal the signer now'}
-            </button>
-            <button class="btn btn-ghost btn-sm" disabled={vaultPending}
-              onclick={() => { if (vaultDeviceKey) removeVaultKey(vaultDeviceKey); vaultEscrowKey = null }}>
-              Discard key
-            </button>
+            {#if !overUsb}
+              <h4 class="sub-title">Vault key</h4>
+              <p class="hint">The boot PIN and vault key are changed over USB. Plug the signer into
+                this computer and connect by cable.</p>
+            {:else}
+              <h4 class="sub-title">Vault key</h4>
+              <p class="hint">Encrypts the keys stored on the signer. The key lives in this browser,
+                never on the signer, so a stolen signer yields only ciphertext.</p>
+              {#if vaultLocked}
+                <p class="warn-text">This signer is locked. Unlock it above before changing
+                  encryption.</p>
+              {:else if !vaultDeviceKey}
+                <p class="hint-sm">Add an identity to the signer first.</p>
+              {:else if vaultEscrowKey}
+                <div class="vault-escrow">
+                  <p class="warn-text">Store this vault key somewhere safe outside this browser,
+                    such as a password manager or on paper, before you seal the signer. Without it,
+                    a sealed signer cannot be unlocked.</p>
+                  <div class="uri-box"><code>{vaultEscrowKey}</code></div>
+                  <div class="inline-form">
+                    <button class="btn btn-secondary btn-sm" disabled={vaultPending}
+                      onclick={async () => { vaultCopied = await copyText(vaultEscrowKey ?? '') }}>
+                      {vaultCopied ? 'Copied ✓' : 'Copy'}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" disabled={vaultPending}
+                      onclick={() => {
+                        const url = URL.createObjectURL(new Blob([`${vaultEscrowKey}\n`], { type: 'text/plain' }))
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `heartwood-vault-key-${vaultDeviceKey?.slice(0, 8) ?? 'signer'}.txt`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}>
+                      Download
+                    </button>
+                  </div>
+                  <label class="hint-sm vault-escrow-tick">
+                    <input type="checkbox" bind:checked={vaultEscrowTick} disabled={vaultPending} />
+                    I have stored this key outside this browser
+                  </label>
+                  <div class="inline-form">
+                    <button class="btn btn-primary btn-sm"
+                      disabled={vaultPending || !vaultEscrowTick}
+                      onclick={handleVaultSeal}>
+                      {vaultPending ? 'Waiting for the button…' : 'Seal the signer now'}
+                    </button>
+                    <button class="btn btn-ghost btn-sm" disabled={vaultPending}
+                      onclick={() => { if (vaultDeviceKey) removeVaultKey(vaultDeviceKey); vaultEscrowKey = null }}>
+                      Discard key
+                    </button>
+                  </div>
+                </div>
+              {:else if vaultStored}
+                <p class="hint-sm">This browser holds a vault key for this signer.</p>
+                <div class="vault-escrow">
+                  <p class="hint-sm">Store this somewhere safe off-site (e.g. password manager). It
+                    unlocks your signer if this browser's storage is lost.</p>
+                  {#if vaultShowKey}
+                    <div class="uri-box"><code>{vaultStored}</code></div>
+                  {/if}
+                  <div class="inline-form">
+                    <button class="btn btn-secondary btn-sm" disabled={vaultPending}
+                      onclick={() => (vaultShowKey = !vaultShowKey)}>
+                      {vaultShowKey ? 'Hide vault key' : 'Reveal vault key'}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={handleVaultCopy}>
+                      {vaultCopied ? 'Copied ✓' : 'Copy'}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={handleVaultDownload}>
+                      Download
+                    </button>
+                  </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={showNoEncryption}>
+                  Disable encryption
+                </button>
+              {:else}
+                <ConfirmButton
+                  label="Encrypt at rest"
+                  question="Generate a vault key and encrypt this signer's stored keys? You will back the key up before anything is sealed."
+                  confirmLabel="Yes, generate the key"
+                  busyLabel="Working…"
+                  busy={vaultPending}
+                  buttonClass="btn btn-secondary btn-sm"
+                  onconfirm={handleVaultGenerate}
+                />
+                <details class="disclosure vault-import">
+                  <summary>Restore a vault key saved elsewhere</summary>
+                  <p class="hint-sm">Paste a vault key you escrowed from another browser so this one
+                    can unlock the signer too.</p>
+                  <div class="inline-form">
+                    <input
+                      class="field-input"
+                      bind:value={vaultImport}
+                      placeholder="64 hex characters"
+                      maxlength="64"
+                      spellcheck="false"
+                      autocomplete="off"
+                      disabled={vaultPending}
+                    />
+                    <button class="btn btn-secondary btn-sm" disabled={vaultPending || !normaliseVaultKeyHex(vaultImport)}
+                      onclick={handleVaultImport}>
+                      Save in this browser
+                    </button>
+                  </div>
+                </details>
+              {/if}
+              {#if vaultStatus}<p class="hint-sm status">{vaultStatus}</p>{/if}
+
+              <details class="disclosure boot-pin">
+                <summary>Boot PIN</summary>
+                <p class="warn-text">After any restart, a signer with a boot PIN stays locked until
+                  someone types the PIN over the USB cable. Signing and remote management stop, and
+                  it refuses remote network changes. For a signer you leave running elsewhere, use a
+                  vault key with phone unlock instead.</p>
+                <div class="field">
+                  <label class="field-label" for="boot-pin-input">Boot PIN</label>
+                  <div class="inline-form">
+                    <div class="pw-wrap">
+                      <input
+                        id="boot-pin-input"
+                        type={showPin ? 'text' : 'password'}
+                        class="field-input"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        bind:value={pinValue}
+                        oninput={() => { clearPinAck = false; clearPinConfirming = false }}
+                        placeholder="4 to 8 digits"
+                        maxlength="8"
+                        disabled={pinPending}
+                      />
+                      <PasswordReveal bind:shown={showPin} disabled={pinPending} />
+                    </div>
+                    <button class="btn btn-secondary" disabled={pinPending || !pinValid} onclick={handleSetPin}>
+                      {pinPending ? 'Waiting…' : 'Set PIN'}
+                    </button>
+                    <button class="btn btn-ghost btn-sm" disabled={pinPending || !!pinValue}
+                      onclick={() => { clearPinConfirming = true; clearPinAck = false }}>
+                      Clear PIN
+                    </button>
+                  </div>
+                  <p class="field-hint">4 to 8 digits</p>
+                </div>
+                {#if clearPinConfirming}
+                  <label class="hint-sm ack">
+                    <input type="checkbox" bind:checked={clearPinAck} disabled={pinPending} />
+                    Clearing a PIN turns encryption off and stops every phone unlocking it. {NO_ENCRYPTION_RISK}
+                  </label>
+                  <div class="inline-form">
+                    <button class="btn btn-danger btn-sm" disabled={pinPending || !clearPinAck} onclick={handleSetPin}>
+                      {pinPending ? 'Waiting…' : 'Clear the PIN'}
+                    </button>
+                    <button class="btn btn-ghost btn-sm" disabled={pinPending}
+                      onclick={() => { clearPinConfirming = false; clearPinAck = false }}>Cancel</button>
+                  </div>
+                {/if}
+                {#if pinStatus}<p class="hint-sm status">{pinStatus}</p>{/if}
+              </details>
+            {/if}
           </div>
         </div>
-      {:else if vaultStored}
-        <p class="hint-sm">This browser holds a vault key for this signer.</p>
-        <div class="vault-escrow">
-          <p class="hint-sm">Store this somewhere safe off-site (e.g. password manager). It
-            unlocks your signer if this browser's storage is lost.</p>
-          {#if vaultShowKey}
-            <div class="uri-box"><code>{vaultStored}</code></div>
-          {/if}
-          <div class="inline-form">
-            <button class="btn btn-secondary btn-sm" disabled={vaultPending}
-              onclick={() => (vaultShowKey = !vaultShowKey)}>
-              {vaultShowKey ? 'Hide vault key' : 'Reveal vault key'}
-            </button>
-            <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={handleVaultCopy}>
-              {vaultCopied ? 'Copied ✓' : 'Copy'}
-            </button>
-            <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={handleVaultDownload}>
-              Download
-            </button>
+      </details>
+    {/if}
+
+    <!-- Firmware -->
+    <details class="section-row" bind:this={firmwareSection} bind:open={firmwareOpen}>
+      <summary>
+        <h3 class="section-row-title">Firmware</h3>
+        <span class="section-row-state"><span class="dot dot-{firmwareDot}" aria-hidden="true"></span>{firmwareStateWord}</span>
+      </summary>
+      <OtaUpdate heading={false} />
+    </details>
+
+    <!-- Backup and restore app pairings -->
+    {#if overUsb}
+      <details class="section-row" bind:this={backupSection} bind:open={backupOpen}>
+        <summary>
+          <h3 class="section-row-title">Backup</h3>
+          <span class="section-row-state"><span class="dot dot-{backupDot}" aria-hidden="true"></span>{backupStateWord}</span>
+        </summary>
+        <Backup heading={false} />
+      </details>
+    {:else}
+      <details class="section-row" bind:open={backupOpen}>
+        <summary>
+          <h3 class="section-row-title">Backup</h3>
+          <span class="section-row-state"><span class="dot dot-{backupDot}" aria-hidden="true"></span>{backupStateWord}</span>
+        </summary>
+        <p class="hint">App pairings and the bridge secret are backed up over USB. The signer asks
+          for a button press.</p>
+      </details>
+    {/if}
+
+    <!-- Network mode -->
+    <details class="section-row" bind:open={networkOpen}>
+      <summary>
+        <h3 class="section-row-title">Network</h3>
+        <span class="section-row-state">{networkStateWord}</span>
+      </summary>
+      <Connectivity heading={false} />
+      {#if overUsb}
+        <details class="disclosure advanced-block">
+          <summary>Advanced: bridge secret</summary>
+          <p class="hint">Shared secret for bridge authentication (device-decrypts mode). Needs the
+            button; cannot be set while a bridge session is active.</p>
+          <div class="field">
+            <label class="field-label" for="bridge-secret-input">Bridge secret</label>
+            <div class="inline-form">
+              <div class="pw-wrap">
+                <input
+                  id="bridge-secret-input"
+                  type={showSecret ? 'text' : 'password'}
+                  class="field-input"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  bind:value={secretValue}
+                  placeholder="64 hexadecimal characters"
+                  maxlength="64"
+                  disabled={secretPending}
+                />
+                <PasswordReveal bind:shown={showSecret} disabled={secretPending} />
+              </div>
+              <button class="btn btn-secondary" disabled={secretPending || secretValue.length !== 64} onclick={handleSetBridgeSecret}>
+                {secretPending ? 'Waiting…' : 'Set secret'}
+              </button>
+            </div>
+            <p class="field-hint">64 hexadecimal characters</p>
           </div>
-        </div>
-        <button class="btn btn-secondary btn-sm" disabled={vaultPending} onclick={showNoEncryption}>
-          Disable encryption
-        </button>
-      {:else}
-        <ConfirmButton
-          label="Encrypt at rest"
-          question="Generate a vault key and encrypt this signer's stored keys? You will back the key up before anything is sealed."
-          confirmLabel="Yes, generate the key"
-          busyLabel="Working…"
-          busy={vaultPending}
-          buttonClass="btn btn-secondary btn-sm"
-          onconfirm={handleVaultGenerate}
-        />
-        <details class="disclosure vault-import">
-          <summary>Restore a vault key saved elsewhere</summary>
-          <p class="hint-sm">Paste a vault key you escrowed from another browser so this one can
-            unlock the signer too.</p>
-          <div class="inline-form">
-            <input
-              class="field-input"
-              bind:value={vaultImport}
-              placeholder="64 hex characters"
-              maxlength="64"
-              spellcheck="false"
-              autocomplete="off"
-              disabled={vaultPending}
-            />
-            <button class="btn btn-secondary btn-sm" disabled={vaultPending || !normaliseVaultKeyHex(vaultImport)}
-              onclick={handleVaultImport}>
-              Save in this browser
-            </button>
-          </div>
+          {#if secretStatus}<p class="hint-sm status">{secretStatus}</p>{/if}
         </details>
       {/if}
-      {#if vaultStatus}<p class="hint-sm status">{vaultStatus}</p>{/if}
-
-      <details class="disclosure advanced-block">
-        <summary>Advanced: bridge secret</summary>
-        <p class="hint">Shared secret for bridge authentication (device-decrypts mode). Needs the
-          button; cannot be set while a bridge session is active.</p>
-        <div class="inline-form">
-          <div class="pw-wrap">
-            <input
-              type={showSecret ? 'text' : 'password'}
-              class="field-input"
-              bind:value={secretValue}
-              placeholder="64 hex chars (32 bytes)"
-              maxlength="64"
-              disabled={secretPending}
-            />
-            <PasswordReveal bind:shown={showSecret} disabled={secretPending} />
-          </div>
-          <button class="btn btn-secondary" disabled={secretPending || secretValue.length !== 64} onclick={handleSetBridgeSecret}>
-            {secretPending ? 'Waiting…' : 'Set secret'}
-          </button>
-        </div>
-        {#if secretStatus}<p class="hint-sm status">{secretStatus}</p>{/if}
-      </details>
-    {/if}
-  </details>
-
-  <!-- Backup and restore app pairings (USB only) -->
-  {#if overUsb}
-    <details class="device-section" bind:this={backupSection} bind:open={backupOpen}>
-      <summary><span class="summary-title">Backup</span><span class="summary-state">{backupStateWord}</span></summary>
-      <Backup heading={false} />
     </details>
-  {/if}
 
-  <!-- Network mode -->
-  <details class="device-section" bind:open={networkOpen}>
-    <summary><span class="summary-title">Network</span><span class="summary-state">{networkStateWord}</span></summary>
-    <Connectivity heading={false} />
-  </details>
-
-  <!-- Display and light -->
-  <details class="device-section" bind:open={displayOpen}>
-    <summary><span class="summary-title">Display and light</span><span class="summary-state">{displayStateWord}</span></summary>
-    <p class="hint">Screen orientation and the activity light's log detail.</p>
-    {#if device.mode === 'relay' && typeof device.relayStatus?.log_quiet === 'boolean'}
-      <div class="log-quiet">
-        <span class="lq-label">Activity light and log detail</span>
-        <div class="lq-buttons">
-          <button
-            class="btn btn-sm"
-            class:btn-secondary={device.relayStatus.log_quiet}
-            class:lq-on={!device.relayStatus.log_quiet}
-            disabled={logQuietPending || !device.relayStatus.log_quiet}
-            onclick={() => setLogQuiet(false)}
-          >Detailed</button>
-          <button
-            class="btn btn-sm"
-            class:btn-secondary={!device.relayStatus.log_quiet}
-            class:lq-on={device.relayStatus.log_quiet}
-            disabled={logQuietPending || device.relayStatus.log_quiet}
-            onclick={() => setLogQuiet(true)}
-          >Quiet</button>
+    <!-- Display and light -->
+    <details class="section-row" bind:open={displayOpen}>
+      <summary>
+        <h3 class="section-row-title">Display and light</h3>
+        <span class="section-row-state">{displayStateWord}</span>
+      </summary>
+      <p class="hint">Screen orientation and the activity light's log detail.</p>
+      {#if device.mode === 'relay' && typeof device.relayStatus?.log_quiet === 'boolean'}
+        <div class="log-quiet">
+          <span class="lq-label">Activity light and log detail</span>
+          <TogglePair
+            label="Activity light and log detail"
+            onLabel="Detailed"
+            offLabel="Quiet"
+            value={!device.relayStatus.log_quiet}
+            pending={logQuietPending}
+            onchange={(detailed) => setLogQuiet(!detailed)}
+          />
+          <p class="hint-sm no-gap">The signer's blue activity light flashes with its log output. Quiet keeps
+            warnings only, so the light stays dark in normal use.</p>
         </div>
-        <p class="hint-sm no-gap">The signer's blue activity light flashes with its log output. Quiet keeps
-          warnings only, so the light stays dark in normal use.</p>
-      </div>
-    {/if}
-    {#if screenFlip !== null}
-      <div class="log-quiet">
-        <span class="lq-label">Screen orientation</span>
-        <div class="lq-buttons">
-          <button
-            class="btn btn-sm"
-            class:btn-secondary={screenFlip}
-            class:lq-on={!screenFlip}
-            disabled={flipPending || !screenFlip}
-            onclick={() => turnScreen(false)}
-          >Upright</button>
-          <button
-            class="btn btn-sm"
-            class:btn-secondary={!screenFlip}
-            class:lq-on={screenFlip}
-            disabled={flipPending || screenFlip}
-            onclick={() => turnScreen(true)}
-          >Flipped</button>
+      {/if}
+      {#if screenFlip !== null}
+        <div class="log-quiet">
+          <span class="lq-label">Screen orientation</span>
+          <TogglePair
+            label="Screen orientation"
+            onLabel="Upright"
+            offLabel="Flipped"
+            value={!screenFlip}
+            pending={flipPending}
+            onchange={(upright) => turnScreen(!upright)}
+          />
+          <p class="hint-sm no-gap">Turn the picture round if the signer sits the other way up, for the
+            other hand or a case. The button labels on its cards move with it. On the signer itself: hold its
+            button on the DEVICE page.</p>
         </div>
-        <p class="hint-sm no-gap">Turn the picture round if the signer sits the other way up, for the
-          other hand or a case. The button labels on its cards move with it. On the signer itself: hold its
-          button on the DEVICE page.</p>
-      </div>
-    {/if}
-  </details>
+      {/if}
+    </details>
 
-  <!-- Diagnostics -->
-  <details class="device-section" bind:this={diagnosticsSection} bind:open={diagnosticsOpen}>
-    <summary><span class="summary-title">Diagnostics</span><span class="summary-state">{diagnosticsStateWord}</span></summary>
-    <p class="hint">Live numbers from the signer: connection, memory and storage.</p>
-    <table class="kv-table"><tbody>
-      <tr><td class="label">Connected over</td><td>{modeLabel()}</td></tr>
-      <tr><td class="label">Address</td><td class="mono">{device.portInfo || '--'}</td></tr>
-      <tr><td class="label">Identities</td><td>{device.masters.filter((m) => !m.persona).length}</td></tr>
-      <tr><td class="label">Apps</td><td>{device.slots.length}</td></tr>
-      {#if typeof health.uptime_s === 'number'}
-        <tr><td class="label">Signer up</td><td>{formatUptime(health.uptime_s)}</td></tr>
-      {/if}
-      {#if lastReset}
-        <tr><td class="label">Last restart</td><td class:crash-reset={lastReset.crash}>{recoveryReason ? 'self-recovery restart' : lastReset.text}</td></tr>
-      {/if}
-      {#if typeof freeHeap === 'number' && typeof largestBlock === 'number'}
-        <tr>
-          <td class="label">Free memory</td>
-          <td class:crash-reset={fragmented}>
-            {kb(freeHeap)}{#if fragmented} · fragmented (largest block {kb(largestBlock)}){/if}
-          </td>
-        </tr>
-      {/if}
-      {#if typeof maxSignBytes === 'number'}
-        <tr><td class="label">Max signed message</td><td>
-          {formatBytes(maxSignBytes)}{#if typeof maxSignBytesObject === 'number' && maxSignBytesObject > maxSignBytes}
-            · {formatBytes(maxSignBytesObject)} for apps that ask for the compact reply{/if}
-        </td></tr>
-      {/if}
-      {#if storage}
-        <tr>
-          <td class="label">Identity &amp; app storage</td>
-          <td class:crash-reset={storage.state !== 'ok'}>
-            <span class="gauge-track"><span
-              class="gauge-fill gauge-{storage.state}"
-              style={`width:${storage.pct}%`}
-            ></span></span>
-            {storage.label}
-          </td>
-        </tr>
-      {/if}
-    </tbody></table>
-    {#if storage?.state === 'warn'}
-      <p class="hint-sm crash-hint">The signer's storage is filling up. Identities, personas, app pairings
-        and settings share it. Removing an unused persona or app pairing frees space.</p>
-    {/if}
-    {#if storage?.state === 'full'}
-      <p class="hint-sm crash-hint">The signer's storage is nearly full. It will refuse new personas before
-        app pairings stop working, so remove an unused persona or app pairing now.</p>
-    {/if}
-    {#if lastReset?.crash}
-      <p class="hint-sm crash-hint">The signer's last restart was not planned.{#if health.crashed_during}&#32;It crashed while
-        handling <strong>{health.crashed_during}</strong>.{/if} If this repeats, note the pattern; the request log
-        below restarts empty each boot.</p>
-    {/if}
-    {#if fragmented}
-      <details class="disclosure">
-        <summary>Why is the memory fragmented?</summary>
-        <p class="hint-sm crash-hint">The signer's largest free block is small relative to total free.
-          This can happen after a burst of decryptions; it clears on the next restart. Newer firmware
-          frees the TLS buffers between messages to avoid it.</p>
-      </details>
-    {/if}
-    {#if trimmed}
-      <p class="hint-sm crash-hint">The signer trimmed this status to its vital fields because its memory
-        was too fragmented to send the full report. The request log paused this poll instead of the signer
-        crashing, and resumes once the memory recovers.</p>
-    {/if}
-    {#if recoveryReason}
-      <details class="disclosure">
-        <summary>Why did the signer restart itself?</summary>
-        <p class="hint-sm crash-hint">Its relay service was unusable for several minutes
-          (<strong>{recoveryReason}</strong>), usually memory too fragmented to place TLS or publish
-          buffers. It now recovers on its own instead of staying unreachable until a power-cycle; if
-          this repeats often, the memory readings above tell the story.</p>
-      </details>
-    {/if}
-  </details>
-
-  <!-- Bridge (bridge mode only) -->
-  {#if overBridge && device.bridgeInfo}
-    <details class="device-section" bind:open={bridgeOpen}>
-      <summary><span class="summary-title">Bridge</span><span class="summary-state">{bridgeStateWord}</span></summary>
+    <!-- Diagnostics -->
+    <details class="section-row" bind:this={diagnosticsSection} bind:open={diagnosticsOpen}>
+      <summary>
+        <h3 class="section-row-title">Diagnostics</h3>
+        <span class="section-row-state">{diagnosticsStateWord}</span>
+      </summary>
+      <p class="hint">Live numbers from the signer.</p>
       <table class="kv-table"><tbody>
-        <tr><td class="label">Mode</td><td>{device.bridgeInfo.mode}</td></tr>
-        <tr><td class="label">Uptime</td><td>{formatUptime(device.bridgeInfo.uptime_secs as number)}</td></tr>
-        <tr>
-          <td class="label">Relays</td>
-          <td>
-            {#each (device.bridgeInfo.relays as string[]) as relay}
-              <div class="mono">{relay}</div>
-            {/each}
-          </td>
-        </tr>
+        <tr><td class="label">Connected over</td><td>{modeLabel()}</td></tr>
+        <tr><td class="label">Address</td><td class="mono">{device.portInfo || '--'}</td></tr>
+        <tr><td class="label">Identities</td><td>{device.masters.filter((m) => !m.persona).length}</td></tr>
+        <tr><td class="label">Apps</td><td>{device.slots.length}</td></tr>
+        {#if typeof health.uptime_s === 'number'}
+          <tr><td class="label">Signer up</td><td>{formatUptime(health.uptime_s)}</td></tr>
+        {/if}
+        {#if lastReset}
+          <tr><td class="label">Last restart</td><td class:crash-reset={lastReset.crash}>{recoveryReason ? 'self-recovery restart' : lastReset.text}</td></tr>
+        {/if}
+        {#if typeof freeHeap === 'number' && typeof largestBlock === 'number'}
+          <tr>
+            <td class="label">Free memory</td>
+            <td class:crash-reset={fragmented}>
+              {kb(freeHeap)}{#if fragmented} · fragmented (largest block {kb(largestBlock)}){/if}
+            </td>
+          </tr>
+        {/if}
+        {#if typeof maxSignBytes === 'number'}
+          <tr><td class="label">Max signed message</td><td>
+            {formatBytes(maxSignBytes)}{#if typeof maxSignBytesObject === 'number' && maxSignBytesObject > maxSignBytes}
+              · {formatBytes(maxSignBytesObject)} for apps that ask for the compact reply{/if}
+          </td></tr>
+        {/if}
+        {#if storage}
+          <tr>
+            <td class="label">Identity and app storage</td>
+            <td class:crash-reset={storage.state !== 'ok'}>
+              <span class="gauge-track"><span
+                class="gauge-fill gauge-{storage.state}"
+                style={`width:${storage.pct}%`}
+              ></span></span>
+              {storage.label}
+            </td>
+          </tr>
+        {/if}
       </tbody></table>
-      <p class="hint bridge-hint">The bridge holds the USB port. Stop it to connect directly over USB
-        (then reload Sapwood and connect by cable).</p>
-      <div class="inline-form">
-        <ConfirmButton
-          label="Stop bridge"
-          question="Stop the bridge? You'll need to restart it manually."
-          confirmLabel="Yes, stop it"
-          busyLabel="Stopping…"
-          busy={bridgeBusy}
-          buttonClass="btn btn-warn btn-sm"
-          onconfirm={handleBridgeStop}
-        />
-        <ConfirmButton
-          label="Restart bridge"
-          question="Restart the bridge? Relay connections drop briefly."
-          confirmLabel="Yes, restart"
-          busyLabel="Restarting…"
-          busy={bridgeBusy}
-          buttonClass="btn btn-secondary btn-sm"
-          onconfirm={handleBridgeRestart}
-        />
-      </div>
+      {#if storage?.state === 'warn'}
+        <p class="hint-sm crash-hint">The signer's storage is filling up. Identities, personas, app pairings
+          and settings share it. Removing an unused persona or app pairing frees space.</p>
+      {/if}
+      {#if storage?.state === 'full'}
+        <p class="hint-sm crash-hint">The signer's storage is nearly full. It will refuse new personas before
+          app pairings stop working, so remove an unused persona or app pairing now.</p>
+      {/if}
+      {#if lastReset?.crash}
+        <p class="hint-sm crash-hint">The signer's last restart was not planned.{#if health.crashed_during} It crashed while
+          handling <strong>{health.crashed_during}</strong>.{/if} If this repeats, note the pattern; the request log
+          below restarts empty each boot.</p>
+      {/if}
+      {#if fragmented}
+        <details class="disclosure">
+          <summary>Why is the memory fragmented?</summary>
+          <p class="hint-sm crash-hint">The signer's largest free block is small relative to total free.
+            This can happen after a burst of decryptions; it clears on the next restart. Newer firmware
+            frees the TLS buffers between messages to avoid it.</p>
+        </details>
+      {/if}
+      {#if trimmed}
+        <p class="hint-sm crash-hint">The signer trimmed this status to its vital fields because its memory
+          was too fragmented to send the full report. The request log paused this poll instead of the signer
+          crashing, and resumes once the memory recovers.</p>
+      {/if}
+      {#if recoveryReason}
+        <details class="disclosure">
+          <summary>Why did the signer restart itself?</summary>
+          <p class="hint-sm crash-hint">Its relay service was unusable for several minutes
+            (<strong>{recoveryReason}</strong>), usually memory too fragmented to place TLS or publish
+            buffers. It now recovers on its own instead of staying unreachable until a power-cycle; if
+            this repeats often, the memory readings above tell the story.</p>
+        </details>
+      {/if}
     </details>
-  {/if}
+
+    <!-- Bridge (bridge mode only) -->
+    {#if overBridge && device.bridgeInfo}
+      <details class="section-row" bind:open={bridgeOpen}>
+        <summary>
+          <h3 class="section-row-title">Bridge</h3>
+          <span class="section-row-state">{bridgeStateWord}</span>
+        </summary>
+        <table class="kv-table"><tbody>
+          <tr><td class="label">Mode</td><td>{device.bridgeInfo.mode}</td></tr>
+          <tr><td class="label">Uptime</td><td>{formatUptime(device.bridgeInfo.uptime_secs as number)}</td></tr>
+          <tr>
+            <td class="label">Relays</td>
+            <td>
+              {#each (device.bridgeInfo.relays as string[]) as relay}
+                <div class="mono">{relay}</div>
+              {/each}
+            </td>
+          </tr>
+        </tbody></table>
+        <p class="hint bridge-hint">The bridge holds the USB port. Stop it to connect directly over USB
+          (then reload Sapwood and connect by cable).</p>
+        <div class="inline-form">
+          <ConfirmButton
+            label="Stop bridge"
+            question="Stop the bridge? You'll need to restart it manually."
+            confirmLabel="Yes, stop it"
+            busyLabel="Stopping…"
+            busy={bridgeBusy}
+            buttonClass="btn btn-warn btn-sm"
+            onconfirm={handleBridgeStop}
+          />
+          <ConfirmButton
+            label="Restart bridge"
+            question="Restart the bridge? Relay connections drop briefly."
+            confirmLabel="Yes, restart"
+            busyLabel="Restarting…"
+            busy={bridgeBusy}
+            buttonClass="btn btn-secondary btn-sm"
+            onconfirm={handleBridgeRestart}
+          />
+        </div>
+      </details>
+    {/if}
+  </div>
 
   <!-- Set up another device -->
   <p class="hint flash-line">Flash another board: install or re-flash firmware in the guided
@@ -1155,50 +1216,73 @@
 
   .log-quiet { margin-top: 0.9rem; }
   .lq-label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.4rem; }
-  .lq-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; }
-  .lq-on { border-color: var(--green-dim); color: var(--green); background: #08130d; }
 
   .device-panel {
-    display: flex; flex-direction: column; gap: 1.75rem;
+    display: flex; flex-direction: column; gap: 1.5rem;
     /* Room above the docked mobile tab bar so the last section (Danger
        zone) is never hidden behind it. */
     padding-bottom: 2rem;
   }
-  .pairing-backup-warning { border-color: var(--amber); background: #1a1508; }
-  .pairing-backup-warning .section-title { color: var(--amber); }
 
-  /* "Your signer": bold, spaced-out rows, worst concern first. The heading
-     reads as the headline: same weight as a section summary, a touch bigger. */
-  .your-signer { display: flex; flex-direction: column; gap: 0.25rem; }
-  .your-signer > .section-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 1rem; }
-  .summary-rows { display: flex; flex-direction: column; gap: 1rem; }
-  .summary-row {
-    display: flex; align-items: center; gap: 0.75rem;
-    padding: 0.9rem 1rem;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  /* Needs attention: 0 to n cards, worst first, spaced not boxed-within-boxed. */
+  .attention-block { display: flex; flex-direction: column; gap: 0.75rem; }
+  .attention-card {
+    display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-start;
+    border-left-width: 3px; border-left-style: solid;
   }
-  .summary-lead { flex: 0 0 13.5rem; display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
-  .dot {
-    flex: none; width: 0.7rem; height: 0.7rem; border-radius: 50%;
+  .attention-problem { border-left-color: var(--red); }
+  .attention-attention { border-left-color: var(--amber); }
+  .attention-lead { display: flex; align-items: center; gap: 0.5rem; }
+  .attention-label { font-size: 1rem; font-weight: 600; color: var(--text); }
+  .attention-text { margin: 0; font-size: 0.85rem; color: var(--text-dim); }
+  .attention-action { margin-top: 0.2rem; }
+
+  @media (min-width: 1024px) {
+    .attention-card { flex-direction: row; align-items: center; justify-content: space-between; gap: 1rem; }
+    .attention-lead { flex: 0 0 auto; }
+    .attention-text { flex: 1 1 auto; }
+    .attention-action { margin-top: 0; margin-left: auto; }
   }
+
+  .dot { flex: none; width: 0.6rem; height: 0.6rem; border-radius: 50%; }
   .dot-ok { background: var(--green); }
-  .dot-unknown { background: var(--text-muted); }
+  .dot-unknown { background: transparent; border: 2px solid var(--text-muted); }
   .dot-attention { background: var(--amber); }
   .dot-problem { background: var(--red); }
-  .summary-label { font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .summary-text { flex: 1 1 auto; min-width: 0; font-size: 1rem; font-weight: 600; color: var(--text); }
-  .summary-action { flex: none; margin-left: auto; }
 
-  /* Phone width: dot+label on their own line, then the state text, then a
-     full-width button. The dot never sits alone on a line. */
-  @media (max-width: 480px) {
-    .summary-row { flex-direction: column; align-items: stretch; gap: 0.4rem; }
-    .summary-lead { flex: none; }
-    .summary-text { flex: none; }
-    .summary-action { margin-left: 0; width: 100%; }
+  /* Grouped section list: one border, rows split by dividers. */
+  .section-group {
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .section-row { padding: 0 1rem; }
+  .section-row + .section-row { border-top: 1px solid var(--border); }
+  .section-row > summary {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 0.3rem 1rem; padding: 0.9rem 0; cursor: pointer; list-style: none;
+  }
+  .section-row > summary::-webkit-details-marker { display: none; }
+  .section-row-title {
+    margin: 0; font-size: 1rem; font-weight: 600; color: var(--text); display: inline-flex; align-items: center;
+    white-space: nowrap;
+  }
+  .section-row-title::before {
+    content: '▸'; display: inline-block; margin-right: 0.6rem; color: var(--text-muted);
+    transition: transform 0.15s;
+  }
+  .section-row[open] > summary .section-row-title::before { transform: rotate(90deg); }
+  .section-row-state {
+    /* A long state drops under the title on a phone rather than squeezing it. */
+    font-size: 0.85rem; color: var(--text-dim); margin-left: auto; text-align: right;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+  }
+  .section-row > :not(summary) { padding: 0 0 1.25rem; }
+  .section-row :global(.hint),
+  .section-row :global(.hint-sm) { max-width: 68ch; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .section-row-title::before { transition: none; }
   }
 
-  /* Collapsible sections: bold, roomy summaries with a state word docked right. */
   .device-section {
     border: 1px solid var(--border); border-radius: 8px;
     padding: 0 1.1rem;
@@ -1210,18 +1294,13 @@
   .device-section > summary::-webkit-details-marker { display: none; }
   .device-section--danger { border-color: #442222; }
   .summary-title { font-size: 1.05rem; font-weight: 700; color: #fff; }
-  .summary-title::before {
-    content: '▸'; display: inline-block; margin-right: 0.6rem; color: var(--text-muted);
-    transition: transform 0.15s;
-  }
-  .device-section[open] > summary .summary-title::before { transform: rotate(90deg); }
-  .summary-state { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
   .device-section > :not(summary) { padding-bottom: 1.1rem; }
   .advanced-block { margin-top: 1.1rem; }
   .flash-line { margin: 0; }
 
   .sub-title { font-size: 0.9rem; font-weight: 600; color: var(--text); margin: 1.1rem 0 0.4rem; }
   .sub-title:first-of-type { margin-top: 0; }
+  .sub-title:focus { outline: 2px solid var(--green); outline-offset: 2px; }
 
   .inline-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
   .inline-form .field-input { font-size: 0.85rem; padding: 0.45rem 0.7rem; }
@@ -1229,17 +1308,24 @@
 
   .bridge-hint { margin-top: 0.8rem; }
 
-  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.75rem; margin: 0.8rem 0; }
-  .mode { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
-  .mode-current { border-color: var(--green-dim); }
-  .mode-head { display: flex; gap: 0.5rem; align-items: center; }
+  .power-cut-grid { display: flex; flex-direction: column; gap: 1.5rem; }
+  .power-cut-left, .power-cut-right { min-width: 0; }
+  @media (min-width: 1024px) {
+    .power-cut-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; }
+  }
+
+  .mode-list { display: flex; flex-direction: column; margin: 0.6rem 0; }
+  .mode-row { padding: 0.7rem 0; border-top: 1px solid var(--border); }
+  .mode-row:first-child { border-top: none; }
+  .mode-row-head { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
   .mode-name { font-weight: 600; color: var(--text); }
+  .mode-switch { margin-left: auto; }
   .mode-label { color: var(--text); }
-  .mode-steps { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-top: 0.3rem; }
+  .mode-steps { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-top: 0.5rem; }
   .ack { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.4rem; }
   .ack input { margin-top: 0.2rem; flex: none; }
-  .phones { margin-top: 1.2rem; }
 
+  .boot-pin { margin-top: 1.1rem; }
   .vault-escrow {
     display: flex; flex-direction: column; gap: 0.6rem;
     margin: 0.6rem 0 0.9rem;
@@ -1262,7 +1348,18 @@
   @media (max-width: 640px) {
     .danger-row { flex-wrap: wrap; }
     .inline-form .pw-wrap { width: 100%; }
-    .summary-row { padding: 0.8rem 0.85rem; }
+    .section-row { padding: 0 0.85rem; }
     .device-section { padding: 0 0.85rem; }
+  }
+
+  /* Touch targets: scoped to this tab only (Q4). */
+  @media (any-pointer: coarse), (max-width: 640px) {
+    .device-panel :global(.btn) { min-height: 44px; }
+    .device-panel :global(button.btn-sm) { min-height: 44px; }
+    /* Padding, not flex: flex would drop the disclosure marker. */
+    .device-panel :global(summary) { min-height: 44px; box-sizing: border-box; padding-block: 0.7rem; }
+    .device-panel :global(button),
+    .device-panel :global(summary) { touch-action: manipulation; }
+    .device-panel :global(.btn:active:not(:disabled)) { transform: translateY(1px); }
   }
 </style>

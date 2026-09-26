@@ -174,10 +174,10 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
-    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
+    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(P, 'Pixel 8', expect.stringMatching(/compare the five words/i))
     expect(relays.ensureRelay).toHaveBeenCalledWith('wss://relay.example', expect.anything())
     const [urls, event] = relays.publish.mock.calls[0] as unknown as [string[], { kind: number; tags: string[][] }]
     expect(urls).toEqual(['wss://relay.example'])
@@ -185,7 +185,7 @@ describe('UnlockPhones', () => {
     expect(event.tags).toEqual([['h', R]])
 
     // Finished, then the same code again: refused here, not sent twice.
-    await fireEvent.click(screen.getByRole('button', { name: 'Finished' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     await fireEvent.click(await screen.findByText('Phone shows a code instead? Paste it'))
     await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE } })
@@ -209,7 +209,7 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: CODE.replace(P, 'c3'.repeat(32)) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
     expect(await screen.findByText(/Each code works once/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Scan a new code' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -254,12 +254,13 @@ describe('UnlockPhones', () => {
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: codeWith(p) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
     // Sapwood's own copy of the request-code words: for reference only.
-    expect(screen.getByText('release jar chimney acoustic depart')).toBeTruthy()
-    expect(screen.getByText(/Compare them with your phone's own screen/)).toBeTruthy()
-    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByText('release')).toBeTruthy()
+    expect(screen.getByText('depart')).toBeTruthy()
+    expect(screen.getByText('Check Cambium shows these five words, in this order.')).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
     expect(await screen.findByText('9B6 164')).toBeTruthy()
     expect(api.enrolUnlockPhone).toHaveBeenCalledOnce()
-    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
+    expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/compare the five words/i))
     // Sent exactly once: the hand-off is only ever published the once.
     const [urls, event] = relays.publish.mock.calls[0] as unknown as [string[], { kind: number; tags: string[][] }]
     expect(urls).toEqual(['wss://relay.example'])
@@ -282,7 +283,7 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: codeWith(p) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
     expect(await screen.findByRole('button', { name: 'Revoke record 99' })).toBeTruthy()
     expect(screen.getByText(/nobody holds/)).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: 'Revoke record 99' }))
@@ -300,7 +301,7 @@ describe('UnlockPhones', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Paste a code' }))
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: codeWith(p) } })
     await fireEvent.click(screen.getByRole('button', { name: 'Use this code' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
     expect(await screen.findByText(/never answered in time/)).toBeTruthy()
     expect(screen.queryByText(/nobody holds/)).toBeNull()
   })
@@ -320,11 +321,11 @@ describe('UnlockPhones', () => {
       const p = '11'.repeat(32)
       opts.onevent(inviteReply(codeWith(p)))
 
-      expect(await screen.findByText('Check your phone shows these same five words')).toBeTruthy()
-      expect(screen.getByText('Pixel 8')).toBeTruthy()
-      await fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+      expect(await screen.findByText('Pixel 8 wants to unlock this signer')).toBeTruthy()
+      expect(screen.getAllByText('Pixel 8').length).toBeGreaterThan(0)
+      await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
       expect(await screen.findByText('9B6 164')).toBeTruthy()
-      expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/ADD PHONE/))
+      expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/compare the five words/i))
     })
 
     it('ignores a repeat of the identical reply', async () => {
@@ -335,9 +336,9 @@ describe('UnlockPhones', () => {
 
       const p = '22'.repeat(32)
       opts.onevent(inviteReply(codeWith(p)))
-      await screen.findByText('Check your phone shows these same five words')
+      await screen.findByText('Pixel 8 wants to unlock this signer')
       opts.onevent(inviteReply(codeWith(p)))
-      expect(screen.getByText('Check your phone shows these same five words')).toBeTruthy()
+      expect(screen.getByText('Pixel 8 wants to unlock this signer')).toBeTruthy()
       expect(screen.queryByText(/Two phones answered/)).toBeNull()
     })
 
@@ -348,10 +349,10 @@ describe('UnlockPhones', () => {
       const opts = relays.subscribe.mock.calls[0][2]
 
       opts.onevent(inviteReply(codeWith('33'.repeat(32))))
-      await screen.findByText('Check your phone shows these same five words')
+      await screen.findByText('Pixel 8 wants to unlock this signer')
       opts.onevent(inviteReply(codeWith('44'.repeat(32))))
 
-      expect(await screen.findByText(/Two phones answered this code/)).toBeTruthy()
+      expect(await screen.findByText('Two phones answered')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'New code' })).toBeTruthy()
       expect(api.enrolUnlockPhone).not.toHaveBeenCalled()
     })
@@ -374,7 +375,7 @@ describe('UnlockPhones', () => {
       await screen.findByText('Scan this with Cambium')
       const opts = relays.subscribe.mock.calls[0][2]
       opts.onevent(inviteReply(codeWith('55'.repeat(32)), 'ff'.repeat(16)))
-      expect(screen.queryByText('Check your phone shows these same five words')).toBeNull()
+      expect(screen.queryByText('Pixel 8 wants to unlock this signer')).toBeNull()
     })
   })
 })

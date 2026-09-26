@@ -110,7 +110,7 @@
       }
       const seconds = Math.round(vaultUnlockTimeoutMs(lockedSlots) / 1000)
       const count = lockedSlots === null ? 'each identity' : `${lockedSlots} ${lockedSlots === 1 ? 'identity' : 'identities'}`
-      device.awaitingButton = `Unlocking — the signer unseals ${count} with a slow key derivation on purpose, about 25 seconds each. This waits up to ${seconds} seconds; leave the cable in.`
+      device.awaitingButton = `Unlocking: the signer unseals ${count} with a slow key derivation on purpose, about 25 seconds each. This waits up to ${seconds} seconds; leave the cable in.`
       try {
         await serialVaultUnlock(serialTransport, keyHex, lockedSlots)
       } finally {
@@ -134,7 +134,7 @@
   async function unlockRelay(keyHex: string | undefined, remember: boolean) {
     busy = true
     status = null
-    device.awaitingButton = 'Sending the vault key — the signer unseals each identity with a slow key derivation on purpose, about 25 seconds each, then rejoins its relays.'
+    device.awaitingButton = 'Sending the vault key: the signer unseals each identity with a slow key derivation on purpose, about 25 seconds each, then rejoins its relays.'
     try {
       await sendVaultKeyOverRelay(keyHex)
       if (remember && keyHex && deviceKey) {
@@ -158,7 +158,7 @@
     <h2 class="vault-title">Signer is locked</h2>
     <p class="hint no-gap">
       Its keys are encrypted at rest, so it signs nothing until it is unlocked.
-      It shows <strong>“Locked — Await unlock”</strong>.
+      It shows <strong>“Locked: Await unlock”</strong>.
     </p>
     {#if storedKey}
       <div class="vault-actions">
@@ -196,8 +196,8 @@
   <section class="card card--warn vault-banner" role="alert">
     <h2 class="vault-title">Signer is locked</h2>
     <p class="hint no-gap">
-      Your signer is locked and asking for its vault key — unlock? Only do this if you know
-      it just rebooted.
+      Your signer is locked and asking for its vault key. Unlock it only if you know it just
+      restarted.
     </p>
     {#if storedKey}
       <div class="vault-actions">
@@ -237,7 +237,7 @@
 {:else if device.vaultReconnect}
   <section class="card card--live vault-banner" role="status">
     <p class="hint no-gap">
-      Vault key sent. Waiting for the signer to unseal and rejoin its relays — about 25 seconds an
+      Vault key sent. Waiting for the signer to unseal and rejoin its relays, about 25 seconds an
       identity, then ~20 seconds to reconnect. Dialling it again every 10 seconds
       (attempt {device.vaultReconnect.attempt}, {reconnectElapsed}s so far).
     </p>
