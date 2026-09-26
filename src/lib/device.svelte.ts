@@ -51,6 +51,7 @@ import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
 import { markPairingBackupStale } from './pairing-backup.js'
 import { kithmootPermissionChanges, permissionSlotUnchanged, kithmootUpgradeBlockedReason, type KithmootPermissionReview } from './client-permission-upgrade.js'
+import { parseStorageOutcome } from './storage-outcomes.js'
 
 // --- Reactive state ---
 
@@ -1640,6 +1641,23 @@ async function rethrowAfterManagementConflict(error: unknown): Promise<never> {
   throw error
 }
 
+/**
+ * Translate a relay management error into the signer's plain storage/
+ * revocation outcome (heartwood-esp32 PR #197) when it matches. A revocation
+ * that already took hold refreshes the slot list first, so the UI never
+ * shows it as unrevoked; anything unrecognised falls through to the existing
+ * management-conflict handling.
+ */
+async function rethrowAfterStorageOutcome(error: unknown): Promise<never> {
+  const reason = error instanceof Error ? error.message : String(error)
+  const outcome = parseStorageOutcome(reason)
+  if (outcome) {
+    if (outcome.applied) await relayRefresh()
+    throw new Error(outcome.message)
+  }
+  return rethrowAfterManagementConflict(error)
+}
+
 /** Grant a slot signing authority over the relay (operator-authorised). */
 export async function relayApproveSigning(slotIndex: number, expectedFingerprint?: string): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
@@ -1666,7 +1684,7 @@ export async function relayRevokeClient(slotIndex: number, expectedFingerprint?:
       expected_secret_fingerprint: fingerprint,
     }, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
-    return rethrowAfterManagementConflict(error)
+    return rethrowAfterStorageOutcome(error)
   }
   await relayRefresh()
   notePairingBackupStale()
@@ -1687,7 +1705,7 @@ export async function relayUpdateClient(
       ...changes,
     }, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
   } catch (error) {
-    return rethrowAfterManagementConflict(error)
+    return rethrowAfterStorageOutcome(error)
   }
   await relayRefresh()
   notePairingBackupStale()
@@ -3445,7 +3463,8 @@ const MAX_CONNECT_SLOTS = 16
 export class SlotCreateError extends Error {
   readonly reason: string
   constructor(reason: string) {
-    super(reason ? `The signer refused the connection: ${reason}.` : 'The signer refused the connection.')
+    const outcome = reason ? parseStorageOutcome(reason) : null
+    super(outcome ? outcome.message : (reason ? `The signer refused the connection: ${reason}.` : 'The signer refused the connection.'))
     this.name = 'SlotCreateError'
     this.reason = reason
   }
@@ -3488,11 +3507,26 @@ export async function serialCreateClient(
   return { bunker_uri, secret: info.secret, signing_approved: false, slot_index: info.slot_index }
 }
 
+/**
+ * Report a refused write, translating the signer's own storage/revocation
+ * wording (heartwood-esp32 PR #197) into a plain outcome when it matches.
+ * When the change is a revocation that already took hold in RAM, the caller
+ * must refresh its slot list first so the UI never shows it as unrevoked.
+ */
+async function reportRefusedWrite(reasonBytes: Uint8Array, fallback: string, refresh: () => Promise<unknown>): Promise<never> {
+  const reason = new TextDecoder().decode(reasonBytes).trim()
+  const outcome = parseStorageOutcome(reason)
+  if (outcome?.applied) await refresh()
+  throw new Error(outcome?.message ?? (reason || fallback))
+}
+
 /** Revoke a client slot over USB. */
 export async function serialRevokeClient(slotIndex: number): Promise<void> {
   await ensureBridgeAuth()
   const resp = await serialTransport.sendAndReceive(buildConnSlotRevoke(device.selectedSlot, slotIndex), [FrameType.CONNSLOT_REVOKE_RESP, FrameType.NACK], SERIAL_RTT_MS)
-  if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) throw new Error('Revoke rejected')
+  if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) {
+    await reportRefusedWrite(resp.payload, 'Revoke rejected', refreshSlots)
+  }
   await refreshSlots()
   notePairingBackupStale()
 }
@@ -3501,7 +3535,9 @@ export async function serialRevokeClient(slotIndex: number): Promise<void> {
 export async function serialUpdateClient(slotIndex: number, changes: { label?: string; allowed_methods?: string[]; allowed_kinds?: number[]; auto_approve?: boolean }): Promise<void> {
   await ensureBridgeAuth()
   const resp = await serialTransport.sendAndReceive(buildConnSlotUpdate(device.selectedSlot, { slot_index: slotIndex, ...changes }), [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK], 35_000)
-  if (resp.type !== FrameType.CONNSLOT_UPDATE_RESP) throw new Error('Update denied on the device')
+  if (resp.type !== FrameType.CONNSLOT_UPDATE_RESP) {
+    await reportRefusedWrite(resp.payload, 'Update denied on the device', refreshSlots)
+  }
   await refreshSlots()
   notePairingBackupStale()
 }
@@ -3912,7 +3948,17 @@ export async function mgmtWithdrawConsent(snapshot: ConnectSlot, client?: string
       throw new Error('This signer does not support per-device consent management')
     }
     if (!contextCurrent()) throw new Error('Connection changed before withdrawal')
-    await current.request(identity === undefined ? 'clear_client_identities' : 'revoke_client_identity', params, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
+    try {
+      await current.request(identity === undefined ? 'clear_client_identities' : 'revoke_client_identity', params, MGMT_WRITE_TIMEOUT_MS, relayMgmtTarget())
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      const outcome = parseStorageOutcome(reason)
+      if (outcome) {
+        if (outcome.applied) await relayRefresh()
+        throw new Error(outcome.message)
+      }
+      throw error
+    }
   } else {
     await ensureBridgeAuth()
     if (!contextCurrent()) throw new Error('Connection changed before withdrawal')
@@ -3920,7 +3966,10 @@ export async function mgmtWithdrawConsent(snapshot: ConnectSlot, client?: string
       slot_index: snapshot.slot_index, expected_secret_fingerprint: fingerprint,
       withdraw_consent_v1: { ...(client === undefined ? {} : { client_pubkey: client }), ...(identity === undefined ? {} : { identity }) },
     }), [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK], SERIAL_RTT_MS)
-    if (response.type !== FrameType.CONNSLOT_UPDATE_RESP || new TextDecoder().decode(response.payload) !== 'consent_withdrawn_v1') {
+    if (response.type === FrameType.NACK) {
+      await reportRefusedWrite(response.payload, 'The signer did not confirm consent withdrawal; refresh before retrying', () => serialFetchSlots(master))
+    }
+    if (new TextDecoder().decode(response.payload) !== 'consent_withdrawn_v1') {
       throw new Error('The signer did not confirm consent withdrawal; refresh before retrying')
     }
   }
@@ -4177,6 +4226,9 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
           }
         : undefined
 
+    // A device NACK explains itself (a refusal, or the signer's own storage
+    // wording) and never needs the generic "may have applied" hedge below.
+    class DeviceRefusalError extends Error {}
     try {
       if (ctx.mode === 'serial') {
         const resp = await serialTransport.sendAndReceive(
@@ -4185,7 +4237,10 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
           35000,
         )
         assertContext()
-        if (resp.type === FrameType.NACK) throw new Error('Kithmoot permission update denied by device')
+        if (resp.type === FrameType.NACK) {
+          const reason = new TextDecoder().decode(resp.payload).trim()
+          throw new DeviceRefusalError(reason || 'Kithmoot permission update denied by device')
+        }
       } else if (ctx.mode === 'relay') {
         const transport = ctx.transport
         if (!transport) throw new Error('Relay transport missing')
@@ -4196,7 +4251,16 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
         throw new Error('Kithmoot permission update requires serial or relay connection')
       }
     } catch (err) {
-      if (err instanceof Error && err.message === 'Kithmoot permission update denied by device') throw err
+      if (err instanceof DeviceRefusalError) {
+        const outcome = parseStorageOutcome(err.message)
+        throw new Error(outcome?.message ?? err.message)
+      }
+      // A relay `update_client` error is the device's own JSON-RPC error text
+      // when it is a recognised storage outcome; anything else (timeouts,
+      // dropped connections) stays ambiguous and keeps the hedge below.
+      const reason = err instanceof Error ? err.message : String(err)
+      const outcome = parseStorageOutcome(reason)
+      if (outcome) throw new Error(outcome.message)
       throw new Error('Kithmoot permission update may have applied; refresh review before retrying')
     }
 
