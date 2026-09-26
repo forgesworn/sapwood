@@ -501,7 +501,7 @@
     {#if step !== 'idle'}
       <div class="enrol card">
         <h4 class="enrol-heading" tabindex="-1" bind:this={cardHeadingEl}>{cardHeadingText}</h4>
-        <p role="status" aria-live="polite" class="hint-sm enrol-live">{liveText}</p>
+        <p role="status" aria-live="polite" class="enrol-live">{liveText}</p>
 
         {#if step === 'invite'}
           {#if !invite}
@@ -578,13 +578,9 @@
             </tbody></table>
           </details>
         {:else if step === 'working'}
-          <p class="hint-sm">Wait for ADD PHONE. When its five words match these and the phone, hold
-            its button.</p>
+          <p class="hint-sm">Wait for ADD PHONE. It shows the words two at a time, and its button only
+            works once all five have shown. Hold it if they match these and the phone.</p>
           <WordPairs words={confirmWords} />
-          {#if overRelay}
-            <p class="hint-sm">This can take up to about two and a half minutes: the card queues
-              behind any other approval.</p>
-          {/if}
           {#if working}<p class="hint-sm status">{working}</p>{/if}
         {:else if step === 'done' && result}
           <p class="hint-sm">Check code</p>
@@ -666,7 +662,8 @@
   .enrol { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.8rem; align-items: flex-start; }
   .enrol-heading { font-size: 1.1rem; font-weight: 700; margin: 0; color: var(--text); }
   .enrol-heading:focus { outline: 2px solid var(--green); outline-offset: 2px; }
-  .enrol-live:empty { display: none; }
+  /* Announced, not shown: every step already says the same on screen. */
+  .enrol-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .code-input { width: 100%; box-sizing: border-box; font-size: 0.8rem; resize: vertical; }
   .check-code { font-size: 2rem; font-weight: 600; letter-spacing: 0.2em; color: var(--green); margin: 0.2rem 0; font-variant-numeric: slashed-zero; }
   .status { margin-top: 0.6rem; color: var(--text-dim); }

@@ -1257,12 +1257,13 @@
   .section-row { padding: 0 1rem; }
   .section-row + .section-row { border-top: 1px solid var(--border); }
   .section-row > summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-    padding: 0.9rem 0; cursor: pointer; list-style: none;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 0.3rem 1rem; padding: 0.9rem 0; cursor: pointer; list-style: none;
   }
   .section-row > summary::-webkit-details-marker { display: none; }
   .section-row-title {
     margin: 0; font-size: 1rem; font-weight: 600; color: var(--text); display: inline-flex; align-items: center;
+    white-space: nowrap;
   }
   .section-row-title::before {
     content: '▸'; display: inline-block; margin-right: 0.6rem; color: var(--text-muted);
@@ -1270,7 +1271,8 @@
   }
   .section-row[open] > summary .section-row-title::before { transform: rotate(90deg); }
   .section-row-state {
-    font-size: 0.85rem; color: var(--text-dim); white-space: nowrap;
+    /* A long state drops under the title on a phone rather than squeezing it. */
+    font-size: 0.85rem; color: var(--text-dim); margin-left: auto; text-align: right;
     display: inline-flex; align-items: center; gap: 0.4rem;
   }
   .section-row > :not(summary) { padding: 0 0 1.25rem; }
@@ -1351,10 +1353,11 @@
   }
 
   /* Touch targets: scoped to this tab only (Q4). */
-  @media (any-pointer: coarse) {
+  @media (any-pointer: coarse), (max-width: 640px) {
     .device-panel :global(.btn) { min-height: 44px; }
     .device-panel :global(button.btn-sm) { min-height: 44px; }
-    .device-panel :global(summary) { min-height: 44px; display: flex; align-items: center; }
+    /* Padding, not flex: flex would drop the disclosure marker. */
+    .device-panel :global(summary) { min-height: 44px; box-sizing: border-box; padding-block: 0.7rem; }
     .device-panel :global(button),
     .device-panel :global(summary) { touch-action: manipulation; }
     .device-panel :global(.btn:active:not(:disabled)) { transform: translateY(1px); }
