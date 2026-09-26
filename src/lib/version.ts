@@ -16,11 +16,11 @@ interface ParsedVersion {
 /** Parse "0.14.0" (or "v0.14.0", or "0.14.0-beta.17") into comparable parts, or
  *  null when it is not a version we can reason about. */
 function parse(version: string): ParsedVersion | null {
-  const cleaned = version.trim().replace(/^v/i, '')
+  // A build-metadata suffix (+...) plays no part in precedence (SemVer 2.0 §10).
+  const cleaned = version.trim().replace(/^v/i, '').split('+')[0] ?? ''
   const [core, ...rest] = cleaned.split('-')
   if (!core || !/^\d+(\.\d+)*$/.test(core)) return null
-  // A build-metadata suffix (+...) plays no part in precedence (SemVer 2.0 §10).
-  const prereleaseRaw = rest.length > 0 ? rest.join('-').split('+')[0] : null
+  const prereleaseRaw = rest.length > 0 ? rest.join('-') : null
   return {
     core: core.split('.').map(Number),
     prerelease: prereleaseRaw ? prereleaseRaw.split('.') : null,

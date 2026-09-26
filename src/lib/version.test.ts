@@ -28,6 +28,12 @@ describe('compareVersions', () => {
     expect(compareVersions('0.18.0-beta.19', '0.18.0-beta.19')).toBe(0)
   })
 
+  it('ignores build metadata, with or without a pre-release', () => {
+    expect(compareVersions('0.14.0+abc123', '0.14.0')).toBe(0)
+    expect(compareVersions('0.18.0-beta.19+abc123', '0.18.0-beta.19')).toBe(0)
+    expect(compareVersions('0.18.0-beta.17+abc123', '0.18.0-beta.19')).toBeLessThan(0)
+  })
+
   it('returns null rather than guessing at unparseable input', () => {
     expect(compareVersions('', '0.14.0')).toBeNull()
     expect(compareVersions('unknown', '0.14.0')).toBeNull()
