@@ -62,7 +62,7 @@
     "@paulmillr/qr": "^0.3.0",
     "@scure/bip32": "^2.4.0",
     "@scure/bip39": "^2.4.0",
-    "esptool-js": "^0.6.1",
+    "esptool-js": "^0.7.0",
     "nostr-tools": "2.23.9",
     "serialport": "^13.0.0",
     "spoken-token": "^2.1.0"
