@@ -481,15 +481,16 @@
       {#if operator}
         <div class="card card--live operator">
           {#if operator.mnemonic}
-            <p class="op-title">✍ Write down these 12 words</p>
+            <p class="op-title">✍ Write down these {operator.mnemonic.trim().split(/\s+/).length} words</p>
             <p class="op-desc">
               They're your <strong>operator key</strong>. Your signer was just told to accept
               WiFi management (approving apps, revoking them, checking status) only from the
               holder of this key, so keep the words private. They restore the key in any
               browser; it also stays saved in this one, under <strong>Identity › Operator
               key</strong> in the console. You don't need it for the next steps.
-              Heads up: in a moment your signer shows <strong>a different 12 words on its own
-              screen</strong>. That's its recovery phrase, a separate thing. Label this one
+              Heads up: in a moment your signer shows <strong>a different set of words on its
+              own screen</strong> (19, or 31 if you pick the longer option). That's its
+              recovery phrase, a separate thing. Label this one
               <strong>“operator”</strong> so you don't mix them up.
             </p>
             <pre class="op-phrase">{operator.mnemonic}</pre>
