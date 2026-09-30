@@ -130,7 +130,7 @@ export interface RemoteNetworkState {
   revision: number
   active: RedactedNetworkConfig
   /** Which network in `active` the signer joined (`0` for `ssid`, `n` for
-   * `networks[n - 1]`), when its firmware reports it. See {@link joinedSsid}. */
+   * `networks[n - 1]`), when its firmware reports it. See `joinedSsid`. */
   joined_index?: number
   trial: NetworkConfigTrial | null
   last_result: {
@@ -156,7 +156,7 @@ export interface UsbNetworkState {
   /** Which stored network the station actually joined, from the firmware's
    * `runtime.wifi_index`: `0` for `ssid`, `n` for `networks[n - 1]`. Absent
    * while WiFi is down, on older firmware, or when the value is not one we
-   * understand. Display only: resolve it with {@link joinedSsid}. */
+   * understand. Display only: resolve it with `joinedSsid` (joined-network.ts). */
   joined_index?: number
   op_mgmt?: string
   recovery_ok: boolean
@@ -2904,17 +2904,6 @@ function parseJoinedIndex(holder: unknown): number | undefined {
   return Number.isInteger(index) && Number(index) >= 0 && Number(index) <= 8
     ? Number(index)
     : undefined
-}
-
-/** The SSID the signer actually joined, or `undefined` when unknown. With a
- * fallback list this can be a network other than the primary. */
-export function joinedSsid(
-  state: { ssid?: string; networks?: Array<{ ssid: string }>; joined_index?: number },
-): string | undefined {
-  const index = state.joined_index
-  if (index === undefined) return undefined
-  const ssid = index === 0 ? state.ssid : state.networks?.[index - 1]?.ssid
-  return ssid || undefined
 }
 
 function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {

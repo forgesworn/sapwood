@@ -2,9 +2,10 @@
   import { onDestroy } from 'svelte'
   import {
     abortNetworkConfig, device, configureNetwork, configureNetworkRemotely, getNetworkConfig,
-    joinedSsid, patchNetworkOverUsb, scanWifi, type NetworkConfigTrial, type RemotePasswordChange,
+    patchNetworkOverUsb, scanWifi, type NetworkConfigTrial, type RemotePasswordChange,
     type WifiNetwork,
   } from '../lib/device.svelte.js'
+  import { joinedSsid } from '../lib/joined-network.js'
   import { getOrCreateOperator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
   import { DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS } from '../lib/wizard.js'

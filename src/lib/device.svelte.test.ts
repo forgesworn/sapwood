@@ -114,8 +114,9 @@ import {
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
   mgmtApplyKithmootPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
-  usbDisplayFlip, setDisplayFlip, joinedSsid,
+  usbDisplayFlip, setDisplayFlip,
 } from './device.svelte.js'
+import { joinedSsid } from './joined-network.js'
 import { kithmootPermissionChanges } from './client-permission-upgrade.js'
 import type { KithmootPermissionReview } from './client-permission-upgrade.js'
 import type { ConnectSlot } from './types.js'
