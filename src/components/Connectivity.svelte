@@ -5,6 +5,7 @@
     patchNetworkOverUsb, scanWifi, type NetworkConfigTrial, type RemotePasswordChange,
     type WifiNetwork,
   } from '../lib/device.svelte.js'
+  import { joinedSsid } from '../lib/joined-network.js'
   import { getOrCreateOperator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
   import { DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS } from '../lib/wizard.js'
@@ -55,6 +56,9 @@
   // live. `undefined` = firmware predates the list (it would reject the patch
   // field); an array (possibly empty) = the editor is usable.
   let storedNetworks = $state<Array<{ ssid: string; password_set: boolean }> | undefined>(undefined)
+  // The network the signer actually joined, as it last reported it. Display
+  // only: with a fallback list it can differ from the primary in the form.
+  let joinedNetwork = $state<string | undefined>(undefined)
 
   const overUsb = $derived(device.connected && device.mode === 'serial')
   const overRelay = $derived(device.connected && device.mode === 'relay')
@@ -142,6 +146,7 @@
     newNetSsid = ''
     newNetPassword = ''
     storedNetworks = undefined
+    joinedNetwork = undefined
   }
 
   async function loadRemoteConfig(targetKey: string, epoch: number) {
@@ -160,6 +165,7 @@
       clearPassword = false
       storedNetworks = state.active.networks
       fallbacks = (state.active.networks ?? []).map((n) => ({ ssid: n.ssid, password: null }))
+      joinedNetwork = joinedSsid({ ...state.active, joined_index: state.joined_index })
       pendingTrial = state.trial
       if (state.trial) {
         message = state.trial.phase === 'staged'
@@ -198,6 +204,7 @@
     clearPassword = false
     storedNetworks = state.networks
     fallbacks = (state.networks ?? []).map((n) => ({ ssid: n.ssid, password: null }))
+    joinedNetwork = state.mode === 'wifi' ? joinedSsid(state) : undefined
     loading = false
   })
 
@@ -480,6 +487,11 @@
           </ul>
         {/if}
         {#if scanNote}<p class="hint-sm scan-note">{scanNote}</p>{/if}
+        {#if joinedNetwork}
+          <p class="hint-sm joined-note">
+            Currently on <strong>{joinedNetwork}</strong>{joinedNetwork !== activeSsid ? ', one of the fallback networks' : ''}.
+          </p>
+        {/if}
       </div>
       <div class="field">
         <span class="field-label">WiFi password</span>

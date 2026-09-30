@@ -116,6 +116,7 @@ import {
   mgmtApplyKithmootPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
   usbDisplayFlip, setDisplayFlip,
 } from './device.svelte.js'
+import { joinedSsid } from './joined-network.js'
 import { kithmootPermissionChanges } from './client-permission-upgrade.js'
 import type { KithmootPermissionReview } from './client-permission-upgrade.js'
 import type { ConnectSlot } from './types.js'
@@ -336,6 +337,45 @@ describe('USB redacted network and operator recovery', () => {
     serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse())
     const legacy = await refreshUsbNetworkState()
     expect(legacy?.networks).toBeUndefined()
+  })
+
+  it('names the joined network and treats an odd index as unknown, never as bad state', async () => {
+    device.mode = 'serial'
+    device.connected = true
+    const networks = [
+      { ssid: 'hotspot', password_set: true },
+      { ssid: 'starlink', password_set: false },
+    ]
+    const read = async (runtime: unknown) => {
+      serialMock.sendAndReceive.mockResolvedValueOnce(stateResponse({ networks, runtime }))
+      return refreshUsbNetworkState()
+    }
+
+    // 0 is the primary ssid, n is networks[n - 1].
+    const primary = await read({ stage: 'online', wifi_connected: true, wifi_index: 0 })
+    expect(primary?.joined_index).toBe(0)
+    expect(joinedSsid(primary!)).toBe('Home')
+    const fallback = await read({ stage: 'online', wifi_connected: true, wifi_index: 2 })
+    expect(joinedSsid(fallback!)).toBe('starlink')
+
+    // WiFi down, older firmware, garbage, or a place past the list: the state
+    // still parses in full and the joined network is simply unknown.
+    for (const runtime of [
+      { stage: 'wifi_connecting', wifi_connected: false, wifi_index: null },
+      { stage: 'online', wifi_connected: true },
+      undefined,
+      { wifi_index: '1' },
+      { wifi_index: -1 },
+      { wifi_index: 1.5 },
+    ]) {
+      const state = await read(runtime)
+      expect(state).toMatchObject({ ssid: 'Home', networks })
+      expect(state?.joined_index).toBeUndefined()
+      expect(joinedSsid(state!)).toBeUndefined()
+    }
+    const past = await read({ wifi_index: 5 })
+    expect(past?.joined_index).toBe(5)
+    expect(joinedSsid(past!)).toBeUndefined()
   })
 
   it('preserves a USB network trial and never persists its stale active route', async () => {
@@ -667,6 +707,7 @@ describe('staged remote network management', () => {
             password_set: true, password: 'must-not-escape',
           },
           trial: null,
+          wifi_index: 0,
         }
       }
       return { ok: true }
@@ -677,6 +718,7 @@ describe('staged remote network management', () => {
       await expect(getNetworkConfig()).resolves.toEqual({
         revision: 7,
         active: { mode: 'wifi', ssid: 'Home', relays: ['wss://old.example'], password_set: true },
+        joined_index: 0,
         trial: null,
         last_result: null,
       })

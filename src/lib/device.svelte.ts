@@ -129,6 +129,9 @@ export interface NetworkConfigTrial extends RedactedNetworkConfig {
 export interface RemoteNetworkState {
   revision: number
   active: RedactedNetworkConfig
+  /** Which network in `active` the signer joined (`0` for `ssid`, `n` for
+   * `networks[n - 1]`), when its firmware reports it. See `joinedSsid`. */
+  joined_index?: number
   trial: NetworkConfigTrial | null
   last_result: {
     transaction_id: string
@@ -150,6 +153,11 @@ export interface UsbNetworkState {
    * (possibly empty) exactly when the firmware supports the network list —
    * older firmware omits it and rejects `networks` in patches. */
   networks?: Array<{ ssid: string; password_set: boolean }>
+  /** Which stored network the station actually joined, from the firmware's
+   * `runtime.wifi_index`: `0` for `ssid`, `n` for `networks[n - 1]`. Absent
+   * while WiFi is down, on older firmware, or when the value is not one we
+   * understand. Display only: resolve it with `joinedSsid` (joined-network.ts). */
+  joined_index?: number
   op_mgmt?: string
   recovery_ok: boolean
   /** A non-null value means the stored active route is not proof of the route
@@ -1991,6 +1999,9 @@ function remoteNetworkState(raw: Record<string, unknown>): RemoteNetworkState {
     throw new Error('The signer returned an invalid network configuration revision.')
   }
   const active = redactedNetworkConfig(raw.active)
+  // The relay reply carries the index at top level, the USB frame in `runtime`.
+  const joinedIndex = parseJoinedIndex(raw)
+  const joined = joinedIndex !== undefined ? { joined_index: joinedIndex } : {}
   const lastRaw = record(raw.last_result)
   const lastOutcome = lastRaw?.outcome
   const lastRevision = Number(lastRaw?.revision)
@@ -2006,7 +2017,7 @@ function remoteNetworkState(raw: Record<string, unknown>): RemoteNetworkState {
       } as RemoteNetworkState['last_result']
     : null
   if (raw.trial === null || raw.trial === undefined) {
-    return { revision, active, trial: null, last_result: lastResult }
+    return { revision, active, ...joined, trial: null, last_result: lastResult }
   }
   const trialRaw = record(raw.trial)
   if (!trialRaw || typeof trialRaw.transaction_id !== 'string' || !trialRaw.transaction_id) {
@@ -2022,6 +2033,7 @@ function remoteNetworkState(raw: Record<string, unknown>): RemoteNetworkState {
   return {
     revision,
     active,
+    ...joined,
     last_result: lastResult,
     trial: {
       ...redactedNetworkConfig(trialRaw),
@@ -2883,6 +2895,17 @@ function firstMasterHex(): string {
   } catch { return '' }
 }
 
+/** `wifi_index` from the object holding it (GET_NET_CONFIG's `runtime`, or
+ * the relay reply itself), or `undefined`. Lenient on purpose, unlike the
+ * rest of the parser: it only labels the screen, so a missing or odd value
+ * means "unknown" and never discards the state. */
+function parseJoinedIndex(holder: unknown): number | undefined {
+  const index = record(holder)?.wifi_index
+  return Number.isInteger(index) && Number(index) >= 0 && Number(index) <= 8
+    ? Number(index)
+    : undefined
+}
+
 function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {
   let raw: unknown
   try { raw = JSON.parse(new TextDecoder().decode(payload)) } catch { return null }
@@ -2949,6 +2972,7 @@ function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {
     }
     networks = parsed
   }
+  const joinedIndex = parseJoinedIndex(value.runtime)
   return {
     ...base,
     mode: value.mode,
@@ -2956,6 +2980,7 @@ function parseUsbNetworkState(payload: Uint8Array): UsbNetworkState | null {
     relays: [...value.relays] as string[],
     password_set: value.password_set,
     ...(networks !== undefined ? { networks } : {}),
+    ...(joinedIndex !== undefined ? { joined_index: joinedIndex } : {}),
     op_mgmt: value.op_mgmt,
   }
 }

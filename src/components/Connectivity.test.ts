@@ -305,6 +305,28 @@ describe('Connectivity USB network changes', () => {
     expect(JSON.stringify({ ...localStorage })).not.toContain('Device WiFi password')
   })
 
+  it('names the network the signer joined, and says when it is a fallback', async () => {
+    ;(device as { mode: string }).mode = 'serial'
+    ;(device as { usbNetworkSupport: string }).usbNetworkSupport = 'supported'
+    ;(device as { usbNetworkState: object | null }).usbNetworkState = {
+      ...USB_STATE,
+      networks: [{ ssid: 'Phone hotspot', password_set: true }],
+      joined_index: 1,
+    }
+    render(Connectivity)
+    await waitFor(() => expect(screen.getByText(/one of the fallback networks/)).toBeTruthy())
+    expect(screen.getByText('Phone hotspot', { selector: 'strong' })).toBeTruthy()
+  })
+
+  it('says nothing about the joined network when the signer does not report it', async () => {
+    ;(device as { mode: string }).mode = 'serial'
+    ;(device as { usbNetworkSupport: string }).usbNetworkSupport = 'supported'
+    ;(device as { usbNetworkState: object | null }).usbNetworkState = USB_STATE
+    render(Connectivity)
+    await waitFor(() => expect((screen.getByLabelText('WiFi SSID') as HTMLInputElement).value).toBe('Device WiFi'))
+    expect(screen.queryByText(/Currently on/)).toBeNull()
+  })
+
   it('refuses the unsafe whole-config editor on old firmware', () => {
     ;(device as { mode: string }).mode = 'serial'
     ;(device as { usbNetworkSupport: string }).usbNetworkSupport = 'unsupported'
