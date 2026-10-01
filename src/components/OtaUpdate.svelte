@@ -11,7 +11,8 @@
   import { device, serialTransport, httpTransport, getFirmwareVersion, disconnect } from '../lib/device.svelte.js'
   import { streamOta, OtaError, OtaStatus } from '../lib/ota.js'
   import { isUpgrade, compareVersions } from '../lib/version.js'
-  import { BOARDS, flashAppOnly } from '../lib/flasher'
+  import { BOARDS } from '../lib/flasher'
+  import { usbUpdate, runUsbUpdate, usbUpdateBusy, clearUsbUpdate } from '../lib/usb-update.svelte.js'
 
   interface BoardAsset { app: string; sha256: string; bytes: number; ota?: boolean; signature?: string }
   interface Manifest { version: string; builtAt?: string; boards: Record<string, BoardAsset> }
@@ -49,12 +50,23 @@
   let optimisticVersion = $state<string | null>(null)
 
   const canUpdate = $derived(device.connected && (device.mode === 'serial' || device.mode === 'http'))
-  const busy = $derived(status === 'waiting' || status === 'uploading' || status === 'verifying')
+  // A USB re-flash runs from app-level state (lib/usb-update), because it
+  // disconnects the console and unmounts this panel part-way through; while
+  // one is in flight or its outcome is unread, it is what this panel shows.
+  const shown = $derived(usbUpdate.status !== 'idle'
+    ? { status: usbUpdate.status, progress: usbUpdate.progress, message: usbUpdate.message }
+    : { status, progress, message })
+  const busy = $derived(
+    status === 'waiting' || status === 'uploading' || status === 'verifying' || usbUpdateBusy(),
+  )
   const latest = $derived(available ? available.version : null)
   // What the signer is running: over WiFi from get_status (firmware ≥0.13.2),
   // over USB from the FIRMWARE_INFO frame. Older firmware → unknown.
+  // A USB re-flash remounts this panel, so its version is read again from the
+  // signer; the one it sent only stands in until that report arrives.
   const running = $derived(optimisticVersion
-    ?? (device.mode === 'relay' ? device.relayStatus?.version ?? null : usbInfo?.version ?? null))
+    ?? (device.mode === 'relay' ? device.relayStatus?.version ?? null : usbInfo?.version ?? null)
+    ?? usbUpdate.installedVersion)
   const deviceBoard = $derived(device.mode === 'relay'
     ? device.relayStatus?.board ?? null
     : usbInfo?.board ?? null)
@@ -98,9 +110,8 @@
   })
 
   /** The device itself reports the version we just installed. */
-  const updateConfirmed = $derived(
-    !!optimisticVersion && usbInfo?.version === optimisticVersion,
-  )
+  const sentVersion = $derived(optimisticVersion ?? usbUpdate.installedVersion)
+  const updateConfirmed = $derived(!!sentVersion && usbInfo?.version === sentVersion)
 
   // The connected board's manifest entry, and whether it supports OTA at all.
   // Factory-only boards carry ota:false (no OTA slot — they update by re-flashing);
@@ -110,6 +121,7 @@
   const appUrl = $derived(otaCapable && boardKey && BOARD_DIR[boardKey] ? `/firmware/${BOARD_DIR[boardKey]}/app.bin` : null)
 
   async function runUpdate(data: Uint8Array, signature?: Uint8Array) {
+    clearUsbUpdate()
     progress = 0
     suggestUsb = false
     try {
@@ -156,36 +168,28 @@
    * App-only USB re-flash for boards with a single firmware slot (T-Display,
    * C6, and an early V4 on the legacy single-slot table): writes just the
    * firmware region, so identity, keys and network settings stay on the device.
-   * flashAppOnly reads the partition table first and refuses a two-slot board. Frees the console's serial connection first —
-   * esptool needs the port exclusively.
+   * flashAppOnly reads the partition table first and refuses a two-slot board.
+   * Frees the console's serial connection first (esptool needs the port
+   * exclusively), which unmounts this panel: the progress lives in
+   * lib/usb-update, which App shows while no signer is connected.
    */
   async function quickUsbUpdate() {
     const board = BOARDS.find((b) => b.id === boardKey)
     if (!board || busy) return
     suggestUsb = false
-    try {
-      status = 'waiting'
-      message = 'Pick the signer in the browser port chooser…'
-      if (device.connected && device.mode === 'serial') await disconnect()
-      await flashAppOnly(board, {
-        onProgress: (pct, stage) => {
-          if (stage === 'done') return
-          status = 'uploading'
-          progress = pct
-          message = `Writing firmware… ${pct}%`
-        },
-      })
-      status = 'done'
-      optimisticVersion = latest
-      message = `Updated to v${latest}. Identity and settings were kept — reconnect once the signer has rebooted.`
-    } catch (e) {
-      status = 'error'
-      message = e instanceof Error ? e.message : 'The update could not be completed.'
-    }
+    status = 'idle'
+    message = ''
+    await runUsbUpdate(board, {
+      version: latest,
+      release: async () => {
+        if (device.connected && device.mode === 'serial') await disconnect()
+      },
+    })
   }
 
   async function updateToLatest() {
     if (!appUrl || busy) return
+    clearUsbUpdate()
     try {
       status = 'waiting'
       message = 'Fetching the firmware…'
@@ -201,6 +205,7 @@
   function handleFileSelect(e: Event) {
     const input = e.target as HTMLInputElement
     file = input.files?.[0] ?? null
+    clearUsbUpdate()
     status = 'idle'
     message = ''
     progress = 0
@@ -341,11 +346,11 @@
       {/if}
     {/if}
 
-    {#if status === 'uploading'}
-      <div class="progress ota-progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
-        <div class="progress-fill" style="width: {progress}%"></div>
+    {#if shown.status === 'uploading'}
+      <div class="progress ota-progress" role="progressbar" aria-valuenow={shown.progress} aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill" style="width: {shown.progress}%"></div>
       </div>
-    {:else if status === 'waiting' || status === 'verifying'}
+    {:else if shown.status === 'waiting' || shown.status === 'verifying'}
       <!-- No byte counts in these phases, but the update is live — show an
            indeterminate sweep so a click never appears to have done nothing. -->
       <div class="progress ota-progress" role="progressbar">
@@ -353,15 +358,15 @@
       </div>
     {/if}
 
-    {#if message}
+    {#if shown.message}
       <p
         class="status-msg"
-        class:error-text={status === 'error'}
-        class:success-text={status === 'done'}
-        class:hint-sm={status !== 'error' && status !== 'done'}
-      >{message}</p>
+        class:error-text={shown.status === 'error'}
+        class:success-text={shown.status === 'done'}
+        class:hint-sm={shown.status !== 'error' && shown.status !== 'done'}
+      >{shown.message}</p>
     {/if}
-    {#if suggestUsb && status === 'error'}
+    {#if suggestUsb && shown.status === 'error'}
       <p class="hint">
         If this board has only one firmware slot, over-the-air updates can't install on it. Update over
         USB instead: it rewrites only the firmware, keeps your identity and settings, and checks the
@@ -371,6 +376,9 @@
     {/if}
     {#if updateConfirmed}
       <p class="status-msg success-text">Confirmed: the signer itself reports v{usbInfo?.version}.</p>
+      {#if usbUpdate.status === 'done'}
+        <button class="btn btn-link btn-sm" onclick={clearUsbUpdate}>Dismiss</button>
+      {/if}
     {/if}
   {/if}
 </section>

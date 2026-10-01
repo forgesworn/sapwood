@@ -6,6 +6,7 @@
   import Home from './components/Home.svelte'
   import Cockpit from './components/Cockpit.svelte'
   import { device } from './lib/device.svelte.js'
+  import { usbUpdate, usbUpdateBusy, clearUsbUpdate } from './lib/usb-update.svelte.js'
   import {
     importNotice, pendingImport, confirmPendingImport, dismissPendingImport,
     pendingPin, submitPin, dismissPin,
@@ -128,6 +129,37 @@
     <div class="pairing-banner" role="status" aria-live="polite">
       <span class="pairing-dot"></span>
       <p>{device.awaitingButton} <span class="pairing-elapsed">{awaitingElapsed}s</span></p>
+    </div>
+  {/if}
+
+  <!-- A USB re-flash closes the console's connection before it writes, which
+       unmounts the device panel holding its progress. Carry it here until a
+       signer is connected again (the panel then shows the outcome itself). -->
+  {#if !device.connected && usbUpdate.status !== 'idle'}
+    <div
+      class="usb-update-banner"
+      class:usb-update-banner--error={usbUpdate.status === 'error'}
+      class:usb-update-banner--done={usbUpdate.status === 'done'}
+      role={usbUpdate.status === 'error' ? 'alert' : 'status'}
+      aria-live="polite"
+    >
+      <div class="usb-update-head">
+        {#if usbUpdateBusy()}<span class="pairing-dot"></span>{/if}
+        <strong>
+          {usbUpdate.status === 'error' ? 'Firmware update failed'
+            : usbUpdate.status === 'done' ? 'Firmware updated'
+            : 'Updating firmware over USB'}
+        </strong>
+        {#if !usbUpdateBusy()}
+          <button class="btn btn-link btn-sm usb-update-dismiss" onclick={clearUsbUpdate}>Dismiss</button>
+        {/if}
+      </div>
+      {#if usbUpdate.status === 'uploading'}
+        <div class="progress" role="progressbar" aria-valuenow={usbUpdate.progress} aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-fill" style="width: {usbUpdate.progress}%"></div>
+        </div>
+      {/if}
+      <p>{usbUpdate.message}</p>
     </div>
   {/if}
 
@@ -430,6 +462,20 @@
   }
   @keyframes pairing-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
   @media (prefers-reduced-motion: reduce) { .pairing-dot { animation: none; } }
+
+  .usb-update-banner {
+    position: sticky; top: 0.75rem; z-index: 60;
+    background: #221a08; border: 1px solid var(--amber, #d9a441); border-radius: 6px;
+    box-shadow: 0 4px 16px #00000088;
+    padding: 0.8rem 1rem; margin-bottom: 1rem;
+  }
+  .usb-update-banner--done { background: #08200f; border-color: var(--green, #4ade80); }
+  .usb-update-banner--error { background: #16060688; border-color: var(--red, #ef4444); }
+  .usb-update-head { display: flex; align-items: center; gap: 0.7rem; }
+  .usb-update-head strong { font-size: 0.9rem; color: var(--text); }
+  .usb-update-dismiss { margin-left: auto; }
+  .usb-update-banner .progress { margin-top: 0.6rem; }
+  .usb-update-banner p { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; }
 
   /* WiFi-join failure lifted out of the log stream — a real error, so red. */
   .wifi-error-banner {
