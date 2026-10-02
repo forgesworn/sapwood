@@ -269,6 +269,21 @@ describe('cmdAppsRevoke', () => {
     await expect(cmdAppsRevoke(t, 7, undefined, O)).rejects.toThrow('no such slot')
   })
 
+  it('reports a revocation that held but could not be saved as a warning, not a failure', async () => {
+    // heartwood-esp32 PR #197: CONNSLOT_REVOKE never rolls the revocation
+    // back, so a storage_* NACK here means the app was still disconnected.
+    const t = fakeTransport({
+      [FrameType.PROVISION_LIST]: jsonFrame(FrameType.PROVISION_LIST_RESPONSE, [MASTERS[1]!]),
+      [FrameType.CONNSLOT_REVOKE]: nack(
+        'storage_unavailable: pairing revocation holds until the next restart only; it could not be saved, try again',
+      ),
+    })
+    const r = await cmdAppsRevoke(t, 2, undefined, O)
+    expect(r.lines[0]).toMatch(/^⚠ revoked app slot 2 on 'market':/)
+    expect(r.lines[0]).toMatch(/applied now/i)
+    expect((r.data as { restart_advised: boolean }).restart_advised).toBe(false)
+  })
+
   const SECRET = 'ab'.repeat(32)
 
   it('authenticates the session before revoking when given the secret', async () => {
