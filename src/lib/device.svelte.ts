@@ -2,7 +2,7 @@ import { parseClientApprovals } from './client-consent.js'
 // Reactive device state shared across all components.
 // Supports two transport modes: Web Serial (direct USB) and HTTP (bridge API).
 
-import { transport as serialTransport, type SerialEvent } from './serial.js'
+import { transport as serialTransport, type ReadRetryOptions, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
   buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
@@ -602,7 +602,8 @@ export async function syncIdentityMeta(): Promise<string | null> {
       const ping = await serialTransport.sendAndReceive(
         buildFirmwareInfo(),
         [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
-        6_000,
+        USB_READ_DEADLINE_MS,
+        USB_READ_RETRY,
       )
       if (ping.type === FrameType.NACK) throw new Error('device rejected the version query')
       const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
@@ -1750,7 +1751,7 @@ export async function relaySetLogQuiet(quiet: boolean): Promise<void> {
 export async function usbDisplayFlip(): Promise<boolean | null> {
   if (device.mode !== 'serial') return null
   try {
-    const resp = await serialTransport.sendAndReceive(buildDisplayFlip(), [FrameType.DISPLAY_FLIP_RESP, FrameType.NACK], 4_000)
+    const resp = await serialTransport.sendAndReceive(buildDisplayFlip(), [FrameType.DISPLAY_FLIP_RESP, FrameType.NACK], USB_READ_DEADLINE_MS, USB_READ_RETRY)
     return resp.type === FrameType.DISPLAY_FLIP_RESP ? resp.payload[0] === 1 : null
   } catch {
     return null
@@ -2850,7 +2851,8 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
     const resp = await serialTransport.sendAndReceive(
       buildFirmwareInfo(),
       [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
-      4_000,
+      USB_READ_DEADLINE_MS,
+      USB_READ_RETRY,
     )
     if (resp.type !== FrameType.FIRMWARE_INFO_RESPONSE) return null
     const info = JSON.parse(new TextDecoder().decode(resp.payload))
@@ -3013,7 +3015,8 @@ async function readUsbNetworkState(
     const resp = await serialTransport.sendAndReceive(
       buildGetNetConfig(),
       [FrameType.GET_NET_CONFIG_RESPONSE, FrameType.NACK],
-      20_000,
+      USB_READ_DEADLINE_MS,
+      USB_READ_RETRY,
     )
     if (generation !== device.connectionGeneration || device.mode !== 'serial'
       || !usbNetworkReadAllowed(mutationToken)) return null
@@ -3261,19 +3264,22 @@ async function probeSerial() {
   device.usbProbing = true
   device.usbSilent = false
   try {
-    for (let attempt = 0; attempt < 12; attempt++) {
-      try {
-        await serialTransport.sendAndReceive(
-          buildProvisionList(),
-          [FrameType.PROVISION_LIST_RESPONSE, FrameType.NACK],
-          5_000,
-        )
-        void refreshUsbNetworkState()
-        return // answered → reachable
-      } catch { /* timed out this round — the board may still be booting or joining WiFi */ }
-      if (device.masters.length > 0) return // a late list reply arrived via handleFrame
-    }
-    device.usbSilent = true
+    // Resent, not a single short wait: a WiFi signer that cannot find its
+    // network reads the cable only between join attempts, each of which can
+    // block for several seconds (up to 15). A plain 5 s wait timed out inside
+    // one, and a timed-out request closes the session, so the board looked
+    // dead over USB exactly when the cable was the way to fix its WiFi.
+    try {
+      await serialTransport.sendAndReceive(
+        buildProvisionList(),
+        [FrameType.PROVISION_LIST_RESPONSE, FrameType.NACK],
+        60_000,
+        USB_READ_RETRY,
+      )
+      void refreshUsbNetworkState()
+      return // answered → reachable
+    } catch { /* a minute with no answer, or the port went */ }
+    if (device.mode === 'serial') device.usbSilent = true
   } finally {
     device.usbProbing = false
   }
@@ -3391,6 +3397,14 @@ export async function ensureBridgeAuth(): Promise<void> {
 // (provisioning, net config, PIN, bridge secret) keep their own longer,
 // human-paced timeouts — those wait on a person, not the cable.
 const SERIAL_RTT_MS = 30_000
+
+// Read-only USB queries are resent rather than waited on once. A WiFi signer
+// that cannot join reads the cable only between join attempts, each blocking
+// for up to 15 s, so a single wait can land wholly inside one; resending every
+// 2 s lands a copy in the next window, and the deadline covers one full block
+// plus slack without closing the session (see SerialTransport.sendAndReceive).
+const USB_READ_RETRY: ReadRetryOptions = { resendMs: 2_000 }
+const USB_READ_DEADLINE_MS = 20_000
 
 function lastRelays(): string[] {
   // During a staged/trying boot the redacted `relays` field is committed A,

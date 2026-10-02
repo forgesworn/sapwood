@@ -314,6 +314,72 @@ describe('request/response serialisation', () => {
   })
 })
 
+describe('resent reads (a WiFi signer between join attempts)', () => {
+  const LIST = FrameType.PROVISION_LIST_RESPONSE
+  const emitType = (t: SerialTransport, type: number, tag = 0) =>
+    (t as unknown as { emit: (event: unknown) => void }).emit({
+      kind: 'frame',
+      frame: { type, payload: new Uint8Array([tag]) },
+    })
+
+  it('keeps resending through a silent spell and answers when the board wakes, session intact', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    const read = t.sendAndReceive(new Uint8Array([7]), [LIST, FrameType.NACK], 5_000, { resendMs: 20 })
+
+    // The board is blocked in a WiFi join: nothing comes back, copies pile up.
+    await vi.waitFor(() => expect(fake.writes.length).toBeGreaterThanOrEqual(3))
+    emitType(t, LIST)
+    await expect(read).resolves.toMatchObject({ type: LIST })
+    expect(fake.closed).toBe(false)
+    expect(t.connected).toBe(true)
+  })
+
+  it('absorbs the replies to its other copies before the next request runs', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    const read = t.sendAndReceive(new Uint8Array([7]), [LIST, FrameType.NACK], 5_000, { resendMs: 20 })
+    await vi.waitFor(() => expect(fake.writes.length).toBeGreaterThanOrEqual(2))
+    const next = t.sendAndReceive(new Uint8Array([8]), [FrameType.NACK], 1_000)
+
+    // The board wakes and answers every buffered copy back to back. The first
+    // answers the read; the rest, including a NACK, must not reach `next`.
+    emitType(t, LIST)
+    await expect(read).resolves.toMatchObject({ type: LIST })
+    const copies = fake.writes.filter((w) => w[0] === 7).length
+    for (let i = 1; i < copies; i++) emitType(t, FrameType.NACK, 0xee) // stale
+
+    await vi.waitFor(() => expect(fake.writes.at(-1)?.[0]).toBe(8))
+    emitType(t, FrameType.NACK, 0x01) // next's own answer
+    const answer = await next
+    expect(answer.payload[0]).toBe(0x01)
+    expect(fake.writes.filter((w) => w[0] === 7).length).toBe(copies) // no copy sent after the answer
+  })
+
+  it('runs out of time without closing the session', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    const read = t.sendAndReceive(new Uint8Array([7]), [LIST], 60, { resendMs: 20 })
+    await expect(read).rejects.toThrow(/no response/i)
+    expect(fake.closed).toBe(false)
+    expect(t.connected).toBe(true)
+
+    const next = t.sendAndReceive(new Uint8Array([8]), [FrameType.ACK], 1_000)
+    await vi.waitFor(() => expect(fake.writes.at(-1)?.[0]).toBe(8))
+    emitFrame(t, FrameType.ACK)
+    await expect(next).resolves.toMatchObject({ type: FrameType.ACK })
+  })
+
+  it('refuses to resend a request that accepts ACK', async () => {
+    const fake = makeFakePort()
+    const t = transportWith(fake.port)
+    await expect(
+      t.sendAndReceive(new Uint8Array([1]), [FrameType.ACK, FrameType.NACK], 1_000, { resendMs: 20 }),
+    ).rejects.toThrow(/must not accept ACK/)
+    expect(fake.writes).toEqual([])
+  })
+})
+
 describe('reconnect is user-gesture safe', () => {
   it('calls requestPort BEFORE closing the previous port', async () => {
     const order: string[] = []

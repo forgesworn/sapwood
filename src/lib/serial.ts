@@ -4,7 +4,7 @@
 // Reads incoming bytes, hunts for frame magic, and emits parsed frames.
 // Non-frame bytes (ESP-IDF log output) are emitted as log lines.
 
-import type { Frame, FrameTypeValue } from './frame.js'
+import { FrameType, type Frame, type FrameTypeValue } from './frame.js'
 import { FrameStream } from './frame-stream.js'
 import { paceSlices } from './pacing.js'
 import { releaseGrantedPorts, releasePortsOnUnload } from './serial-ports.js'
@@ -18,10 +18,22 @@ export type SerialEvent =
 
 export type SerialListener = (event: SerialEvent) => void
 
+/** Options for a read that may be resent. See `sendAndReceive`. */
+export interface ReadRetryOptions {
+  /** Resend the same frame this often until a reply arrives. */
+  resendMs: number
+}
+
+/** How long a resent read holds the line after its answer, so the replies to
+ *  its other copies are absorbed here instead of reaching the next request.
+ *  The signer answers buffered copies back to back, well inside this. */
+const RESEND_SETTLE_MS = 1_500
+
 interface SerialRequest {
   frameBytes: Uint8Array
   expectedTypes: FrameTypeValue[]
   timeoutMs: number
+  resendMs?: number
   resolve: (frame: Frame) => void
   reject: (error: Error) => void
   /** Installed only while this request owns the response listener. */
@@ -247,18 +259,32 @@ export class SerialTransport {
     if (writeErr) throw writeErr
   }
 
-  /** Send a frame and wait for a response with one of the expected types. */
+  /** Send a frame and wait for a response with one of the expected types.
+   *
+   *  By default an overdue reply closes the session (see runRequest). A
+   *  read-only frame can pass `retry` instead: it is resent every
+   *  `retry.resendMs` until answered, and running out of time rejects without
+   *  closing anything. A WiFi signer reads the cable only between its WiFi
+   *  join attempts, each of which can block for several seconds, so a single
+   *  short wait can land wholly inside one and look like a dead board. Only
+   *  for frames whose answer cannot be mistaken for another operation's: a
+   *  request that accepts ACK is refused. */
   async sendAndReceive(
     frameBytes: Uint8Array,
     expectedTypes: FrameTypeValue[],
     timeoutMs = 30_000,
+    retry?: ReadRetryOptions,
   ): Promise<Frame> {
     if (!this.connected) return Promise.reject(new Error('Not connected'))
+    if (retry && expectedTypes.includes(FrameType.ACK)) {
+      return Promise.reject(new Error('A resent request must not accept ACK'))
+    }
     return new Promise<Frame>((resolve, reject) => {
       this.requestQueue.push({
         frameBytes,
         expectedTypes: [...expectedTypes],
         timeoutMs,
+        resendMs: retry?.resendMs,
         resolve,
         reject: (error) => reject(error),
       })
@@ -297,6 +323,7 @@ export class SerialTransport {
 
   /** Execute one request after it reaches the head of the FIFO. */
   private runRequest(request: SerialRequest): Promise<Frame> {
+    if (request.resendMs !== undefined) return this.runResentRead(request)
     return new Promise<Frame>((resolve, reject) => {
       let settled = false
       let unsub = () => {}
@@ -340,6 +367,73 @@ export class SerialTransport {
       this.write(request.frameBytes).catch((error) => {
         finish({ error: error instanceof Error ? error : new Error(String(error)) })
       })
+    })
+  }
+
+  /** A read-only request that is resent until answered (see sendAndReceive).
+   *  The caller is answered by the first reply; the line stays held until every
+   *  other copy has been answered or RESEND_SETTLE_MS pass, so those replies
+   *  are absorbed here. Running out of time rejects and leaves the session
+   *  open: the replies it might still draw are of a read's own type, never an
+   *  ACK. */
+  private runResentRead(request: SerialRequest): Promise<Frame> {
+    return new Promise<Frame>((resolve, reject) => {
+      let copies = 0
+      let answer: Frame | null = null
+      let done = false
+      let settleTimer: ReturnType<typeof setTimeout> | undefined
+      let unsub = () => {}
+
+      const end = (result: { frame: Frame } | { error: Error }) => {
+        if (done) return
+        done = true
+        clearTimeout(deadline)
+        clearInterval(resend)
+        clearTimeout(settleTimer)
+        unsub()
+        request.cancel = undefined
+        if ('frame' in result) resolve(result.frame)
+        else reject(result.error)
+      }
+
+      const send = () => {
+        copies += 1
+        this.write(request.frameBytes).catch((error) => {
+          if (!answer) end({ error: error instanceof Error ? error : new Error(String(error)) })
+        })
+      }
+
+      const deadline = setTimeout(() => {
+        if (!answer) end({ error: new Error('No response from the device.') })
+      }, request.timeoutMs)
+      const resend = setInterval(() => {
+        if (!answer) send()
+      }, request.resendMs)
+
+      let replies = 0
+      unsub = this.on((event) => {
+        if (event.kind === 'disconnected') {
+          if (answer) end({ frame: answer })
+          else end({ error: new Error('Disconnected') })
+          return
+        }
+        if (event.kind !== 'frame' || !request.expectedTypes.includes(event.frame.type)) return
+        replies += 1
+        if (!answer) {
+          answer = event.frame
+          clearInterval(resend)
+          clearTimeout(deadline)
+          request.resolve(answer) // answer the caller now; the line is held below
+          settleTimer = setTimeout(() => end({ frame: answer! }), RESEND_SETTLE_MS)
+        }
+        if (replies >= copies) end({ frame: answer })
+      })
+      request.cancel = (error) => {
+        if (answer) end({ frame: answer })
+        else end({ error })
+      }
+
+      send()
     })
   }
 

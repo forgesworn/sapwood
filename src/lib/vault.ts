@@ -129,8 +129,11 @@ const VAULT_SET_TIMEOUT_MS = 90_000
 // unlocked". Budget per identity, with headroom for a slower board.
 const VAULT_UNLOCK_BASE_MS = 60_000
 const VAULT_UNLOCK_PER_SLOT_MS = 40_000
-// The locked USB loop answers PROVISION_LIST straight away (public rows only).
-const LOCKED_SLOTS_TIMEOUT_MS = 10_000
+// The locked USB loop answers PROVISION_LIST straight away (public rows only),
+// but a locked WiFi board reads the cable only between WiFi join attempts, so
+// the query is resent rather than waited on once (see sendAndReceive).
+const LOCKED_SLOTS_TIMEOUT_MS = 20_000
+const LOCKED_SLOTS_RESEND_MS = 2_000
 
 /** How long to wait for VAULT_UNLOCK's ACK given how many identities are sealed. */
 export function vaultUnlockTimeoutMs(lockedSlots: number | null): number {
@@ -150,6 +153,7 @@ export async function serialVaultLockedSlots(transport: SerialTransport): Promis
     buildProvisionList(),
     [FrameType.PROVISION_LIST_RESPONSE, FrameType.NACK],
     LOCKED_SLOTS_TIMEOUT_MS,
+    { resendMs: LOCKED_SLOTS_RESEND_MS },
   )
   if (resp.type !== FrameType.PROVISION_LIST_RESPONSE) return null
   try {
