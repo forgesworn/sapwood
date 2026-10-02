@@ -28,6 +28,7 @@
   import { transport as serialTransport } from '../lib/serial.js'
   import { generateBridgeSecret, bridgeArtifacts, type BridgeArtifacts } from '../lib/bridge-setup.js'
   import { copyText } from '../lib/clipboard.js'
+  import ResetCallout from './ResetCallout.svelte'
 
   type Step = 'intro' | 'flash' | 'provision' | 'bridge' | 'done'
   let step = $state<Step>('intro')
@@ -76,7 +77,7 @@
         onLog: (l) => (flashMsg = l),
       })
       flashDone = true
-      flashMsg = 'Flashed. Press the RESET button on the board so it starts the new firmware.'
+      flashMsg = 'Flashed.'
     } catch (e) {
       flashMsg = e instanceof Error ? e.message : 'Flashing failed.'
     } finally {
@@ -243,6 +244,7 @@
       <div class="progress"><div class="progress-fill" style="width: {flashPct}%"></div></div>
     {/if}
     {#if flashMsg}<p class="hint">{flashMsg}</p>{/if}
+    {#if flashDone && !flashing}<ResetCallout boardId={board.id} label={board.label} />{/if}
     <div class="row">
       <button class="btn btn-primary" disabled={flashing} onclick={flash}>
         {flashing ? `Flashing… ${flashPct}%` : flashDone ? 'Re-flash' : 'Flash firmware'}

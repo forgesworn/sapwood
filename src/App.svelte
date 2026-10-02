@@ -7,6 +7,7 @@
   import Cockpit from './components/Cockpit.svelte'
   import { device } from './lib/device.svelte.js'
   import { usbUpdate, usbUpdateBusy, clearUsbUpdate } from './lib/usb-update.svelte.js'
+  import ResetCallout from './components/ResetCallout.svelte'
   import {
     importNotice, pendingImport, confirmPendingImport, dismissPendingImport,
     pendingPin, submitPin, dismissPin,
@@ -160,6 +161,9 @@
         </div>
       {/if}
       <p>{usbUpdate.message}</p>
+      {#if usbUpdate.status === 'done'}
+        <ResetCallout boardId={usbUpdate.board?.id} label={usbUpdate.board?.label} />
+      {/if}
     </div>
   {/if}
 
@@ -472,10 +476,10 @@
   .usb-update-banner--done { background: #08200f; border-color: var(--green, #4ade80); }
   .usb-update-banner--error { background: #16060688; border-color: var(--red, #ef4444); }
   .usb-update-head { display: flex; align-items: center; gap: 0.7rem; }
-  .usb-update-head strong { font-size: 0.9rem; color: var(--text); }
+  .usb-update-head strong { font-size: 1.05rem; color: var(--text); }
   .usb-update-dismiss { margin-left: auto; }
   .usb-update-banner .progress { margin-top: 0.6rem; }
-  .usb-update-banner p { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; }
+  .usb-update-banner > p { margin: 0.5rem 0 0; font-size: 1rem; color: var(--text); line-height: 1.55; }
 
   /* WiFi-join failure lifted out of the log stream — a real error, so red. */
   .wifi-error-banner {

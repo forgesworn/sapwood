@@ -18,6 +18,8 @@ export const usbUpdate = $state({
   message: '',
   /** The version the last successful run wrote, until the signer reports it. */
   installedVersion: null as string | null,
+  /** The board the last run wrote, so the RESET step can name its button. */
+  board: null as { id: string; label: string } | null,
 })
 
 /** A run is in flight. */
@@ -50,6 +52,7 @@ export async function runUsbUpdate(board: BoardSpec, opts: UsbUpdateOptions): Pr
   usbUpdate.status = 'waiting'
   usbUpdate.progress = 0
   usbUpdate.installedVersion = null
+  usbUpdate.board = { id: board.id, label: board.label }
   usbUpdate.message = 'Pick the signer in the browser port chooser…'
   try {
     await opts.release?.()
@@ -69,9 +72,11 @@ export async function runUsbUpdate(board: BoardSpec, opts: UsbUpdateOptions): Pr
     usbUpdate.status = 'done'
     usbUpdate.progress = 100
     usbUpdate.installedVersion = opts.version
+    // Written is not running: the RESET step (ResetCallout) is shown beside
+    // this, since esptool's automatic reset does not take on every board.
     usbUpdate.message = opts.version
-      ? `Updated to v${opts.version}. Identity and settings were kept. Reconnect once the signer has restarted.`
-      : 'Updated. Identity and settings were kept. Reconnect once the signer has restarted.'
+      ? `Firmware v${opts.version} is written. Identity and settings were kept. Press RESET on the board, then reconnect.`
+      : 'The firmware is written. Identity and settings were kept. Press RESET on the board, then reconnect.'
   } catch (e) {
     usbUpdate.status = 'error'
     usbUpdate.message = e instanceof Error ? e.message : 'The update could not be completed.'

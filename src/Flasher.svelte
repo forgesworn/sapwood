@@ -19,6 +19,7 @@
   import TetheredSetup from './components/TetheredSetup.svelte'
   import PasswordReveal from './components/PasswordReveal.svelte'
   import RelayEditor from './components/RelayEditor.svelte'
+  import ResetCallout from './components/ResetCallout.svelte'
 
   const webSerial = typeof navigator !== 'undefined' && 'serial' in navigator
 
@@ -457,14 +458,7 @@
 
     {:else if step === 'done'}
       <h2>Your signer is flashed</h2>
-      <div class="reset-callout">
-        <p class="reset-title">⚠ Now press the RESET button on the board</p>
-        <p class="reset-body">
-          {board?.label} has the new firmware, but it won't start running it until it restarts.
-          Press the small <strong>RST</strong> button on the board (or unplug it and plug it back in).
-          Its screen should then light up showing your signer.
-        </p>
-      </div>
+      <ResetCallout boardId={board?.id} label={board?.label} />
       <p class="lede">
         {#if data.netMode === 'wifi'}
           It's joining <strong>{data.ssid}</strong>.
@@ -572,13 +566,6 @@
   .stepper li.current .dot { border-color: var(--green); color: var(--green); box-shadow: var(--green-glow); }
   .stepper li.done .dot { border-color: var(--green-dim); color: var(--green-dim); }
 
-  .reset-callout {
-    border: 1px solid var(--amber); border-left: 4px solid var(--amber);
-    border-radius: 6px; padding: 0.9rem 1.1rem; background: #1a1206; margin: 0 0 1.1rem;
-  }
-  .reset-title { font-size: 1rem; font-weight: 700; color: var(--amber); margin: 0 0 0.4rem; }
-  .reset-body { font-size: 0.85rem; color: var(--text-dim); line-height: 1.6; margin: 0; }
-  .reset-body strong { color: var(--amber); }
 
   .panel { min-height: 320px; }
   h2 { font-size: 1.4rem; font-weight: 600; margin: 0 0 0.75rem; color: #fff; letter-spacing: 0.01em; }

@@ -44,7 +44,10 @@ describe('runUsbUpdate', () => {
     expect(seen[2]).toEqual(seen[1])
     expect(usbUpdate.status).toBe('done')
     expect(usbUpdate.installedVersion).toBe('1.2.3')
-    expect(usbUpdate.message).toMatch(/v1\.2\.3.*Reconnect/)
+    // Written is not running: the outcome asks for RESET rather than assuming
+    // the automatic reset took, and names the board so its button can be shown.
+    expect(usbUpdate.message).toMatch(/v1\.2\.3 is written.*Press RESET.*reconnect/)
+    expect(usbUpdate.board).toEqual({ id: BOARD.id, label: BOARD.label })
   })
 
   it('records a failure instead of throwing', async () => {

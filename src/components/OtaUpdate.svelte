@@ -13,6 +13,7 @@
   import { isUpgrade, compareVersions } from '../lib/version.js'
   import { BOARDS } from '../lib/flasher'
   import { usbUpdate, runUsbUpdate, usbUpdateBusy, clearUsbUpdate } from '../lib/usb-update.svelte.js'
+  import ResetCallout from './ResetCallout.svelte'
 
   interface BoardAsset { app: string; sha256: string; bytes: number; ota?: boolean; signature?: string }
   interface Manifest { version: string; builtAt?: string; boards: Record<string, BoardAsset> }
@@ -365,6 +366,9 @@
         class:success-text={shown.status === 'done'}
         class:hint-sm={shown.status !== 'error' && shown.status !== 'done'}
       >{shown.message}</p>
+    {/if}
+    {#if usbUpdate.status === 'done' && !updateConfirmed}
+      <ResetCallout boardId={usbUpdate.board?.id} label={usbUpdate.board?.label} />
     {/if}
     {#if suggestUsb && shown.status === 'error'}
       <p class="hint">
