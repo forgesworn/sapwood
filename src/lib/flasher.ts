@@ -20,11 +20,12 @@
 // full-erase, progress mapping, best-effort reset, error/cleanup paths — is
 // exercised without hardware. The esptool-js coupling lives in ONE place below.
 
-import { ESPLoader, Transport } from 'esptool-js'
+import { ESPLoader, HardReset, Transport } from 'esptool-js'
 import { ed25519 } from '@noble/curves/ed25519.js'
 import type { NetConfig } from './frame'
 import { buildConfigBlob } from './flash-config'
 import { releaseGrantedPorts } from './serial-ports'
+import { PulsedHardReset } from './hard-reset'
 
 export interface BoardSpec {
   id: string
@@ -258,6 +259,18 @@ async function verifyAppIntegrity(
   log(`Firmware verified (sha256 ${actual.slice(0, 16)}…, signed for ${otaSigningBoardId(boardId)}).`)
 }
 
+/** esptool-js's HardReset slot, filled with the pulse its own version omits. */
+class EsptoolPulsedHardReset extends HardReset {
+  private readonly pulse: PulsedHardReset<Transport>
+  constructor(transport: Transport, nativeUsb: boolean) {
+    super(transport, nativeUsb)
+    this.pulse = new PulsedHardReset(transport, nativeUsb)
+  }
+  override reset(): Promise<void> {
+    return this.pulse.reset()
+  }
+}
+
 /** The production backend: esptool-js over Web Serial. Coupling isolated here. */
 export const defaultBackend: FlasherBackend = {
   hasWebSerial: () => typeof navigator !== 'undefined' && 'serial' in navigator,
@@ -266,7 +279,18 @@ export const defaultBackend: FlasherBackend = {
   fetchManifest,
   async openSession(port, { baudrate, terminal }) {
     const transport = new Transport(port as never, false)
-    const esploader = new ESPLoader({ transport, baudrate, terminal })
+    // esptool-js's own hard reset never pulses EN, so the board stays in the
+    // ROM loader after a flash (see hard-reset.ts). Espressif's native USB
+    // ports take esptool's longer holds.
+    const nativeUsb = (port as SerialPort).getInfo?.().usbVendorId === 0x303a
+    const esploader = new ESPLoader({
+      transport,
+      baudrate,
+      terminal,
+      resetConstructors: {
+        hardReset: (t, usingUsbOtg) => new EsptoolPulsedHardReset(t, nativeUsb || !!usingUsbOtg),
+      },
+    })
     // Wrappers normalise esptool-js return types to the FlashSession contract
     // (some of its methods resolve to values we don't use).
     return {
