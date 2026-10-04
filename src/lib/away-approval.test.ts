@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { awayApprovalAvailability, awayApprovalNotApplied, awayApprovalOffered, AWAY_APPROVAL_PHONE_SETUP, AWAY_APPROVAL_RISKS } from './away-approval.js'
+import { awayApprovalAvailability, awayApprovalNotApplied, awayApprovalOffered, AWAY_APPROVAL_FAMILY_NOTE, AWAY_APPROVAL_PHONE_SETUP, AWAY_APPROVAL_RISKS } from './away-approval.js'
 import { MANAGER_SLOT_LABEL } from './client-policy.js'
 
 describe('awayApprovalAvailability', () => {
@@ -54,6 +54,11 @@ describe('away approval copy', () => {
     const text = AWAY_APPROVAL_RISKS.join(' ')
     expect(text).toMatch(/operator key/)
     expect(text).toMatch(/10 minutes/)
+  })
+
+  it('warns that Signet owns the setting on a family member\'s pairing', () => {
+    expect(AWAY_APPROVAL_FAMILY_NOTE).toMatch(/Signet/)
+    expect(AWAY_APPROVAL_FAMILY_NOTE).toMatch(/change it back/)
   })
 
   it('points a WiFi failure to turn it off at USB', () => {

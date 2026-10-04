@@ -70,6 +70,15 @@ export const AWAY_APPROVAL_PHONE_SETUP: readonly string[] = [
   'Held requests appear in Signet\'s signer panel, under Waiting for approval (Family asks on older Signet versions).',
 ]
 
+/**
+ * Signet compiles the policy of every pairing it manages for a family member
+ * and pushes it whenever the family changes, with this flag always on, so a
+ * change made here to one of those pairings does not last. Sapwood cannot
+ * tell those pairings apart from the owner's own, so it says so instead.
+ */
+export const AWAY_APPROVAL_FAMILY_NOTE =
+  'If Signet manages this app for a family member, Signet decides this setting and will change it back the next time it syncs.'
+
 /** The error when the signer answered but the flag did not move. */
 export function awayApprovalNotApplied(on: boolean, transport: string | null): string {
   if (transport === 'relay') {
