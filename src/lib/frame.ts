@@ -308,7 +308,7 @@ export interface LocalNetConfigPatch {
   ssid?: string
   relays?: string[]
   password?: { action: 'keep' | 'set' | 'clear'; value?: string }
-  /** Replacement fallback-network list (order = priority). Per-entry `keep`
+  /** Replacement fallback-network list (saved order; firmware chooses join policy). Per-entry `keep`
    * reuses the password the signer already stores for that SSID, so
    * add/remove/reorder never resends secrets. Only include this field for
    * firmware that reports a `networks` array in its redacted state — older

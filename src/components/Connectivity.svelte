@@ -45,7 +45,8 @@
   let scanMsg = $state('')
   let scanNote = $state('')
 
-  // Fallback networks after the primary, in priority order. `password: null`
+  // Additional saved networks after the primary. Order breaks signal ties on
+  // current firmware and sets priority on older firmware. `password: null`
   // means "keep what the signer already stores for this SSID" — reordering and
   // deleting never resend a secret. A string is a new password to set ('' =
   // open network).
@@ -489,7 +490,7 @@
         {#if scanNote}<p class="hint-sm scan-note">{scanNote}</p>{/if}
         {#if joinedNetwork}
           <p class="hint-sm joined-note">
-            Currently on <strong>{joinedNetwork}</strong>{joinedNetwork !== activeSsid ? ', one of the fallback networks' : ''}.
+            Currently on <strong>{joinedNetwork}</strong>{joinedNetwork !== activeSsid ? ', another saved network' : ''}.
           </p>
         {/if}
       </div>
@@ -519,9 +520,10 @@
       </div>
       {#if supportsNetworkList}
         <div class="field">
-          <span class="field-label">Fallback networks</span>
-          <p class="hint-sm">Tried in order when the network above is out of reach — home first,
-            then a phone hotspot, say. Reordering and removing never resend a password.</p>
+          <span class="field-label">Other saved networks</span>
+          <p class="hint-sm">Firmware 0.18.0-beta.22 and later chooses the strongest visible saved network.
+            It switches when another stays clearly stronger. Saved order breaks signal ties;
+            older firmware tries networks in order. Reordering and removing never resend a password.</p>
           {#if fallbacks.length}
             <ul class="fallback-list">
               {#each fallbacks as net, i (net.ssid)}
