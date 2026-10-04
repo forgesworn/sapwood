@@ -47,7 +47,7 @@ describe('away approval copy', () => {
     const text = AWAY_APPROVAL_PHONE_SETUP.join(' ')
     expect(text).toMatch(/Heartwood connect/)
     expect(text).toMatch(/operator key/)
-    expect(text).toMatch(/Family asks/)
+    expect(text).toMatch(/Waiting for approval/)
   })
 
   it('names the operator key and the 10-minute window in the risks', () => {

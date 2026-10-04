@@ -67,7 +67,7 @@ export const AWAY_APPROVAL_RISKS: readonly string[] = [
 export const AWAY_APPROVAL_PHONE_SETUP: readonly string[] = [
   'Signet on your phone is paired with this signer (Heartwood connect), not set up with its own recovery phrase.',
   'Signet holds the operator key: Settings, Advanced, Heartwood operator key.',
-  'Held requests appear in Signet\'s signer panel under Family asks, even when they are your own apps.',
+  'Held requests appear in Signet\'s signer panel, under Waiting for approval (Family asks on older Signet versions).',
 ]
 
 /** The error when the signer answered but the flag did not move. */
