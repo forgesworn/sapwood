@@ -3,7 +3,7 @@
   // by default. Turning it on asks the owner to accept the risks first, and
   // over USB the signer asks for a press too; turning it off never asks.
   import type { ConnectSlot } from '../lib/types.js'
-  import { AWAY_APPROVAL_RISKS, type AwayApprovalAvailability } from '../lib/away-approval.js'
+  import { AWAY_APPROVAL_PHONE_SETUP, AWAY_APPROVAL_RISKS, type AwayApprovalAvailability } from '../lib/away-approval.js'
 
   interface Props {
     slot: ConnectSlot
@@ -75,8 +75,11 @@
       <ul>
         {#each AWAY_APPROVAL_RISKS as risk (risk)}<li>{risk}</li>{/each}
       </ul>
-      <p class="away-note">Your phone needs the Signet app connected to this signer as your identity, holding
-        its operator key. Only requests that would ask for the button are sent to your phone; an app set to sign
+      <p class="away-note">Before turning this on, check your phone (Sapwood cannot see it):</p>
+      <ul class="away-setup">
+        {#each AWAY_APPROVAL_PHONE_SETUP as step (step)}<li>{step}</li>{/each}
+      </ul>
+      <p class="away-note">Only requests that would ask for the button are sent to your phone; an app set to sign
         automatically is unaffected. A request nobody answers is dropped after 10 minutes.</p>
       <label class="away-accept">
         <input type="checkbox" bind:checked={accepted} disabled={saving} />
@@ -111,6 +114,7 @@
   }
   .away-review h4 { margin: 0; font-size: 0.95rem; color: var(--amber); }
   .away-review ul { margin: 0; padding-left: 1.1rem; font-size: 0.82rem; color: var(--text-dim); line-height: 1.5; }
+  .away-setup { margin: 0; padding-left: 1.1rem; font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; }
   .away-note { margin: 0; font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; }
   .away-accept { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.85rem; color: var(--text); }
   .away-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }

@@ -16,7 +16,7 @@
   import ApprovalQueue from './ApprovalQueue.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
   import AwayApproval from './AwayApproval.svelte'
-  import { awayApprovalAvailability } from '../lib/away-approval.js'
+  import { awayApprovalAvailability, awayApprovalOffered } from '../lib/away-approval.js'
   import type { ConnectSlot } from '../lib/types.js'
   import { identityKey } from '../lib/identity-key.js'
   import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
@@ -626,7 +626,7 @@
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />
 
-          {#if overUsbRelay}
+          {#if overUsbRelay && awayApprovalOffered(slot)}
             <AwayApproval {slot} availability={awayAvailability} {overUsb} canChange={overUsbRelay}
               busy={updatingSlot === slot.slot_index || reviewBusy}
               onchange={(on) => setAwayApproval(slot, on)} />

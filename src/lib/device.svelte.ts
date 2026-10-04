@@ -14,7 +14,7 @@ import {
   buildDeriveIdentity, buildProvisionRemove,
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
-import { policiesEqual, managerClientPolicy, MANAGER_METHODS } from './client-policy.js'
+import { policiesEqual, managerClientPolicy, MANAGER_METHODS, MANAGER_SLOT_LABEL } from './client-policy.js'
 import {
   clientPubkeyHex as nip46UsbClientPubkeyHex,
   connectWithSecret as nip46UsbConnect,
@@ -3630,10 +3630,6 @@ function selectedMasterHex(): string {
   if (decoded.type !== 'npub') throw new Error('Unexpected identity encoding')
   return decoded.data
 }
-
-/** Label every Sapwood manager pairing carries. Also the marker that says a
- *  slot is Sapwood's own bookkeeping rather than one of the operator's apps. */
-const MANAGER_SLOT_LABEL = 'Sapwood manager'
 
 /** Mint the manager slot, reclaiming Sapwood's own abandoned pairings when the
  *  identity's 16 connection slots are full.
