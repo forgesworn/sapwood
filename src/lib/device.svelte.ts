@@ -1,4 +1,5 @@
 import { parseClientApprovals } from './client-consent.js'
+import { awayApprovalNotApplied } from './away-approval.js'
 // Reactive device state shared across all components.
 // Supports two transport modes: Web Serial (direct USB) and HTTP (bridge API).
 
@@ -1707,10 +1708,21 @@ export async function relayRevokeClient(slotIndex: number, expectedFingerprint?:
   notePairingBackupStale()
 }
 
+/** The fields a client update may carry. `escalate` is the owner's
+ *  away-approval switch: a request that needs the button is held on the
+ *  signer and can be answered from the owner's phone instead. */
+export type ClientUpdate = {
+  label?: string
+  allowed_methods?: string[]
+  allowed_kinds?: number[]
+  auto_approve?: boolean
+  escalate?: boolean
+}
+
 /** Update a client slot (label / kind perms / auto-approve) over the relay. */
 export async function relayUpdateClient(
   slotIndex: number,
-  changes: { label?: string; allowed_methods?: string[]; allowed_kinds?: number[]; auto_approve?: boolean },
+  changes: ClientUpdate,
   expectedFingerprint?: string,
 ): Promise<void> {
   if (!relayTransport) throw new Error('not connected over relay')
@@ -3577,7 +3589,7 @@ export async function serialRevokeClient(slotIndex: number): Promise<void> {
 }
 
 /** Update a client slot (label / kinds / auto-approve) over USB. Button-confirmed on device. */
-export async function serialUpdateClient(slotIndex: number, changes: { label?: string; allowed_methods?: string[]; allowed_kinds?: number[]; auto_approve?: boolean }): Promise<void> {
+export async function serialUpdateClient(slotIndex: number, changes: ClientUpdate): Promise<void> {
   await ensureBridgeAuth()
   const resp = await serialTransport.sendAndReceive(buildConnSlotUpdate(device.selectedSlot, { slot_index: slotIndex, ...changes }), [FrameType.CONNSLOT_UPDATE_RESP, FrameType.NACK], 35_000)
   if (resp.type !== FrameType.CONNSLOT_UPDATE_RESP) throw new Error('Update denied on the device')
@@ -3958,10 +3970,24 @@ export async function mgmtRevokeClient(slotIndex: number, expectedFingerprint?: 
   throw new Error('not connected')
 }
 
-export async function mgmtUpdateClient(slotIndex: number, changes: { label?: string; allowed_methods?: string[]; allowed_kinds?: number[]; auto_approve?: boolean }, expectedFingerprint?: string): Promise<void> {
+export async function mgmtUpdateClient(slotIndex: number, changes: ClientUpdate, expectedFingerprint?: string): Promise<void> {
   if (device.mode === 'relay') return relayUpdateClient(slotIndex, changes, expectedFingerprint)
   if (device.mode === 'serial') return serialUpdateClient(slotIndex, changes)
   throw new Error('not connected')
+}
+
+/**
+ * Turn away approval on or off for one app, then read the signer back and
+ * fail unless the flag really moved. Over USB the change is a button-confirmed
+ * CONNSLOT_UPDATE; over WiFi it is the operator's update_client. Firmware
+ * before the away-approval switch ignores `escalate` on an older pairing over
+ * WiFi, so the read-back is what tells the owner the truth.
+ */
+export async function mgmtSetAwayApproval(slotIndex: number, on: boolean, expectedFingerprint?: string): Promise<void> {
+  await mgmtUpdateClient(slotIndex, { escalate: on }, expectedFingerprint)
+  const slots = device.mode === 'serial' ? await serialFetchSlots(device.selectedSlot) : device.slots
+  const slot = slots.find((s) => s.slot_index === slotIndex)
+  if (!slot || Boolean(slot.escalate) !== on) throw new Error(awayApprovalNotApplied(on, device.mode))
 }
 
 /** Withdraw consent without changing the pairing's capabilities or credential. */

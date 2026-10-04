@@ -8,12 +8,15 @@
     device, refreshSlots, httpTransport,
     mgmtCreateClient, mgmtApproveSigning, mgmtRevokeClient, mgmtUpdateClient,
     mgmtCanApproveSigning, mgmtClientUri, mgmtApplyKithmootPermissions, mgmtWithdrawConsent,
+    mgmtSetAwayApproval,
   } from '../lib/device.svelte.js'
   import { kindLabelPlain as kindLabel } from '../lib/kinds.js'
   import KindPermissions from './KindPermissions.svelte'
   import ClientConsent from './ClientConsent.svelte'
   import ApprovalQueue from './ApprovalQueue.svelte'
   import ConfirmButton from './ConfirmButton.svelte'
+  import AwayApproval from './AwayApproval.svelte'
+  import { awayApprovalAvailability } from '../lib/away-approval.js'
   import type { ConnectSlot } from '../lib/types.js'
   import { identityKey } from '../lib/identity-key.js'
   import { ensureProfiles, profileName } from '../lib/profiles.svelte.js'
@@ -32,6 +35,12 @@
   const overUsb = $derived(device.mode === 'serial')
   const overUsbRelay = $derived(device.mode === 'serial' || device.mode === 'relay')
   const canApprove = $derived(mgmtCanApproveSigning())
+  // Approve-from-phone needs the board in WiFi mode; over USB Sapwood knows
+  // the board's mode once it has read its network config.
+  const awayAvailability = $derived(awayApprovalAvailability({
+    transport: device.mode === 'serial' || device.mode === 'relay' || device.mode === 'http' ? device.mode : null,
+    boardMode: device.usbNetworkState?.mode ?? null,
+  }))
   // Master slots only: derived personas share their owner's slot table, so
   // they are not separate targets for app connections here.
   const identities = $derived(device.masters.filter((m) => !m.persona))
@@ -245,6 +254,16 @@
       device.error = /denied/i.test(msg) ? 'Update denied on device.'
         : /timeout/i.test(msg) ? 'Timed out waiting for the device to confirm.'
         : msg
+    } finally {
+      updatingSlot = null
+    }
+  }
+
+  async function setAwayApproval(slot: ConnectSlot, on: boolean) {
+    if (reviewBusy) return
+    updatingSlot = slot.slot_index
+    try {
+      await mgmtSetAwayApproval(slot.slot_index, on, slot.secret_fingerprint)
     } finally {
       updatingSlot = null
     }
@@ -606,6 +625,12 @@
             updating={updatingSlot === slot.slot_index || (reviewBusy && review?.slot.slot_index === slot.slot_index)}
             onchange={(kinds) => handleUpdate(slot, { allowed_kinds: kinds })}
           />
+
+          {#if overUsbRelay}
+            <AwayApproval {slot} availability={awayAvailability} {overUsb} canChange={overUsbRelay}
+              busy={updatingSlot === slot.slot_index || reviewBusy}
+              onchange={(on) => setAwayApproval(slot, on)} />
+          {/if}
 
           {#if overUsbRelay}
             <div class="km-block">

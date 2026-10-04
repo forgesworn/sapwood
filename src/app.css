@@ -185,6 +185,7 @@ select.field-input { cursor: pointer; }
 }
 .tag--green { background: #001a0a; border-color: #003a1a; color: var(--green); }
 .tag--blue { background: #001520; border-color: #003a5c; color: #44aaee; }
+.tag--amber { background: #1a1200; border-color: #4a3500; color: var(--amber); }
 button.tag { cursor: pointer; transition: all 0.12s; }
 button.tag:disabled { opacity: 0.5; cursor: not-allowed; }
 
