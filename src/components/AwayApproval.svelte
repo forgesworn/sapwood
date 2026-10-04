@@ -3,7 +3,7 @@
   // by default. Turning it on asks the owner to accept the risks first, and
   // over USB the signer asks for a press too; turning it off never asks.
   import type { ConnectSlot } from '../lib/types.js'
-  import { AWAY_APPROVAL_PHONE_SETUP, AWAY_APPROVAL_RISKS, type AwayApprovalAvailability } from '../lib/away-approval.js'
+  import { AWAY_APPROVAL_FAMILY_NOTE, AWAY_APPROVAL_PHONE_SETUP, AWAY_APPROVAL_RISKS, type AwayApprovalAvailability } from '../lib/away-approval.js'
 
   interface Props {
     slot: ConnectSlot
@@ -63,9 +63,11 @@
     {/if}
   </div>
 
-  {#if !on && !availability.available}
+  {#if on}
+    <p class="hint-sm">{AWAY_APPROVAL_FAMILY_NOTE}</p>
+  {:else if !availability.available}
     <p class="hint-sm">{availability.reason}</p>
-  {:else if !on && !reviewing}
+  {:else if !reviewing}
     <p class="hint-sm">When you are away from the signer, requests from this app that need the button can be approved in the Signet app on your phone instead.</p>
   {/if}
 
@@ -81,6 +83,7 @@
       </ul>
       <p class="away-note">Only requests that would ask for the button are sent to your phone; an app set to sign
         automatically is unaffected. A request nobody answers is dropped after 10 minutes.</p>
+      <p class="away-note">{AWAY_APPROVAL_FAMILY_NOTE}</p>
       <label class="away-accept">
         <input type="checkbox" bind:checked={accepted} disabled={saving} />
         I understand my phone can now approve for this app
