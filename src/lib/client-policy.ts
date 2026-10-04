@@ -77,6 +77,10 @@ export const MANAGER_METHODS = [
   'heartwood_rename_persona',
 ] as const
 
+/** Label every Sapwood manager pairing carries. Also the marker that says a
+ *  slot is Sapwood's own bookkeeping rather than one of the operator's apps. */
+export const MANAGER_SLOT_LABEL = 'Sapwood manager'
+
 /** Policy ceiling for the Sapwood manager slot. Auto-approve is deliberate:
  * creating the slot needs an authenticated bridge session, and installing
  * this ceiling is button-confirmed on the device, so the pairing ceremony

@@ -114,7 +114,7 @@ import {
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
   mgmtApplyKithmootPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
-  usbDisplayFlip, setDisplayFlip,
+  usbDisplayFlip, setDisplayFlip, mgmtSetAwayApproval,
 } from './device.svelte.js'
 import { joinedSsid } from './joined-network.js'
 import { kithmootPermissionChanges } from './client-permission-upgrade.js'
@@ -2844,6 +2844,72 @@ describe('identity card auto-sync on serial master list', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(resolveMock).not.toHaveBeenCalled()
     expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
+  })
+
+  // --- mgmtSetAwayApproval (approve from my phone) ---
+
+  it('turns away approval on over the relay: escalate alone, fingerprint-bound, verified read', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({ escalate: false })
+    const stub = installRelayStub({ pubHex, initial: before, afterWrite: { ...before, escalate: true } })
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await mgmtSetAwayApproval(KM_SLOT_INDEX, true, KM_FP)
+      expect(stub.updateCalls).toHaveLength(1)
+      expect(stub.updateCalls[0]).toEqual({ slot_index: KM_SLOT_INDEX, expected_secret_fingerprint: KM_FP, escalate: true })
+      expect(device.slots.find((s) => s.slot_index === KM_SLOT_INDEX)?.escalate).toBe(true)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('reports the truth when older firmware ignores escalate over the relay', async () => {
+    const { pubHex } = freshMaster()
+    const before = kmSlot({ escalate: true })
+    // The signer answers the write but the flag never moves.
+    installRelayStub({ pubHex, initial: before, afterWrite: before })
+    await connectRelay(pubHex, ['wss://r.example'])
+    try {
+      await expect(mgmtSetAwayApproval(KM_SLOT_INDEX, false, KM_FP)).rejects.toThrow(/over USB/)
+    } finally {
+      await disconnect()
+    }
+  })
+
+  it('turns away approval on over USB with a CONNSLOT_UPDATE carrying escalate, then re-reads', async () => {
+    const { pubHex } = freshMaster()
+    const slotWire = (escalate: boolean) => new TextEncoder().encode(JSON.stringify([{
+      ...kmSlot({ secret_fingerprint: undefined }), escalate,
+    }]))
+    const frames: Uint8Array[] = []
+    let wrote = false
+    serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+      frames.push(frame)
+      if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return FW_RESP
+      if (expect.includes(FrameType.CONNSLOT_LIST_RESP)) {
+        return { type: FrameType.CONNSLOT_LIST_RESP, payload: slotWire(wrote) }
+      }
+      if (expect.includes(FrameType.CONNSLOT_UPDATE_RESP)) {
+        wrote = true
+        return { type: FrameType.CONNSLOT_UPDATE_RESP, payload: new Uint8Array() }
+      }
+      return ACK
+    })
+    await connectRelay(pubHex, ['wss://r.example'])
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = true
+    device.selectedSlot = 0
+    try {
+      await mgmtSetAwayApproval(KM_SLOT_INDEX, true)
+      const updates = frames.filter((f) => f.length > 0 && f[2] === FrameType.CONNSLOT_UPDATE)
+      expect(updates).toHaveLength(1)
+      const parsed = parseFrame(updates[0]!)
+      expect(JSON.parse(new TextDecoder().decode(parsed.payload.slice(1)))).toEqual({ slot_index: KM_SLOT_INDEX, escalate: true })
+      expect(device.slots.find((s) => s.slot_index === KM_SLOT_INDEX)?.escalate).toBe(true)
+    } finally {
+      await disconnect()
+    }
   })
 })
 
