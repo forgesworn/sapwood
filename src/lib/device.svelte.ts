@@ -187,7 +187,7 @@ export interface RemoteNetworkPatch {
   ssid?: string
   relays?: string[]
   password?: RemotePasswordChange
-  /** Replacement fallback-network list (order = priority). Per-entry `keep`
+  /** Replacement fallback-network list (saved order; firmware chooses join policy). Per-entry `keep`
    * reuses the password the signer already stores for that SSID. Only valid
    * against firmware that reports a `networks` array in its active state. */
   networks?: Array<{ ssid: string; password: RemotePasswordChange }>

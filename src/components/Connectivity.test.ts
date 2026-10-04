@@ -305,7 +305,7 @@ describe('Connectivity USB network changes', () => {
     expect(JSON.stringify({ ...localStorage })).not.toContain('Device WiFi password')
   })
 
-  it('names the network the signer joined, and says when it is a fallback', async () => {
+  it('names the network the signer joined when it differs from the first saved network', async () => {
     ;(device as { mode: string }).mode = 'serial'
     ;(device as { usbNetworkSupport: string }).usbNetworkSupport = 'supported'
     ;(device as { usbNetworkState: object | null }).usbNetworkState = {
@@ -314,7 +314,7 @@ describe('Connectivity USB network changes', () => {
       joined_index: 1,
     }
     render(Connectivity)
-    await waitFor(() => expect(screen.getByText(/one of the fallback networks/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/another saved network/)).toBeTruthy())
     expect(screen.getByText('Phone hotspot', { selector: 'strong' })).toBeTruthy()
   })
 
