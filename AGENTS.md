@@ -107,11 +107,18 @@ public/        -- static assets
 
 ## Security model
 
-Secrets never leave the ESP32. The serial protocol only carries:
+Master secrets never leave the ESP32: no frame reads a master key back out. Apart from the exceptions below, the serial protocol only carries:
 - Public keys and npubs (outbound)
 - Policy metadata (client pubkeys, labels, methods)
 - Unsigned events in, signatures out
 - Firmware binary chunks (OTA)
+
+Exceptions, all on the cable and not encrypted on the wire:
+- `BACKUP_EXPORT_RESPONSE` and `BACKUP_IMPORT_REQUEST` carry a plaintext JSON `BackupPayload`: per-master metadata and public keys (no master secret), connection slots with their per-app secrets, and the bridge secret. Both are button-gated, and `src/lib/backup.ts` only ever writes the payload to disk inside the Argon2id + XChaCha20-Poly1305 envelope.
+- `SESSION_AUTH` and `SET_BRIDGE_SECRET` carry the 32-byte bridge secret.
+- Importing a phrase or nsec (`PROVISION`, 0x01) sends the derived 32-byte secret from the browser to the signer; Sapwood zeroes its copy after sending. Over a relay the same import (`provision_identity`) is NIP-44 encrypted under the operator-signer conversation key instead.
+
+Derive-by-name (`DERIVE_IDENTITY`), `GENERATE_IDENTITY` and `RESTORE_IDENTITY` send no secret: the signer derives, generates or collects the words on its own screen.
 
 All destructive operations (factory reset, OTA, provisioning) require physical button confirmation on the device. A compromised SPA cannot extract keys or perform destructive actions without physical access to the button.
 
