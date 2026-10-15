@@ -3,11 +3,16 @@
 # Sapwood
 
 > **Untested alpha:** this is Sapwood `0.16.0-alpha.1`, which bundles Heartwood
-> `0.18.0-beta.28` firmware. Recovery Words v1 and Heartwood `0.18.0-alpha.1`
-> are available for integration testing, but the complete write-down, wipe, and
-> hardware restore ceremony has not run. Use test keys only, keep an
-> independent backup, and do not rely on this flow for funds or an
-> irreplaceable identity.
+> `0.18.0-beta.28` firmware. Recovery Words v1 is available for integration
+> testing, but the complete write-down, wipe, and hardware restore ceremony has
+> not run. Use test keys only, keep an independent backup, and do not rely on
+> this flow for funds or an irreplaceable identity.
+>
+> Sapwood has no single minimum firmware; individual features do. Generating
+> an identity on the signer, or restoring any word count other than the legacy
+> 12, needs Heartwood `0.18.0-alpha.1` or later. Phone unlock needs
+> `0.18.0-beta.17`, and strongest-network WiFi selection needs
+> `0.18.0-beta.22`. The bundled firmware meets all three.
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/TheCryptoDonkey?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/TheCryptoDonkey)
 
@@ -18,7 +23,7 @@ Bootstrap Heartwood over USB, then leave it online in WiFi-standalone mode and m
 ## Features
 
 - **Masters** -- view provisioned master slots, npubs, and derivation modes
-- **Named identities** -- type a name and the signer derives the identity from the master it already holds (nsec-tree child derivation, no secret in the browser); older firmware falls back to phrase/nsec entry. Connect apps to it via the identity picker
+- **Named identities** -- type a name and the signer derives the identity from the master it already holds (nsec-tree child derivation, no secret in the browser); a signer that does not recognise the derive frame (it replies NACK) falls back to phrase/nsec entry. Sapwood detects this from the reply, not from a version number, and this repository does not record the first Heartwood release that supports derive-by-name; the bundled firmware does. Connect apps to it via the identity picker
 - **Backup & restore** -- the encrypted backup file (Argon2id + XChaCha20-Poly1305, USB only, button-confirmed on the device) holds your **app pairings** (connection slots with their per-app secrets and policies) and the bridge secret, plus a non-spendable record of any bearer notes held. It carries each master's public key for matching, not its secret. Other secrets use separate flows, see [backup and restore](docs/backup-and-restore.md): identity keys as typed 19/31-word recovery words with an embedded derivation and fingerprint (made at creation or import, never readable back later), the operator key as its own 12-word recovery phrase, and named identities by re-deriving them from the master and the name. Historical bare BIP-39 and 24-word key backups remain explicit legacy imports. Bearer notes themselves are deliberately excluded (restoring them twice would double-spend).
 - **Clients** -- remotely create, list, revoke, and update exact client policies
 - **Connectivity** -- stage and activate rollback-safe WiFi/relay changes remotely; manage saved WiFi networks (add, remove and reorder) without ever resending a stored password; Heartwood 0.18.0-beta.22 and later selects by signal strength and switches when another saved network stays clearly stronger
@@ -41,7 +46,7 @@ The frame protocol is a TypeScript port of [heartwood-common/src/frame.rs](https
 
 ## Security
 
-Master secrets never leave the ESP32. Remote mutations require the separate operator key, a device-issued one-time challenge, and the current client credential fingerprint. Exact policies fail closed: unlisted methods and event kinds cannot be signed automatically. Sapwood keeps multiple operator credentials in an additive local keyring, and a protected phone QR is built only from relays/operator state proven by the exact signer. Derive-by-name and identity import (phrase, nsec or ncryptsec) also work over relays: derive-by-name sends no secret, and an import travels NIP-44 encrypted under the operator-signer conversation key. Seed and PIN changes, trust-root changes, factory reset, and OTA remain local USB/physical operations; firmware-only flashing preserves the config partition by default.
+Master secrets never leave the ESP32: no frame reads one back out. Importing a phrase or nsec over USB does send the derived 32-byte secret from the browser to the signer, unencrypted on the cable, and Sapwood zeroes its copy afterwards. Remote mutations require the separate operator key, a device-issued one-time challenge, and the current client credential fingerprint. Exact policies fail closed: unlisted methods and event kinds cannot be signed automatically. Sapwood keeps multiple operator credentials in an additive local keyring, and a protected phone QR is built only from relays/operator state proven by the exact signer. Derive-by-name and identity import (phrase, nsec or ncryptsec) also work over relays: derive-by-name sends no secret, and an import travels NIP-44 encrypted under the operator-signer conversation key. Seed and PIN changes, trust-root changes, factory reset, and OTA remain local USB/physical operations; firmware-only flashing preserves the config partition by default.
 
 ## Quick start
 
@@ -84,7 +89,7 @@ sapwood backup export --out pairings.json  # app pairings + bridge secret to an 
 sapwood backup import pairings.json    # restore app pairings from that file, button-confirmed
 ```
 
-`--json` on any command gives machine-readable output for scripting. The port is auto-detected when exactly one signer is plugged in; `--port` overrides. `apps revoke` needs an authenticated bridge session: set `SAPWOOD_BRIDGE_SECRET` or pass `--bridge-secret -` to read the 32-byte secret from stdin. `backup export` and `backup import` read the file passphrase from a prompt or stdin. Master secrets never travel over the cable, and destructive operations still need the physical button; `key backup`, `operator new` and `operator restore` never open the device.
+`--json` on any command gives machine-readable output for scripting. The port is auto-detected when exactly one signer is plugged in; `--port` overrides. `apps revoke` needs an authenticated bridge session: set `SAPWOOD_BRIDGE_SECRET` or pass `--bridge-secret -` to read the 32-byte secret from stdin. `backup export` and `backup import` read the file passphrase from a prompt or stdin. The CLI never sends a master secret to the signer or asks for one, and it has no phrase or nsec import (that is a web UI flow, which sends the derived 32-byte secret over the cable). It does send the bridge secret for `apps revoke`, and `backup export` and `backup import` move a plaintext backup payload (per-app secrets and the bridge secret) over the cable, unencrypted on the wire and button-confirmed. Destructive operations still need the physical button; `key backup`, `operator new` and `operator restore` never open the device.
 
 ## Stack
 
