@@ -86,7 +86,7 @@ TypeScript port of the Rust implementation in heartwood-common/src/frame.rs, def
 | DERIVE_IDENTITY_RESPONSE | 0x61 | device -> host | JSON `{slot, label, npub, parent_slot, purpose, existing}` |
 | ENCRYPTED_REQUEST | 0x10 | host -> device | target_pubkey (32) + client_pubkey (32) + created_at (8, u64 be) + NIP-44 ciphertext (base64); a full NIP-46 request |
 | SIGN_ENVELOPE_RESPONSE | 0x35 | device -> host | signed kind:24133 envelope; content decrypts under the client-identity conversation key |
-| SESSION_AUTH | 0x21 | host -> device | 32-byte bridge secret; device replies SESSION_ACK (0x22) |
+| SESSION_AUTH | 0x21 | host -> device | 32-byte bridge secret; device replies SESSION_ACK (0x22): 0x00 ok, 0x01 wrong secret, 0x02 no secret set |
 | CONNSLOT_LIST | 0x42 | host -> device | master_slot (1 byte); secrets redacted, no session needed |
 | CONNSLOT_REVOKE | 0x46 | host -> device | master_slot (1) + slot_index (1); requires SESSION_AUTH first |
 | FACTORY_RESET | 0x24 | host -> device | (empty, requires button) |
@@ -101,6 +101,8 @@ TypeScript port of the Rust implementation in heartwood-common/src/frame.rs, def
 
 **Declared but not implemented.** `POLICY_LIST_REQUEST` (0x27), `POLICY_LIST_RESPONSE` (0x28), `POLICY_REVOKE` (0x29) and `POLICY_UPDATE` (0x2A) exist in `heartwood-common/src/types.rs` and in `frame.ts`, but the firmware has no handler for any of them; Sapwood only touches them in byte-roundtrip tests. App permissions go over the `CONNSLOT_*` frames instead.
 
+**Session gate.** `CONNSLOT_CREATE`, `CONNSLOT_REVOKE`, `PHONE_UNLOCK_CMD` (0x64), `BACKUP_EXPORT_REQUEST`, `BACKUP_IMPORT_REQUEST`, `VAULT_SET` and `VAULT_UNLOCK` need `SESSION_AUTH` first, so a bare `CONNSLOT_REVOKE` is refused. `CONNSLOT_LIST` redacts secrets and needs no session. The CLI takes the bridge secret (64 hex characters) from `SAPWOOD_BRIDGE_SECRET` or `--bridge-secret -` (stdin).
+
 ### Stream parsing
 
 The serial stream carries both ESP-IDF log lines (plain text, newline-terminated) and protocol frames (binary). `frame-stream.ts` hunts for the `0x48 0x57` magic sequence to separate them; `serial.ts` wraps the Web Serial API around it and emits frame and log events.
@@ -111,7 +113,7 @@ The serial stream carries both ESP-IDF log lines (plain text, newline-terminated
 
 ### Identities (masters)
 
-Lists provisioned master slots on the device: slot index, npub, derivation mode. Calls PROVISION_LIST (0x05), receives PROVISION_LIST_RESPONSE (0x07). New identities can be typed by name and derived on-device (DERIVE_IDENTITY, no secret in the browser), or imported from a phrase/nsec/ncryptsec for older firmware.
+Lists provisioned master slots on the device: slot index, npub, derivation mode. Calls PROVISION_LIST (0x05), receives PROVISION_LIST_RESPONSE (0x07). New identities can be typed by name and derived on-device (DERIVE_IDENTITY, no secret in the browser), or imported from a phrase/nsec/ncryptsec when the signer NACKs the derive frame (support is detected from the reply, not a version number).
 
 ### Apps (connected clients)
 
@@ -137,7 +139,9 @@ Erases all keys and client policies. Sends FACTORY_RESET (0x24); the device will
 
 ## Security model
 
-**Secrets never leave the ESP32.** The protocol only carries public keys and npubs, policy/connection metadata, NIP-44 ciphertext and signatures (not plaintext key material), and firmware binary chunks (OTA).
+**Master secrets never leave the ESP32.** No frame reads a master key back out. Apart from the exceptions below, the protocol only carries public keys and npubs, policy/connection metadata, NIP-44 ciphertext and signatures, and firmware binary chunks (OTA).
+
+Exceptions, all on the cable and not encrypted on the wire: `BACKUP_EXPORT_RESPONSE` and `BACKUP_IMPORT_REQUEST` carry a plaintext JSON `BackupPayload` (per-master metadata and public keys, connection slots with their per-app secrets, and the bridge secret; button-gated, and only ever written to disk inside the Argon2id + XChaCha20-Poly1305 envelope); `SESSION_AUTH` and `SET_BRIDGE_SECRET` carry the bridge secret; importing a phrase or nsec (`PROVISION`, 0x01) sends the derived 32-byte secret to the signer. Over a relay the same import (`provision_identity`) is NIP-44 encrypted. Derive-by-name, `GENERATE_IDENTITY` and `RESTORE_IDENTITY` send no secret.
 
 **Physical button confirmation** gates every destructive or secret-revealing operation: factory reset, OTA, backup export/import, and provisioning. A compromised Sapwood SPA cannot extract keys or perform destructive actions without physical access to the button.
 
@@ -210,7 +214,7 @@ Web Serial API is required.
 |-----------|------|------|
 | Heartwood | forgesworn/heartwood-esp32 | ESP32 firmware, bridge, provision CLI |
 | Sapwood | forgesworn/sapwood | Web management UI (this repo) |
-| Bark | see README | Browser extension for NIP-46 signing |
-| nsec-tree | see README | Key derivation library |
+| Bark | forgesworn/bark | Browser extension for NIP-46 signing |
+| nsec-tree | forgesworn/nsec-tree | Key derivation library |
 
 Named after the living, active layer of wood between bark and heartwood.

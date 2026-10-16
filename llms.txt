@@ -40,6 +40,8 @@ an unrelated project.
   provisioning). A compromised browser tab cannot act without it.
 - Named identities: the signer derives child identities from a master it
   already holds (`DERIVE_IDENTITY`), so no secret needs to enter the browser.
+  A signer that NACKs the frame falls back to phrase/nsec entry; support is
+  detected from the reply, not a version number.
 - Exact client policies: connected apps are scoped to specific NIP-46 methods
   and event kinds; unlisted methods and kinds fail closed.
 
@@ -54,8 +56,22 @@ firmware update (`OTA_BEGIN`/`OTA_CHUNK`/`OTA_FINISH`/`OTA_STATUS`), and
 backup/restore (`BACKUP_EXPORT_REQUEST`/`BACKUP_EXPORT_RESPONSE`,
 `BACKUP_IMPORT_REQUEST`/`BACKUP_IMPORT_RESPONSE`).
 
+Session gate: `CONNSLOT_CREATE`, `CONNSLOT_REVOKE`, `PHONE_UNLOCK_CMD`,
+`BACKUP_EXPORT_REQUEST`, `BACKUP_IMPORT_REQUEST`, `VAULT_SET` and
+`VAULT_UNLOCK` need `SESSION_AUTH` (0x21, the 32-byte bridge secret) first. The
+signer replies `SESSION_ACK` (0x22) with 0x00 ok, 0x01 wrong secret or 0x02 no
+secret set. A bare `CONNSLOT_REVOKE` is refused with a NACK that names the
+authenticated bridge session. `CONNSLOT_LIST` redacts secrets and needs no
+session. The CLI takes the secret (64 hex characters) from
+`SAPWOOD_BRIDGE_SECRET` or `--bridge-secret -` (stdin).
+
+Not implemented: `POLICY_LIST_REQUEST`, `POLICY_LIST_RESPONSE`,
+`POLICY_REVOKE` and `POLICY_UPDATE` (0x27-0x2A) are declared in `FrameType` but
+the firmware has no handler for them. Use the `CONNSLOT_*` frames for app
+permissions.
+
 The CLI (`cli/commands.ts`) exposes the same operations as subcommands:
-`device`, `identities`, `identities remove`, `derive`, `apps`,
+`ports`, `device`, `identities`, `identities remove`, `derive`, `apps`,
 `apps revoke`, `logs`, `firmware update`, `key backup`, `operator new`,
 `operator restore`, `backup export`, `backup import`. All support `--json`.
 
