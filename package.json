@@ -65,6 +65,6 @@
     "esptool-js": "^0.7.0",
     "nostr-tools": "2.23.9",
     "serialport": "^13.0.0",
-    "spoken-token": "^2.1.0"
+    "spoken-token": "^2.1.1"
   }
 }
