@@ -726,17 +726,27 @@ export class HttpTransport {
     } catch { return [] }
   }
 
-  /** Approve or deny a pending request. */
-  async resolveApproval(id: string, action: 'approve' | 'deny'): Promise<boolean> {
-    if (!this.heartwooddMode) return false
+  /** Approve or deny a pending request. On failure, `error` carries the
+   *  daemon's reason where it gave one. */
+  async resolveApproval(id: string, action: 'approve' | 'deny'): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!this.heartwooddMode) return { ok: false, error: 'Not connected to a bridge' }
     try {
       const res = await this.fetch(`/api/approvals/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      return res.ok
-    } catch { return false }
+      if (res.ok) return { ok: true }
+      let reason = ''
+      try {
+        const body = await res.json() as { error?: unknown; message?: unknown }
+        const text = body.error ?? body.message
+        if (typeof text === 'string') reason = text
+      } catch { /* no JSON body */ }
+      return { ok: false, error: reason || `HTTP ${res.status}` }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Request failed' }
+    }
   }
 
   // --- Internal ---
