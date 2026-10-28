@@ -1,10 +1,17 @@
 <script lang="ts">
   import { device, httpTransport } from '../lib/device.svelte.js'
 
+  let errors = $state<Record<string, string>>({})
+
   async function resolve(id: string, action: 'approve' | 'deny') {
-    const ok = await httpTransport.resolveApproval(id, action)
-    if (ok) {
+    const result = await httpTransport.resolveApproval(id, action)
+    if (result.ok) {
+      const { [id]: _gone, ...rest } = errors
+      errors = rest
       device.approvals = device.approvals.filter(a => a.id !== id)
+    } else {
+      const verb = action === 'deny' ? 'deny' : 'approve'
+      errors = { ...errors, [id]: `Could not ${verb}: ${result.error}` }
     }
   }
 </script>
@@ -27,6 +34,9 @@
           <button class="btn btn-primary btn-sm" onclick={() => resolve(req.id as string, 'approve')}>Approve</button>
           <button class="btn btn-danger btn-sm" onclick={() => resolve(req.id as string, 'deny')}>Deny</button>
         </div>
+        {#if errors[req.id as string]}
+          <p class="error-text approval-error" role="alert">{errors[req.id as string]}</p>
+        {/if}
       </div>
     {/each}
   </section>
@@ -35,6 +45,7 @@
 <style>
   .approval-card {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
@@ -74,6 +85,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .approval-error { flex-basis: 100%; margin: 0; }
 
   .approval-actions {
     display: flex;
