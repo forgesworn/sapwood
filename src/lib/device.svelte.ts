@@ -51,7 +51,7 @@ import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
 import { markPairingBackupStale } from './pairing-backup.js'
-import { kithmootPermissionChanges, permissionSlotUnchanged, kithmootUpgradeBlockedReason, type KithmootPermissionReview } from './client-permission-upgrade.js'
+import { permissionChanges, permissionSlotUnchanged, upgradeBlockedReason, type PresetPermissionReview } from './client-permission-upgrade.js'
 
 // --- Reactive state ---
 
@@ -4032,17 +4032,19 @@ export async function mgmtWithdrawConsent(snapshot: ConnectSlot, client?: string
   notePairingBackupStale()
 }
 
-// --- KithMoot additive permission upgrade adapter --------------------------
-let mgmtKithmootWriteInFlight = false
+// --- Additive preset permission upgrade adapter --------------------------
+let mgmtPresetWriteInFlight = false
 
-export async function mgmtApplyKithmootPermissions(review: KithmootPermissionReview): Promise<void> {
-  if (mgmtKithmootWriteInFlight) throw new Error('Kithmoot permission update already in flight')
-  mgmtKithmootWriteInFlight = true
+export async function mgmtApplyPresetPermissions(review: PresetPermissionReview): Promise<void> {
+  const preset = review.preset
+  const what = `${preset.label} permission update`
+  if (mgmtPresetWriteInFlight) throw new Error(`${what} already in flight`)
+  mgmtPresetWriteInFlight = true
   try {
     if (!device.connected || device.mode !== review.mode || device.selectedSlot !== review.masterSlot || device.connectionGeneration !== review.connectionGeneration) {
       throw new Error('Connection context changed since review was opened')
     }
-    kithmootPermissionChanges(review.slot) // Reject malformed review arrays before snapshot normalisation.
+    permissionChanges(review.slot, preset) // Reject malformed review arrays before snapshot normalisation.
     const source = review.slot
     const snapshot: ConnectSlot = {
       slot_index: source.slot_index,
@@ -4067,7 +4069,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
       guardian_notice_wrap: Boolean(source.guardian_notice_wrap),
     }
 
-    const blocked = kithmootUpgradeBlockedReason(snapshot)
+    const blocked = upgradeBlockedReason(snapshot, preset)
     if (blocked !== null) throw new Error(blocked)
 
     const ctx = {
@@ -4088,7 +4090,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
         relayTransport !== ctx.transport ||
         relayMgmtTarget() !== ctx.target
       ) {
-        throw new Error('Connection context changed during Kithmoot permission update')
+        throw new Error(`Connection context changed during ${what}`)
       }
     }
 
@@ -4254,7 +4256,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
         const clients = (raw as Record<string, unknown>).clients
         return parseSlotList(clients, 'relay')
       } else {
-        throw new Error('Kithmoot permission update requires serial or relay connection')
+        throw new Error(`${what} requires serial or relay connection`)
       }
     }
 
@@ -4267,7 +4269,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
       throw new Error('Slot changed since review was opened')
     }
 
-    const changes = kithmootPermissionChanges(snapshot)
+    const changes = permissionChanges(snapshot, preset)
 
     const relayUpdateParams =
       ctx.mode === 'relay'
@@ -4286,7 +4288,7 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
           35000,
         )
         assertContext()
-        if (resp.type === FrameType.NACK) throw new Error('Kithmoot permission update denied by device')
+        if (resp.type === FrameType.NACK) throw new Error(`${what} denied by device`)
       } else if (ctx.mode === 'relay') {
         const transport = ctx.transport
         if (!transport) throw new Error('Relay transport missing')
@@ -4294,11 +4296,11 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
         await transport.request('update_client', relayUpdateParams, MGMT_WRITE_TIMEOUT_MS, ctx.target)
         assertContext()
       } else {
-        throw new Error('Kithmoot permission update requires serial or relay connection')
+        throw new Error(`${what} requires serial or relay connection`)
       }
     } catch (err) {
-      if (err instanceof Error && err.message === 'Kithmoot permission update denied by device') throw err
-      throw new Error('Kithmoot permission update may have applied; refresh review before retrying')
+      if (err instanceof Error && err.message === `${what} denied by device`) throw err
+      throw new Error(`${what} may have applied; refresh review before retrying`)
     }
 
     try {
@@ -4315,10 +4317,10 @@ export async function mgmtApplyKithmootPermissions(review: KithmootPermissionRev
       assertContext()
       device.slots = freshAfter
     } catch (err) {
-      throw new Error('Kithmoot permission update may have applied; refresh review before retrying')
+      throw new Error(`${what} may have applied; refresh review before retrying`)
     }
   } finally {
-    mgmtKithmootWriteInFlight = false
+    mgmtPresetWriteInFlight = false
   }
 }
 

@@ -6,7 +6,15 @@ import {
   kithmootPermissionChanges,
   kithmootUpgradeBlockedReason,
   permissionSlotUnchanged,
+  upgradeBlockedReason,
+  presetAlreadyEnabled,
+  permissionChanges,
+  ADDITIVE_PRESETS,
+  SIGN_IN_PRESET,
+  V4V_LISTENER_PRESET,
+  V4V_ARTIST_PRESET,
 } from './client-permission-upgrade.js'
+import { V4V_ARTIST_KINDS, V4V_LISTENER_KINDS } from './client-presets.js'
 import type { ConnectSlot } from './types.js'
 
 function slot(overrides: Partial<ConnectSlot> = {}): ConnectSlot {
@@ -225,5 +233,59 @@ describe('kithmootPermissionChanges runtime shape guards', () => {
   it('throws when allowed_methods contains a non-string', () => {
     const bad = { ...slot(), allowed_methods: ['sign_event', 1 as unknown as string] }
     expect(() => kithmootPermissionChanges(bad)).toThrow()
+  })
+})
+
+describe('additive presets', () => {
+  it('builds the four presets from the client-presets data', () => {
+    expect(ADDITIVE_PRESETS.map((p) => p.id)).toEqual(['sign-in', 'v4v-listener', 'v4v-artist', 'kithmoot-private'])
+    expect([...SIGN_IN_PRESET.kinds]).toEqual([21236])
+    expect([...SIGN_IN_PRESET.methods]).toEqual(['get_public_key', 'sign_event'])
+    expect([...V4V_LISTENER_PRESET.kinds]).toEqual([...V4V_LISTENER_KINDS])
+    expect(new Set(V4V_ARTIST_PRESET.kinds)).toEqual(new Set([...V4V_LISTENER_KINDS, ...V4V_ARTIST_KINDS]))
+    for (const p of [V4V_LISTENER_PRESET, V4V_ARTIST_PRESET]) {
+      expect([...p.methods]).toEqual(['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt'])
+    }
+  })
+
+  for (const preset of [SIGN_IN_PRESET, V4V_LISTENER_PRESET, V4V_ARTIST_PRESET]) {
+    describe(preset.id, () => {
+      it('blocks without signing approval, sign_event or a key', () => {
+        expect(upgradeBlockedReason(slot({ signing_approved: false }), preset)).toBe('Signing approval needed first')
+        expect(upgradeBlockedReason(slot({ allowed_methods: ['get_public_key'] }), preset)).toBe('App must already allow sign_event')
+        expect(
+          upgradeBlockedReason(slot({ current_pubkey: null, authorized_pubkeys: [] }), preset),
+        ).toBe('No authorised key available')
+        expect(upgradeBlockedReason(slot(), preset)).toBeNull()
+      })
+
+      it('detects already enabled and reports it as the blocked reason', () => {
+        const full = slot({ allowed_methods: [...preset.methods], allowed_kinds: [1, ...preset.kinds] })
+        expect(presetAlreadyEnabled(full, preset)).toBe(true)
+        expect(upgradeBlockedReason(full, preset)).toBe(`${preset.name} already enabled`)
+        const missingKind = slot({ allowed_methods: [...preset.methods], allowed_kinds: [99999, ...preset.kinds.slice(1)] })
+        expect(presetAlreadyEnabled(missingKind, preset)).toBe(false)
+        const missingMethod = slot({ allowed_methods: ['sign_event'], allowed_kinds: [...preset.kinds] })
+        expect(presetAlreadyEnabled(missingMethod, preset)).toBe(preset.methods.length === 1)
+      })
+
+      it('unions with existing arrays and keeps unknown methods', () => {
+        const c = permissionChanges(slot({ allowed_methods: ['sign_event', 'ping'], allowed_kinds: [7, 1] }), preset)
+        expect(c.allowed_methods).toEqual(['sign_event', 'ping', ...preset.methods.filter((m) => m !== 'sign_event')])
+        expect(c.allowed_kinds).toEqual([...new Set([7, 1, ...preset.kinds])].sort((a, b) => a - b))
+      })
+
+      it('leaves an unrestricted slot unrestricted and treats it as enabled with all methods', () => {
+        const c = permissionChanges(slot({ allowed_kinds: [] }), preset)
+        expect(c.allowed_kinds).toEqual([])
+        expect(presetAlreadyEnabled(slot({ allowed_methods: [...preset.methods], allowed_kinds: [] }), preset)).toBe(true)
+      })
+    })
+  }
+
+  it('V4V artist is not enabled by the listener kinds alone', () => {
+    const s = slot({ allowed_methods: [...V4V_LISTENER_PRESET.methods], allowed_kinds: [...V4V_LISTENER_KINDS] })
+    expect(presetAlreadyEnabled(s, V4V_LISTENER_PRESET)).toBe(true)
+    expect(presetAlreadyEnabled(s, V4V_ARTIST_PRESET)).toBe(false)
   })
 })

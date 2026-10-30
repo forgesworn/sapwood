@@ -113,11 +113,11 @@ import {
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
-  mgmtApplyKithmootPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
+  mgmtApplyPresetPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
   usbDisplayFlip, setDisplayFlip, mgmtSetAwayApproval,
 } from './device.svelte.js'
 import { joinedSsid } from './joined-network.js'
-import { kithmootPermissionChanges } from './client-permission-upgrade.js'
+import { kithmootPermissionChanges, KITHMOOT_PRIVATE_PRESET } from './client-permission-upgrade.js'
 import type { KithmootPermissionReview } from './client-permission-upgrade.js'
 import type { ConnectSlot } from './types.js'
 import { FrameType, parseFrame } from './frame.js'
@@ -2085,7 +2085,7 @@ describe('identity card auto-sync on serial master list', () => {
     }
   })
 
-  // --- mgmtApplyKithmootPermissions (real exported backend path) ---
+  // --- mgmtApplyPresetPermissions (real exported backend path) ---
   //
   // These tests exercise the exported adapter directly, without stubbing it.
   // Serial tests feed frames through the captured listener / sendAndReceive
@@ -2143,6 +2143,7 @@ describe('identity card auto-sync on serial master list', () => {
       masterSlot: 0,
       connectionGeneration: device.connectionGeneration,
       mode: opts.mode ?? 'relay',
+      preset: KITHMOOT_PRIVATE_PRESET,
       ...opts,
     }
   }
@@ -2209,7 +2210,7 @@ describe('identity card auto-sync on serial master list', () => {
     const baselineList = stub.getListCalls()
     try {
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      await mgmtApplyKithmootPermissions(review)
+      await mgmtApplyPresetPermissions(review)
 
       // Pre-read + verify read: two additional list_clients, one update_client.
       expect(stub.getListCalls() - baselineList).toBe(2)
@@ -2275,7 +2276,7 @@ describe('identity card auto-sync on serial master list', () => {
     device.relays = []
     try {
       const review = kmReview(before, { mode: 'serial', masterSlot: 0 })
-      await mgmtApplyKithmootPermissions(review)
+      await mgmtApplyPresetPermissions(review)
 
       expect(listReads).toBe(2)
       // Decode the actual CONNSLOT_UPDATE frame via the real parseFrame.
@@ -2315,7 +2316,7 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       const review = kmReview(device.slots.find(s => s.slot_index === KM_SLOT_INDEX)!, { mode: 'relay', masterSlot: 0 })
-      await mgmtApplyKithmootPermissions(review)
+      await mgmtApplyPresetPermissions(review)
       const update = stub.updateCalls[0] as Record<string, unknown>
       // Manual flags + persona tags are never part of the mutation payload,
       // so the device keeps their existing values untouched.
@@ -2341,7 +2342,7 @@ describe('identity card auto-sync on serial master list', () => {
     try {
       // selectSlot is 0; review claims masterSlot 9.
       const review = kmReview(before, { mode: 'relay', masterSlot: 9 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
         /Connection context changed since review was opened/,
       )
     } finally {
@@ -2366,8 +2367,8 @@ describe('identity card auto-sync on serial master list', () => {
         }
         return original?.(method, params)
       })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
-        /Connection context changed during Kithmoot permission update/,
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
+        /Connection context changed during KithMoot private rooms permission update/,
       )
       expect(stub.updateCalls).toHaveLength(0)
     } finally {
@@ -2390,8 +2391,8 @@ describe('identity card auto-sync on serial master list', () => {
         }
         return original?.(method, params)
       })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
-        /Connection context changed during Kithmoot permission update/,
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
+        /Connection context changed during KithMoot private rooms permission update/,
       )
       expect(stub.updateCalls).toHaveLength(0)
     } finally {
@@ -2428,8 +2429,8 @@ describe('identity card auto-sync on serial master list', () => {
     device.connectionGeneration = device.connectionGeneration ?? 1
     try {
       const review = kmReview(before, { mode: 'serial', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
-        /Kithmoot permission update denied by device/,
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
+        /KithMoot private rooms permission update denied by device/,
       )
       expect(updateSent).toBe(1)
       // Only the pre-read happened; a denied write must not trigger a verifying read.
@@ -2449,8 +2450,8 @@ describe('identity card auto-sync on serial master list', () => {
     const baselineList = stub.getListCalls()
     try {
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
-        /Kithmoot permission update may have applied; refresh review before retrying/,
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
+        /KithMoot private rooms permission update may have applied; refresh review before retrying/,
       )
       expect(stub.updateCalls).toHaveLength(1)
       expect(stub.getListCalls() - baselineList).toBe(2)
@@ -2485,7 +2486,7 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       const review = kmReview(reviewSlot, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
         /Slot changed since review was opened/,
       )
       expect(stub.updateCalls).toHaveLength(0)
@@ -2510,7 +2511,7 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       const review = kmReview(reviewSlot, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
         /Reviewed slot no longer exists/,
       )
       const updateCalls = relayRequestMock.mock.calls.filter((c) => c[0] === 'update_client')
@@ -2560,11 +2561,11 @@ describe('identity card auto-sync on serial master list', () => {
       })
 
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      const first = mgmtApplyKithmootPermissions(review)
+      const first = mgmtApplyPresetPermissions(review)
       // Give the first call a tick to register its in-flight flag.
       await Promise.resolve()
       // Second call must short-circuit while the first is gated on list_clients.
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
         /already in flight/,
       )
       releaseRead()
@@ -2612,7 +2613,7 @@ describe('identity card auto-sync on serial master list', () => {
     await connectRelay(pubHex, ['wss://r.example'])
     try {
       const review = kmReview(reviewSlot, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
         /Malformed allowed_kinds/,
       )
       expect(updateCalls).toHaveLength(0)
@@ -2640,7 +2641,7 @@ describe('identity card auto-sync on serial master list', () => {
     const baselineList = stub.getListCalls()
     try {
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      await mgmtApplyKithmootPermissions(review)
+      await mgmtApplyPresetPermissions(review)
       expect(stub.updateCalls).toHaveLength(1)
       expect(stub.getListCalls() - baselineList).toBe(2)
       const update = stub.updateCalls[0] as Record<string, unknown>
@@ -2705,7 +2706,7 @@ describe('identity card auto-sync on serial master list', () => {
         return prior(frame, expect)
       })
 
-      await mgmtApplyKithmootPermissions(review)
+      await mgmtApplyPresetPermissions(review)
 
       const updateFrames = frames.filter((f) => f.length > 0 && f[2] === FrameType.CONNSLOT_UPDATE)
       expect(updateFrames).toHaveLength(1)
@@ -2738,8 +2739,8 @@ describe('identity card auto-sync on serial master list', () => {
     const baselineList = stub.getListCalls()
     try {
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
-        /Kithmoot permission update may have applied; refresh review before retrying/,
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
+        /KithMoot private rooms permission update may have applied; refresh review before retrying/,
       )
       expect(stub.updateCalls).toHaveLength(1)
       expect(stub.getListCalls() - baselineList).toBe(2)
@@ -2760,8 +2761,8 @@ describe('identity card auto-sync on serial master list', () => {
     const baselineList = stub.getListCalls()
     try {
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
-        /Kithmoot permission update may have applied; refresh review before retrying/,
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
+        /KithMoot private rooms permission update may have applied; refresh review before retrying/,
       )
       expect(stub.updateCalls).toHaveLength(1)
       expect(stub.getListCalls() - baselineList).toBe(2)
@@ -2783,7 +2784,7 @@ describe('identity card auto-sync on serial master list', () => {
     const baselineList = stub.getListCalls()
     try {
       const review = kmReview(before, { mode: 'relay', masterSlot: 0 })
-      await expect(mgmtApplyKithmootPermissions(review)).rejects.toThrow(
+      await expect(mgmtApplyPresetPermissions(review)).rejects.toThrow(
         /may have applied/,
       )
       // Exactly one attempt, no retry, and no verifying read after failure.

@@ -6,7 +6,7 @@ import {
   refreshSlots,
   mgmtCreateClient,
   mgmtRevokeClient,
-  mgmtApplyKithmootPermissions,
+  mgmtApplyPresetPermissions,
 } from '../lib/device.svelte.js'
 
 // Mock the transport layer; the panel's rendering logic is real.
@@ -31,7 +31,7 @@ vi.mock('../lib/device.svelte.js', () => ({
   mgmtUpdateClient: vi.fn(),
   mgmtCanApproveSigning: vi.fn(() => false),
   mgmtClientUri: vi.fn(),
-  mgmtApplyKithmootPermissions: vi.fn(),
+  mgmtApplyPresetPermissions: vi.fn(),
 }))
 
 vi.mock('../lib/profiles.svelte.js', () => ({
@@ -72,14 +72,19 @@ function legacySignedSlot(overrides: Record<string, unknown> = {}): Record<strin
   })
 }
 
-async function openReview(slot: Record<string, unknown>) {
+async function openReview(slot: Record<string, unknown>, presetId = 'kithmoot-private') {
   // The review is only reachable when the panel knows which signer it is
   // acting for: seed a realistic connected master so the identity picker
-  // doesn't gate the "Add KithMoot rooms" control.
+  // doesn't gate the "Add preset" control.
   device.masters = [MASTERS[0]!]
   device.slots = [slot as never]
   render(AppsPanel)
-  await fireEvent.click(screen.getByText('Add KithMoot rooms'))
+  await choosePreset(presetId)
+  await fireEvent.click(screen.getByText('Add preset'))
+}
+
+async function choosePreset(id: string) {
+  await fireEvent.change(screen.getByLabelText('Preset to add'), { target: { value: id } })
 }
 
 beforeEach(() => {
@@ -136,13 +141,13 @@ describe('AppsPanel KithMoot permission review', () => {
   it('opening the review is explicit: no backend call until Confirm', async () => {
     await openReview(strictSignedSlot())
     expect(screen.getByText(/Add KithMoot private rooms to/)).toBeTruthy()
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
   })
 
   it('a legacy signed slot can also be reviewed', async () => {
     await openReview(legacySignedSlot())
     expect(screen.getByText(/Add KithMoot private rooms to/)).toBeTruthy()
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
   })
 
   it('confirm sends the full methods/kinds snapshot once and never creates or revokes', async () => {
@@ -158,8 +163,8 @@ describe('AppsPanel KithMoot permission review', () => {
     const initialRefreshCalls = vi.mocked(refreshSlots).mock.calls.length
     await fireEvent.click(screen.getByText('Confirm'))
 
-    await waitFor(() => expect(mgmtApplyKithmootPermissions).toHaveBeenCalledTimes(1))
-    expect(mgmtApplyKithmootPermissions).toHaveBeenCalledWith(
+    await waitFor(() => expect(mgmtApplyPresetPermissions).toHaveBeenCalledTimes(1))
+    expect(mgmtApplyPresetPermissions).toHaveBeenCalledWith(
       expect.objectContaining({
         slot: expect.objectContaining({
           slot_index: 1,
@@ -169,6 +174,7 @@ describe('AppsPanel KithMoot permission review', () => {
         masterSlot: 0,
         connectionGeneration: 0,
         mode: 'serial',
+        preset: expect.objectContaining({ id: 'kithmoot-private' }),
       }),
     )
     expect(mgmtCreateClient).not.toHaveBeenCalled()
@@ -182,7 +188,7 @@ describe('AppsPanel KithMoot permission review', () => {
   it('cancel performs no writes and closes the review', async () => {
     await openReview(strictSignedSlot())
     await fireEvent.click(screen.getByText('Cancel'))
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
     expect(mgmtCreateClient).not.toHaveBeenCalled()
     expect(mgmtRevokeClient).not.toHaveBeenCalled()
     expect(screen.queryByText(/Add KithMoot private rooms to/)).toBeNull()
@@ -190,17 +196,19 @@ describe('AppsPanel KithMoot permission review', () => {
 
   it('a slot already covered by the upgrade is disabled with a reason', async () => {
     await openReview(strictSignedSlot({ allowed_kinds: [1, 7, 20460, 21236, 30078] }))
-    const btn = screen.getByText('Add KithMoot rooms') as HTMLButtonElement
+    await choosePreset('kithmoot-private')
+    const btn = screen.getByText('Add preset') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     expect(screen.queryByText('Confirm')).toBeNull()
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
   })
 
   it('a slot that cannot sign is disabled', async () => {
     await openReview(strictSignedSlot({ allowed_methods: ['get_public_key'] }))
-    const btn = screen.getByText('Add KithMoot rooms') as HTMLButtonElement
+    await choosePreset('kithmoot-private')
+    const btn = screen.getByText('Add preset') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
   })
 
   it('review copy states the manual-signing setting is preserved', async () => {
@@ -226,7 +234,7 @@ describe('AppsPanel KithMoot permission review', () => {
   })
 
   it('a backend failure shows the error and no success message', async () => {
-    vi.mocked(mgmtApplyKithmootPermissions).mockRejectedValueOnce(new Error('device refused'))
+    vi.mocked(mgmtApplyPresetPermissions).mockRejectedValueOnce(new Error('device refused'))
     await openReview(strictSignedSlot())
     await fireEvent.click(screen.getByText('Confirm'))
 
@@ -242,7 +250,7 @@ describe('AppsPanel KithMoot permission review', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('changed since the review opened')
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
   })
 
   it('aborts a review whose slot policy changed on the device', async () => {
@@ -252,6 +260,68 @@ describe('AppsPanel KithMoot permission review', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain("permissions changed since the review opened")
-    expect(mgmtApplyKithmootPermissions).not.toHaveBeenCalled()
+    expect(mgmtApplyPresetPermissions).not.toHaveBeenCalled()
+  })
+})
+
+describe('AppsPanel V4V preset review', () => {
+  it('reviews V4V listener with its heading, note and final kinds', async () => {
+    await openReview(strictSignedSlot(), 'v4v-listener')
+    expect(screen.getByText(/Add V4V listener to/)).toBeTruthy()
+    expect(screen.getByText(/zap requests, live chat, playlist notes/)).toBeTruthy()
+    expect(screen.getByText(/account-wide and not restricted to V4V/)).toBeTruthy()
+    expect(screen.getByText('Final event kinds:')).toBeTruthy()
+    expect(screen.queryByText(/device credentials including person scope/)).toBeNull()
+  })
+
+  it('confirm applies the chosen V4V preset', async () => {
+    await openReview(strictSignedSlot(), 'v4v-listener')
+    await fireEvent.click(screen.getByText('Confirm'))
+    await waitFor(() => expect(mgmtApplyPresetPermissions).toHaveBeenCalledTimes(1))
+    expect(mgmtApplyPresetPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ preset: expect.objectContaining({ id: 'v4v-listener' }) }),
+    )
+    await waitFor(() =>
+      expect(screen.getByText('V4V listener enabled. Existing permissions were kept.')).toBeTruthy(),
+    )
+  })
+
+  it('V4V artist warns about money terms', async () => {
+    await openReview(strictSignedSlot(), 'v4v-artist')
+    expect(screen.getByText(/Add V4V artist to/)).toBeTruthy()
+    expect(screen.getByText(/set or move money terms/)).toBeTruthy()
+  })
+
+  it('Sign in only says it adds the sign-in proof and nothing else', async () => {
+    await openReview(strictSignedSlot(), 'sign-in')
+    expect(screen.getByText(/Add Sign in only to/)).toBeTruthy()
+    expect(screen.getByText(/adds the account sign-in proof \(kind 21236\) and nothing else/)).toBeTruthy()
+  })
+
+  it('keeps the manual-signing line for a V4V preset', async () => {
+    await openReview(strictSignedSlot({ auto_approve: false }), 'v4v-artist')
+    expect(
+      screen.getByText('Manual signing is kept: each signature still needs a press of the button on the device.'),
+    ).toBeTruthy()
+  })
+
+  it('disables a preset already covered, with its reason, while others stay available', async () => {
+    device.masters = [MASTERS[0]!]
+    device.slots = [strictSignedSlot({ allowed_kinds: [21236] }) as never]
+    render(AppsPanel)
+    await choosePreset('sign-in')
+    expect((screen.getByText('Add preset') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('Sign in only already enabled')).toBeTruthy()
+    const opts = Array.from((screen.getByLabelText('Preset to add') as HTMLSelectElement).options)
+    expect(opts.find((o) => o.value === 'sign-in')!.disabled).toBe(true)
+    expect(opts.find((o) => o.value === 'v4v-listener')!.disabled).toBe(false)
+  })
+
+  it('disables every preset with the signing reason when signing is not approved', async () => {
+    device.masters = [MASTERS[0]!]
+    device.slots = [strictSignedSlot({ signing_approved: false }) as never]
+    render(AppsPanel)
+    expect((screen.getByText('Add preset') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('Signing approval needed first')).toBeTruthy()
   })
 })
