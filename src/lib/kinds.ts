@@ -13,6 +13,10 @@ export const COMMON_KINDS: KindInfo[] = [
   { kind: 0,     label: 'Profile',      risk: 'high',   category: 'identity' },
   { kind: 3,     label: 'Contacts',     risk: 'high',   category: 'identity' },
   { kind: 20460, label: 'KithMoot Device Credential', risk: 'high', category: 'identity' },
+  // ForgeSworn sign-in (signet-login): proves the account to a site. V4V,
+  // KithMoot and every other Signet-backed sign-in use it.
+  { kind: 21236, label: 'Account Sign-in Proof', risk: 'medium', category: 'identity' },
+  { kind: 21350, label: 'KithMoot Device Revocation', risk: 'high', category: 'identity' },
   { kind: 10002, label: 'Relay List',   risk: 'high',   category: 'relay' },
 
   // Social -- medium risk
@@ -21,9 +25,15 @@ export const COMMON_KINDS: KindInfo[] = [
   { kind: 7,     label: 'Reaction',     risk: 'low',    category: 'social' },
   { kind: 5,     label: 'Delete',       risk: 'medium', category: 'social' },
   { kind: 30023, label: 'Article',      risk: 'medium', category: 'social' },
+  { kind: 1311,  label: 'Live Chat',    risk: 'low',    category: 'social' },
+  { kind: 30315, label: 'Music Status', risk: 'low',    category: 'social' },
 
   // App-local state -- common Nostr clients use this for settings/feed sync.
   { kind: 30078, label: 'App Data',     risk: 'medium', category: 'app' },
+  { kind: 30003, label: 'Bookmark Sets', risk: 'low',   category: 'app' },
+  // V4V: a listener proves ownership of purchases to read their library.
+  { kind: 27201, label: 'V4V Library Auth', risk: 'low', category: 'app' },
+  { kind: 27541, label: 'KithMoot Group Grant', risk: 'medium', category: 'app' },
 
   // Encrypted messages
   { kind: 4,     label: 'DM (NIP-04)',  risk: 'medium', category: 'crypto' },
@@ -37,6 +47,10 @@ export const COMMON_KINDS: KindInfo[] = [
   // 27117 authorises a paywall key deposit / re-price -- it sets money terms
   // for a release, so it is high risk despite never being published.
   { kind: 27117, label: 'Gated Deposit Auth', risk: 'high',   category: 'payment' },
+  // 27118 releases a gated key to a public source and 27202 reads and settles
+  // an artist's sales, so both set or move money terms.
+  { kind: 27118, label: 'Gated Ungate Auth',  risk: 'high',   category: 'payment' },
+  { kind: 27202, label: 'V4V Sales Auth',     risk: 'high',   category: 'payment' },
   { kind: 30808, label: 'Gated Content',      risk: 'medium', category: 'payment' },
 
   // Auth
@@ -72,6 +86,17 @@ const ALL_LABELS: Record<number, string> = {
   20460: 'KithMoot Device Credential', 21236: 'Account Sign-in Proof',
   23195: 'Wallet Response', 24133: 'NIP-46', 27117: 'Gated Deposit Auth',
   27235: 'HTTP Auth',
+  // ForgeSworn kinds: V4V, KithMoot and relayswarm. Named here so a pairing's
+  // permissions never read as "Unknown kind N" in the Apps panel.
+  1464: 'KithMoot Assignment', 21350: 'KithMoot Device Revocation',
+  24170: 'Swarm Presence', 24171: 'Swarm Signal', 24172: 'Swarm Ticket',
+  24173: 'Swarm Commitment Delegation', 24174: 'Swarm Commitment Revocation',
+  24644: 'KithMoot Private Migration', 24645: 'KithMoot Migration Reply',
+  27118: 'Gated Ungate Auth', 27119: 'Artist Hold Invoice Quote',
+  27120: 'Artist Hold Invoice Receipt', 27201: 'V4V Library Auth',
+  27202: 'V4V Sales Auth', 27203: 'Portable Entitlement Receipt',
+  27541: 'KithMoot Group Grant', 30315: 'Music Status',
+  31478: 'KithMoot Call Relay Advert',
   30000: 'Follow Sets', 30001: 'Bookmarks', 30002: 'Relay Sets',
   30003: 'Bookmark Sets', 30007: 'Kind Mute Sets',
   30008: 'Profile Badges', 30009: 'Badge Definition',
