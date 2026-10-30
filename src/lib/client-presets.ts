@@ -11,7 +11,21 @@
 import { CONNECT_METHODS, SIGNING_METHODS, exactClientPolicy } from './client-policy.js'
 import type { ExactClientPolicy } from './types.js'
 
-export type PresetId = 'posting' | 'everything' | 'messaging' | 'kithmoot-private' | 'custom'
+export type PresetId =
+  | 'posting' | 'everything' | 'messaging'
+  | 'sign-in' | 'v4v-listener' | 'v4v-artist' | 'kithmoot-private'
+  | 'custom'
+
+/** What a V4V listener asks their signer for: sign-in, tips, live chat,
+ *  playlists and their deletion, the library set, listening status and the
+ *  encrypted entitlement list (30078). Unlocking paid releases and reading
+ *  that list need NIP-44 through the signer as well. */
+export const V4V_LISTENER_KINDS: readonly number[] = [1, 5, 1311, 9734, 21236, 27201, 30003, 30078, 30315]
+
+/** The artist's additions: deposit and ungate authorisations set a release's
+ *  money terms, the gated release itself, and the sales authorisation that
+ *  reads and settles what was sold. */
+export const V4V_ARTIST_KINDS: readonly number[] = [27117, 27118, 27202, 30808]
 
 export interface PermissionPreset {
   id: PresetId
@@ -50,6 +64,30 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     // deliberately absent: NIP-17 message rumors are unsigned.
     kinds: [4, 13, 1059, 20460],
     methods: [...CONNECT_METHODS, 'sign_event'],
+  },
+  {
+    id: 'sign-in',
+    label: 'Sign in only',
+    description:
+      'Prove who you are to a site that signs in with Signet, such as V4V or KithMoot. Nothing else is signed without a press on the device.',
+    kinds: [21236],
+    methods: ['get_public_key', 'sign_event'],
+  },
+  {
+    id: 'v4v-listener',
+    label: 'V4V listener',
+    description:
+      'Sign in to V4V, tip, chat on a live stage, keep your library, playlists and listening status, and unlock what you have paid for. Account-wide: these kinds are not restricted to V4V.',
+    kinds: [...V4V_LISTENER_KINDS],
+    methods: ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt'],
+  },
+  {
+    id: 'v4v-artist',
+    label: 'V4V artist',
+    description:
+      'What a listener signs, plus publishing gated releases, setting their price and deposit terms, and reading and settling your sales. Sets money terms, so pair only a device you control.',
+    kinds: [...V4V_LISTENER_KINDS, ...V4V_ARTIST_KINDS].sort((a, b) => a - b),
+    methods: ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt'],
   },
   {
     id: 'kithmoot-private',

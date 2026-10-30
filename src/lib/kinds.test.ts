@@ -73,3 +73,22 @@ describe('COMMON_KINDS data integrity', () => {
     }
   })
 })
+
+// ForgeSworn's own kinds: the ones a person may want to control sit in the
+// picker; the rest are at least named, so no pairing shows "Unknown kind N".
+describe('ForgeSworn kinds', () => {
+  it('offers the ones a person may want to control in the picker', () => {
+    for (const kind of [21236, 1311, 30315, 30003, 27201, 27117, 27118, 27202, 30808, 20460, 21350, 27541]) {
+      expect(kindInfo(kind), `kind ${kind}`).toBeDefined()
+    }
+    expect(kindInfo(21236)).toMatchObject({ label: 'Account Sign-in Proof', category: 'identity' })
+    // Setting or moving money terms is high risk, as the catalogue already says of 27117.
+    for (const kind of [27117, 27118, 27202]) expect(kindInfo(kind)?.risk).toBe('high')
+  })
+
+  it('names the ones that only ever appear on a pairing or a card', () => {
+    for (const kind of [1464, 24170, 24171, 24172, 24173, 24174, 24644, 24645, 27119, 27120, 27203, 31478]) {
+      expect(kindLabel(kind), `kind ${kind}`).not.toMatch(/^Unknown kind/)
+    }
+  })
+})

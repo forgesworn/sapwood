@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
-  PERMISSION_PRESETS, presetById, resolveKinds, resolvePolicy, isRestricted, type PresetId,
+  PERMISSION_PRESETS, V4V_ARTIST_KINDS, V4V_LISTENER_KINDS,
+  presetById, resolveKinds, resolvePolicy, isRestricted, type PresetId,
 } from './client-presets.js'
+import { kindLabel } from './kinds.js'
 
 describe('permission presets', () => {
   it('exposes the expected presets in order', () => {
     expect(PERMISSION_PRESETS.map((p) => p.id)).toEqual([
-      'posting', 'everything', 'messaging', 'kithmoot-private', 'custom',
+      'posting', 'everything', 'messaging',
+      'sign-in', 'v4v-listener', 'v4v-artist', 'kithmoot-private',
+      'custom',
     ])
   })
 
@@ -102,5 +106,63 @@ describe('isRestricted', () => {
   it('reflects whether custom has any kinds', () => {
     expect(isRestricted('custom', [])).toBe(false)
     expect(isRestricted('custom', [1])).toBe(true)
+  })
+})
+
+// ForgeSworn's own apps get presets that name exactly what they ask a signer
+// for, so a pairing never needs "Everything" to sign in silently, and never a
+// press per sign-in because the kind was missing from a narrower preset.
+describe('ForgeSworn app presets', () => {
+  it('sign-in grants only the account sign-in proof, with no encryption methods', () => {
+    expect(resolvePolicy('sign-in')).toEqual({
+      allowed_methods: ['get_public_key', 'sign_event'],
+      allowed_kinds: [21236],
+      auto_approve: true,
+    })
+    expect(isRestricted('sign-in')).toBe(true)
+  })
+
+  it('v4v-listener covers sign-in, tips, live chat, playlists, library and listening status', () => {
+    const kinds = resolveKinds('v4v-listener')!
+    for (const k of [21236, 9734, 1311, 1, 5, 30003, 30078, 30315, 27201]) expect(kinds).toContain(k)
+    expect(kinds).toEqual([...kinds].sort((a, b) => a - b))
+    // A listener never sets a release's money terms or reads an artist's sales.
+    for (const k of [27117, 27118, 27202, 30808]) expect(kinds).not.toContain(k)
+    // Profile, contacts and relay list stay out, as in every narrow preset.
+    for (const k of [0, 3, 10002]) expect(kinds).not.toContain(k)
+  })
+
+  it('v4v-listener needs NIP-44 through the signer to unlock paid releases and read the entitlement list', () => {
+    const policy = resolvePolicy('v4v-listener')
+    for (const m of ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt']) {
+      expect(policy.allowed_methods).toContain(m)
+    }
+    expect(policy.allowed_methods).not.toContain('nip04_decrypt')
+  })
+
+  it('v4v-artist is the listener set plus exactly the four artist kinds', () => {
+    const listener = resolveKinds('v4v-listener')!
+    const artist = resolveKinds('v4v-artist')!
+    expect(artist).toEqual([...listener, ...V4V_ARTIST_KINDS].sort((a, b) => a - b))
+    expect(V4V_ARTIST_KINDS).toEqual([27117, 27118, 27202, 30808])
+    expect(resolvePolicy('v4v-artist').allowed_methods).toEqual(resolvePolicy('v4v-listener').allowed_methods)
+  })
+
+  it('the exported V4V kind lists are what the presets install', () => {
+    expect(resolveKinds('v4v-listener')).toEqual([...V4V_LISTENER_KINDS])
+  })
+
+  it('every preset kind has a catalogue name, so a pairing review never shows an unknown kind', () => {
+    for (const preset of PERMISSION_PRESETS) {
+      for (const kind of preset.kinds ?? []) {
+        expect(kindLabel(kind), `preset ${preset.id} kind ${kind}`).not.toMatch(/^Unknown kind/)
+      }
+    }
+  })
+
+  it('every preset stays inside the signer\'s 64-kind policy limit', () => {
+    for (const preset of PERMISSION_PRESETS) {
+      expect((preset.kinds ?? []).length).toBeLessThanOrEqual(64)
+    }
   })
 })
