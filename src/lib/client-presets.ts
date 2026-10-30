@@ -85,7 +85,7 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     id: 'v4v-artist',
     label: 'V4V artist',
     description:
-      'Everything a listener signs, plus publishing gated releases, setting their price and deposit terms, and reading and settling your sales. Sets money terms, so pair only a device you control.',
+      'What a listener signs, plus publishing gated releases, setting their price and deposit terms, and reading and settling your sales. Sets money terms, so pair only a device you control.',
     kinds: [...V4V_LISTENER_KINDS, ...V4V_ARTIST_KINDS].sort((a, b) => a - b),
     methods: ['get_public_key', 'sign_event', 'nip44_encrypt', 'nip44_decrypt'],
   },
