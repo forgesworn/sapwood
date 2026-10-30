@@ -7,7 +7,7 @@
   import {
     device, refreshSlots, httpTransport,
     mgmtCreateClient, mgmtApproveSigning, mgmtRevokeClient, mgmtUpdateClient,
-    mgmtCanApproveSigning, mgmtClientUri, mgmtApplyKithmootPermissions, mgmtWithdrawConsent,
+    mgmtCanApproveSigning, mgmtClientUri, mgmtApplyPresetPermissions, mgmtWithdrawConsent,
     mgmtSetAwayApproval,
   } from '../lib/device.svelte.js'
   import { kindLabelPlain as kindLabel } from '../lib/kinds.js'
@@ -24,10 +24,12 @@
   import { bunkerHasRelay } from '../lib/bunker.js'
   import { exactPolicyFromSlot, fullClientPolicy } from '../lib/client-policy.js'
   import {
-    kithmootUpgradeBlockedReason,
-    kithmootPermissionChanges,
+    upgradeBlockedReason,
+    permissionChanges,
+    ADDITIVE_PRESETS,
     permissionSlotUnchanged,
-    type KithmootPermissionReview,
+    type PresetPermissionReview,
+    type AdditivePermissionPreset,
   } from '../lib/client-permission-upgrade.js'
   import { nip19 } from 'nostr-tools'
 
@@ -72,21 +74,44 @@
   let uriError = $state<string | null>(null)
   let replacingSlot = $state<number | null>(null)
 
-  // --- KithMoot private-rooms permission review (USB/relay only) ---
-  let review = $state<KithmootPermissionReview | null>(null)
+  // --- Additive app-preset permission review (USB/relay only) ---
+  let review = $state<PresetPermissionReview | null>(null)
   let reviewBusy = $state(false)
   let reviewError = $state<string | null>(null)
   let reviewStatus = $state<string | null>(null)
   let reviewStatusSlot = $state<number | null>(null)
 
-  function kithmootBlockedReason(slot: ConnectSlot): string | null {
+  // The preset chosen per app (by slot index). Unset falls back to the first
+  // preset that can be added, or the first one when none can.
+  let presetChoice = $state<Record<number, string>>({})
+
+  function blockedReason(slot: ConnectSlot, preset: AdditivePermissionPreset): string | null {
     if (overBridge) return null
-    return kithmootUpgradeBlockedReason(slot)
+    return upgradeBlockedReason(slot, preset)
   }
 
-  function openKithmootReview(slot: ConnectSlot) {
+  function chosenPreset(slot: ConnectSlot): AdditivePermissionPreset {
+    const picked = ADDITIVE_PRESETS.find((p) => p.id === presetChoice[slot.slot_index])
+    if (picked) return picked
+    return ADDITIVE_PRESETS.find((p) => !blockedReason(slot, p)) ?? ADDITIVE_PRESETS[0]!
+  }
+
+  function presetNote(preset: AdditivePermissionPreset): string {
+    switch (preset.id) {
+      case 'sign-in':
+        return 'This adds the account sign-in proof (kind 21236) and nothing else.'
+      case 'v4v-listener':
+        return 'This adds sign-in proofs, zap requests, live chat, playlist notes and their deletion, the library set, listening status and the encrypted entitlement list. These permissions are account-wide and not restricted to V4V: the shared Bark, Cambium and My Signet pairing applies to every app it allows.'
+      case 'v4v-artist':
+        return 'This adds everything a V4V listener has, plus the gated release and the deposit, ungate and sales authorisations. Those set or move money terms, so add them only for an app on a device you control. These permissions are account-wide and not restricted to V4V.'
+      default:
+        return 'This adds account sign-in proofs (kind 21236), device credentials including person scope (kind 20460), and encrypted account settings including bookmarks and read positions (kind 30078). Whole-kind and NIP-44 permissions are not limited to KithMoot tags, rooms or recipients: the shared Bark, Cambium and My Signet pairing applies to every app it allows.'
+    }
+  }
+
+  function openPresetReview(slot: ConnectSlot, preset: AdditivePermissionPreset) {
     if (reviewBusy) return
-    const reason = kithmootUpgradeBlockedReason(slot)
+    const reason = upgradeBlockedReason(slot, preset)
     if (reason) return
     reviewError = null
     reviewStatus = null
@@ -98,16 +123,17 @@
       masterSlot: device.selectedSlot,
       connectionGeneration: device.connectionGeneration,
       mode: device.mode === 'serial' ? 'serial' : 'relay',
+      preset,
     }
   }
 
-  function closeKithmootReview() {
+  function closePresetReview() {
     if (reviewBusy) return
     review = null
     reviewError = null
   }
 
-  async function confirmKithmootReview() {
+  async function confirmPresetReview() {
     const r = review
     if (!r || reviewBusy) return
     // Abort a stale review before calling: it must still match the identity,
@@ -129,14 +155,14 @@
     reviewBusy = true
     reviewError = null
     try {
-      await mgmtApplyKithmootPermissions(r)
+      await mgmtApplyPresetPermissions(r)
       // The backend verifies the pinned context and applies the change before
       // returning, so the call resolving is the success signal. No local
       // refresh: a refresh failure must not turn a successful write into a
       // contradictory UI, and the device table is authoritative on next read.
       review = null
       reviewError = null
-      reviewStatus = 'KithMoot rooms enabled. Existing permissions were kept.'
+      reviewStatus = `${r.preset.name} added. Existing permissions were kept.`
       reviewStatusSlot = r.slot.slot_index
     } catch (e) {
       reviewError = e instanceof Error ? e.message : 'Could not apply the permission change on the device.'
@@ -635,9 +661,9 @@
           {#if overUsbRelay}
             <div class="km-block">
               {#if review && review.masterSlot === device.selectedSlot && review.slot.slot_index === slot.slot_index}
-                {@const changes = kithmootPermissionChanges(review.slot)}
+                {@const changes = permissionChanges(review.slot, review.preset)}
                 <div class="km-review">
-                  <h4>Add KithMoot private rooms to “{review.slot.label || `app ${review.slot.slot_index}`}”?</h4>
+                  <h4>Add {review.preset.label} to “{review.slot.label || `app ${review.slot.slot_index}`}”?</h4>
                   <p class="km-note">Final signing methods:</p>
                   <ul class="km-list">
                     {#each changes.allowed_methods as m (m)}
@@ -654,28 +680,41 @@
                       {/each}
                     </ul>
                   {/if}
-                  <p class="km-note">This adds account sign-in proofs (kind 21236), device credentials including person scope (kind 20460), and encrypted account settings including bookmarks and read positions (kind 30078). Whole-kind and NIP-44 permissions are not limited to KithMoot tags, rooms or recipients: the shared Bark, Cambium and My Signet pairing applies to every app it allows.</p>
-                  <p class="km-note">Existing permissions, key and persona approvals and the manual-signing setting are kept. This adds no public posting, profile or deletion powers; any broader extras shown above remain.</p>
+                  <p class="km-note">{presetNote(review.preset)}</p>
+                  <p class="km-note">Existing permissions, key and persona approvals and the manual-signing setting are kept. {review.preset.id === 'kithmoot-private' ? 'This adds no public posting, profile or deletion powers; any broader extras shown above remain.' : 'Any broader permissions shown above remain.'}</p>
                   {#if review.slot.auto_approve === false}
                     <p class="km-note" role="status">Manual signing is kept: each signature still needs a press of the button on the device.</p>
                   {/if}
                   {#if reviewError}<p class="error-text" role="alert">{reviewError}</p>{/if}
                   <div class="km-actions">
-                    <button class="btn btn-primary btn-sm" disabled={reviewBusy} onclick={confirmKithmootReview}>
+                    <button class="btn btn-primary btn-sm" disabled={reviewBusy} onclick={confirmPresetReview}>
                       {reviewBusy ? 'Applying…' : 'Confirm'}
                     </button>
-                    <button class="btn btn-secondary btn-sm" disabled={reviewBusy} onclick={closeKithmootReview}>Cancel</button>
+                    <button class="btn btn-secondary btn-sm" disabled={reviewBusy} onclick={closePresetReview}>Cancel</button>
                   </div>
                 </div>
               {:else}
+                {@const preset = chosenPreset(slot)}
+                {@const reason = blockedReason(slot, preset)}
                 <div class="km-actions">
+                  <select
+                    class="field-input km-pick"
+                    aria-label="Preset to add"
+                    disabled={reviewBusy}
+                    value={preset.id}
+                    onchange={(e) => { presetChoice[slot.slot_index] = (e.target as HTMLSelectElement).value }}
+                  >
+                    {#each ADDITIVE_PRESETS as p (p.id)}
+                      <option value={p.id} disabled={!!blockedReason(slot, p)}>{p.label}</option>
+                    {/each}
+                  </select>
                   <button
                     class="btn btn-secondary btn-sm"
-                    disabled={!!kithmootBlockedReason(slot) || reviewBusy}
-                    onclick={() => openKithmootReview(slot)
-                  }>Add KithMoot rooms</button>
-                  {#if kithmootBlockedReason(slot)}
-                    <span class="hint-sm" role="status">{kithmootBlockedReason(slot)}</span>
+                    disabled={!!reason || reviewBusy}
+                    onclick={() => openPresetReview(slot, preset)}
+                  >Add preset</button>
+                  {#if reason}
+                    <span class="hint-sm" role="status">{reason}</span>
                   {/if}
                 </div>
                 {#if reviewStatus && reviewStatusSlot === slot.slot_index}
@@ -684,7 +723,7 @@
               {/if}
             </div>
           {:else}
-            <p class="hint-sm km-guidance" role="status">Adding KithMoot rooms needs a USB or WiFi connection. Connect over USB or WiFi to change this app's permissions.</p>
+            <p class="hint-sm km-guidance" role="status">Adding a preset needs a USB or WiFi connection. Connect over USB or WiFi to change this app's permissions.</p>
           {/if}
 
           {#if identityTags(slot).length > 0}
@@ -789,6 +828,7 @@
   }
   .km-tech { font-size: 0.72rem; color: var(--text-muted); margin-left: 0.4rem; }
   .km-note { margin: 0; font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; }
+  .km-pick { width: auto; max-width: 100%; }
   .km-guidance { margin: 0.4rem 0 0; }
   .km-ok { color: var(--green); margin: 0.4rem 0 0; }
   @media (max-width: 640px) {

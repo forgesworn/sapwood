@@ -1,5 +1,6 @@
 import { consentScope } from './client-consent.js'
-// Pure review logic for the additive KithMoot private-rooms permission upgrade.
+// Pure review logic for the additive app-preset permission upgrade (sign in only,
+// V4V listener, V4V artist, KithMoot private rooms).
 //
 // This module holds no reactive state, performs no I/O, and mutates nothing.
 // It answers three questions for the UI: is the upgrade available, what are the
@@ -7,28 +8,58 @@ import { consentScope } from './client-consent.js'
 // was opened. The arrays are never narrowed or filtered; unknown methods the
 // slot already carries are preserved so an unrelated permission is not lost.
 
+import { presetById, type PresetId } from './client-presets.js'
 import type { ConnectSlot } from './types.js'
 import type { ExactClientPolicy } from './types.js'
 
-export const KITHMOOT_PRIVATE_KINDS: readonly number[] = [20460, 21236, 30078]
-export const KITHMOOT_PRIVATE_METHODS: readonly string[] = [
-  'get_public_key',
-  'sign_event',
-  'nip44_encrypt',
-  'nip44_decrypt',
+/**
+ * An additive preset: kinds and methods unioned into an existing pairing,
+ * never narrowed. `label` is the full preset name (review heading, errors);
+ * `name` is the short noun used in status and blocked copy.
+ */
+export interface AdditivePermissionPreset {
+  id: PresetId
+  label: string
+  name: string
+  kinds: readonly number[]
+  methods: readonly string[]
+}
+
+function fromPreset(id: PresetId, name: string): AdditivePermissionPreset {
+  const p = presetById(id)
+  if (p.kinds === null) throw new Error(`Preset ${id} is not additive`)
+  return { id, label: p.label, name, kinds: p.kinds, methods: p.methods }
+}
+
+export const SIGN_IN_PRESET = fromPreset('sign-in', 'Sign in only')
+export const V4V_LISTENER_PRESET = fromPreset('v4v-listener', 'V4V listener')
+export const V4V_ARTIST_PRESET = fromPreset('v4v-artist', 'V4V artist')
+export const KITHMOOT_PRIVATE_PRESET = fromPreset('kithmoot-private', 'KithMoot rooms')
+
+/** The presets offered for an existing pairing, in display order. */
+export const ADDITIVE_PRESETS: readonly AdditivePermissionPreset[] = [
+  SIGN_IN_PRESET,
+  V4V_LISTENER_PRESET,
+  V4V_ARTIST_PRESET,
+  KITHMOOT_PRIVATE_PRESET,
 ]
+
+export const KITHMOOT_PRIVATE_KINDS: readonly number[] = KITHMOOT_PRIVATE_PRESET.kinds
+export const KITHMOOT_PRIVATE_METHODS: readonly string[] = KITHMOOT_PRIVATE_PRESET.methods
 
 export type ConnectSlotMode = 'serial' | 'relay'
 
 /**
- * A pinned view of a slot captured when the review opened. The same shape is
- * recaptured from a fresh read at confirm; any difference aborts the action.
+ * A pinned view of a slot captured when the review opened, with the preset
+ * being added. The slot shape is recaptured from a fresh read at confirm; any
+ * difference aborts the action.
  */
-export interface KithmootPermissionReview {
+export interface PresetPermissionReview {
   slot: ConnectSlot
   masterSlot: number
   connectionGeneration: number
   mode: ConnectSlotMode
+  preset: AdditivePermissionPreset
 }
 
 function hasRetainedOrCurrentKey(slot: ConnectSlot): boolean {
@@ -37,17 +68,17 @@ function hasRetainedOrCurrentKey(slot: ConnectSlot): boolean {
 }
 
 /**
- * Reason the additive KithMoot upgrade cannot be offered for this slot, or null
- * when it is available. Already enabled is reported as a blocked reason so the
- * caller can show the correct disabled copy.
+ * Reason the additive upgrade cannot be offered for this slot, or null when it
+ * is available. Already enabled is reported as a blocked reason so the caller
+ * can show the correct disabled copy.
  */
-export function kithmootUpgradeBlockedReason(slot: ConnectSlot): string | null {
+export function upgradeBlockedReason(slot: ConnectSlot, preset: AdditivePermissionPreset): string | null {
   if (slot.signing_approved !== true) return 'Signing approval needed first'
   if (!Array.isArray(slot.allowed_methods) || !slot.allowed_methods.includes('sign_event')) {
     return 'App must already allow sign_event'
   }
   if (!hasRetainedOrCurrentKey(slot)) return 'No authorised key available'
-  if (kithmootAlreadyEnabled(slot)) return 'KithMoot rooms already enabled'
+  if (presetAlreadyEnabled(slot, preset)) return `${preset.name} already enabled`
   return null
 }
 
@@ -55,12 +86,12 @@ export function kithmootUpgradeBlockedReason(slot: ConnectSlot): string | null {
  * True when every preset method is already present and the slot is either
  * unrestricted (empty allowed_kinds) or already contains every preset kind.
  */
-export function kithmootAlreadyEnabled(slot: ConnectSlot): boolean {
+export function presetAlreadyEnabled(slot: ConnectSlot, preset: AdditivePermissionPreset): boolean {
   const methods = Array.isArray(slot.allowed_methods) ? slot.allowed_methods : []
-  if (!KITHMOOT_PRIVATE_METHODS.every((m) => methods.includes(m))) return false
+  if (!preset.methods.every((m) => methods.includes(m))) return false
   const kinds = Array.isArray(slot.allowed_kinds) ? slot.allowed_kinds : []
   if (kinds.length === 0) return true
-  return KITHMOOT_PRIVATE_KINDS.every((k) => kinds.includes(k))
+  return preset.kinds.every((k) => kinds.includes(k))
 }
 
 /**
@@ -72,8 +103,9 @@ export function kithmootAlreadyEnabled(slot: ConnectSlot): boolean {
  * An empty `allowed_kinds` means unrestricted for sign_event: it stays empty
  * rather than being rewritten to the preset kinds.
  */
-export function kithmootPermissionChanges(
+export function permissionChanges(
   slot: ConnectSlot,
+  preset: AdditivePermissionPreset,
 ): Pick<ExactClientPolicy, 'allowed_methods' | 'allowed_kinds'> {
   if (!Array.isArray(slot.allowed_methods)) {
     throw new Error('Slot allowed_methods is missing or malformed; refusing to widen permissions.')
@@ -92,17 +124,24 @@ export function kithmootPermissionChanges(
     }
   }
 
-  const existingMethods = slot.allowed_methods
-  const finalMethods = [...new Set([...existingMethods, ...KITHMOOT_PRIVATE_METHODS])]
-
+  const finalMethods = [...new Set([...slot.allowed_methods, ...preset.methods])]
   const existingKinds = slot.allowed_kinds
   const finalKinds =
     existingKinds.length === 0
       ? []
-      : [...new Set([...existingKinds, ...KITHMOOT_PRIVATE_KINDS])].sort((a, b) => a - b)
+      : [...new Set([...existingKinds, ...preset.kinds])].sort((a, b) => a - b)
 
   return { allowed_methods: finalMethods, allowed_kinds: finalKinds }
 }
+
+// KithMoot-named wrappers kept for existing callers.
+export type KithmootPermissionReview = PresetPermissionReview
+export const kithmootUpgradeBlockedReason = (slot: ConnectSlot) =>
+  upgradeBlockedReason(slot, KITHMOOT_PRIVATE_PRESET)
+export const kithmootAlreadyEnabled = (slot: ConnectSlot) =>
+  presetAlreadyEnabled(slot, KITHMOOT_PRIVATE_PRESET)
+export const kithmootPermissionChanges = (slot: ConnectSlot) =>
+  permissionChanges(slot, KITHMOOT_PRIVATE_PRESET)
 
 function normalisedSet(values: readonly string[] | readonly number[]): string {
   return [...new Set(values.map((v) => String(v)))].sort().join('\u0000')
