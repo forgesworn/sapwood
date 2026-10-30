@@ -181,7 +181,7 @@ describe('AppsPanel KithMoot permission review', () => {
     expect(mgmtRevokeClient).not.toHaveBeenCalled()
     expect(refreshSlots).toHaveBeenCalledTimes(initialRefreshCalls)
     await waitFor(() =>
-      expect(screen.getByText('KithMoot rooms enabled. Existing permissions were kept.')).toBeTruthy(),
+      expect(screen.getByText('KithMoot rooms added. Existing permissions were kept.')).toBeTruthy(),
     )
   })
 
@@ -240,7 +240,7 @@ describe('AppsPanel KithMoot permission review', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('device refused')
-    expect(screen.queryByText('KithMoot rooms enabled. Existing permissions were kept.')).toBeNull()
+    expect(screen.queryByText('KithMoot rooms added. Existing permissions were kept.')).toBeNull()
   })
 
   it('aborts a review whose connection generation changed', async () => {
@@ -282,7 +282,7 @@ describe('AppsPanel V4V preset review', () => {
       expect.objectContaining({ preset: expect.objectContaining({ id: 'v4v-listener' }) }),
     )
     await waitFor(() =>
-      expect(screen.getByText('V4V listener enabled. Existing permissions were kept.')).toBeTruthy(),
+      expect(screen.getByText('V4V listener added. Existing permissions were kept.')).toBeTruthy(),
     )
   })
 

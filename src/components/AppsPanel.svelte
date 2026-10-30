@@ -162,7 +162,7 @@
       // contradictory UI, and the device table is authoritative on next read.
       review = null
       reviewError = null
-      reviewStatus = `${r.preset.name} enabled. Existing permissions were kept.`
+      reviewStatus = `${r.preset.name} added. Existing permissions were kept.`
       reviewStatusSlot = r.slot.slot_index
     } catch (e) {
       reviewError = e instanceof Error ? e.message : 'Could not apply the permission change on the device.'

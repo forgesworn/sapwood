@@ -5,8 +5,8 @@ in **Connect an app**. For an existing pairing, open the Apps panel, pick the
 preset under **Add preset**, review the complete permissions it will have and
 confirm. The preset is added to what the app already has; nothing is removed.
 **Sign in only** is the smallest one a pairing needs before V4V's sign-in stops
-asking for a press. USB changes also need the signer's physical confirmation. Existing pairings are never
-expanded simply because Sapwood or V4V updates.
+asking for a press. USB changes also need the signer's physical confirmation.
+Existing pairings are never expanded simply because Sapwood or V4V updates.
 
 **Sign in only** grants kind 21236 and nothing else. It is the narrowest way
 to let a site that signs in with Signet, such as V4V or KithMoot, prove the
