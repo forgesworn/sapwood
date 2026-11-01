@@ -32,18 +32,24 @@ export type NetMode = 'wifi' | 'usb'
  *  default stays light and the editor offers the rest one tap away.
  *  relay.primal.net is included so a bunker link this signer hands out always
  *  names a relay the Primal client reaches, sparing a "no relays specified for
- *  this bunker" failure when someone logs in with Primal. */
+ *  this bunker" failure when someone logs in with Primal.
+ *  relay.damus.io is deliberately absent: it escalates per-address rate
+ *  limiting to an outright write ban ("banned: too many rate-limit
+ *  violations"; seen 8 and 30 October and 1 November 2026), which killed
+ *  sign-in on an address it had flagged until the caller changed network.
+ *  A signer whose bunker URI leads with damus fails exactly like the relay
+ *  being down for every client on that address. */
 export const DEFAULT_SIGNER_RELAYS: readonly string[] = [
   'wss://relay.trotters.cc',
   'wss://nos.lol',
-  'wss://relay.damus.io',
   'wss://relay.primal.net',
 ]
 
 /** Extra reliable relays offered as one-tap additions. nostr.wine is
  *  deliberately absent: paid, rejected our writes. relay.nostr.band and
  *  relay.ditto.pub were dropped after going dark (probed 2026-07-15:
- *  nostr.band unreachable, ditto.pub 502). */
+ *  nostr.band unreachable, ditto.pub 502). relay.damus.io is absent with
+ *  the defaults: it address-bans the traffic pattern (reason above). */
 export const SUGGESTED_SIGNER_RELAYS: readonly string[] = [
   ...DEFAULT_SIGNER_RELAYS,
   'wss://nostr.mom',
