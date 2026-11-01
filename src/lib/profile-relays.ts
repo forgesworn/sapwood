@@ -23,11 +23,12 @@ const PROJECT_RELAY = 'wss://relay.trotters.cc'
 // from any mainstream client still resolves — and gets mirrored home.
 // relay.nostr.band and relay.ditto.pub were dropped after going dark (probed
 // 2026-07-15: nostr.band unreachable, ditto.pub 502) — every lookup against
-// them cost a browser-side timeout.
+// them cost a browser-side timeout. relay.damus.io dropped 1 November 2026:
+// it escalates request traffic from one address to an outright ban, which
+// turns profile reads into timeouts on any address it has flagged.
 export const DEFAULT_PROFILE_RELAYS: ProfileRelay[] = [
   { url: PROJECT_RELAY, write: true },
   { url: 'wss://purplepag.es', write: false },
-  { url: 'wss://relay.damus.io', write: false },
   { url: 'wss://nos.lol', write: false },
   { url: 'wss://relay.primal.net', write: false },
   { url: 'wss://nostr.mom', write: false },
