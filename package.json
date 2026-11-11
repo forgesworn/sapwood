@@ -37,7 +37,7 @@
     "sync:firmware": "node scripts/sync-firmware.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@testing-library/svelte": "^5.4.2",
     "@tsconfig/svelte": "^5.0.0",
@@ -48,11 +48,11 @@
     "esbuild": "^0.28.2",
     "jsdom": "^30.1.3",
     "svelte": "^5.57.3",
-    "svelte-check": "^4.7.7",
+    "svelte-check": "^4.7.8",
     "typescript": "^5.7.0",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^5.1.0",
-    "ws": "^8.22.0"
+    "ws": "^8.22.2"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
