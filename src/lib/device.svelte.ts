@@ -28,7 +28,7 @@ import {
 import { dedupeIdentities } from './identity-key.js'
 import { bunkerUriWithEndpoint } from './bunker.js'
 import { dedupeBy } from './dedupe.js'
-import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
+import { loadAvatar, loadAvatarRungs, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
 import { PICTURE_LADDER, pickPictureStart, type PictureRung } from './nvs-room.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
@@ -595,24 +595,19 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
   const name = profileDisplayName(profile)
   if (!name) return null
 
-  const pictureFor = async (
-    size: number,
-    format: PictureRung['format'] = 'rgb565',
-  ): Promise<{ avatar: Avatar; picture: IdentityCardPicture }> => {
-    const kind: IdentityCardPicture = size === 64 ? (format === 'rgb332' ? 'full-fewer-colours' : 'full') : 'small'
-    try {
-      if (profile.picture) return { avatar: await loadAvatar(profile.picture, size, format), picture: kind }
-    } catch {
-      // image host refused — name + disc beats nothing
-    }
-    return { avatar: placeholderAvatar(name, size, format), picture: 'placeholder' }
-  }
-
   if (device.mode === 'relay') {
     // Relay pushes travel inside a NIP-44 event a classic ESP32 must parse while
     // its TLS session already occupies the heap — 48x48 halves the bytes end to
     // end (a 64x64 relay push OOM-rebooted a T-Display).
-    const { avatar, picture } = await pictureFor(48)
+    let avatar: Avatar
+    let picture: IdentityCardPicture = 'small'
+    try {
+      if (!profile.picture) throw new Error('no picture')
+      avatar = await loadAvatar(profile.picture, 48, 'rgb565')
+    } catch {
+      avatar = placeholderAvatar(name, 48, 'rgb565')
+      picture = 'placeholder'
+    }
     if (!relayTransport) return null
     await relayTransport.request(
       'set_identity_meta',
@@ -634,7 +629,18 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
   // reply and the frame would let the frame slip out of the window.
   // The ladder: 64x64 Rgb565, 64x64 RGB332 (fewer colours), 48x48 Rgb565, 48x48
   // RGB332. Released firmware answers RGB332 with a plain NACK, so it steps on.
-  const pictures = await Promise.all(PICTURE_LADDER.map((r) => pictureFor(r.side, r.format)))
+  const kindOf = (r: PictureRung): IdentityCardPicture =>
+    r.side === 64 ? (r.format === 'rgb332' ? 'full-fewer-colours' : 'full') : 'small'
+  let pictures: { avatar: Avatar; picture: IdentityCardPicture }[]
+  try {
+    // One fetch and decode serves every rung.
+    if (!profile.picture) throw new Error('no picture')
+    const avatars = await loadAvatarRungs(profile.picture, PICTURE_LADDER.map((r) => ({ side: r.side, format: r.format })))
+    pictures = avatars.map((avatar, i) => ({ avatar, picture: kindOf(PICTURE_LADDER[i]!) }))
+  } catch {
+    // image host refused: name + disc beats nothing
+    pictures = PICTURE_LADDER.map((r) => ({ avatar: placeholderAvatar(name, r.side, r.format), picture: 'placeholder' as const }))
+  }
   let lastErr: unknown = null
   let reopened = false
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -651,10 +657,10 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
       )
       if (ping.type === FrameType.NACK) throw new Error('device rejected the version query')
       const info = parseFirmwareInfo(ping.payload)
-      const choice = pickPictureStart({ free: info?.nvs_free_entries, total: info?.nvs_total_entries })
+      const start = pickPictureStart({ free: info?.nvs_free_entries, total: info?.nvs_total_entries })
       // Without stats, start at the top. With them, the estimate picks the
       // first rung that fits; a refusal after "fits" still steps down.
-      for (const entry of pictures.slice(choice.start)) {
+      for (const entry of pictures.slice(start)) {
         const frame = buildSetIdentityMeta(pubHex, name, entry.avatar)
         const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
         if (reply.type === FrameType.ACK) return { name, picture: entry.picture }

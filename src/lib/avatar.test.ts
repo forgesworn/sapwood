@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { rgb565, rgbaToRgb565BE, rgb332ToRgb565, rgbaToRgb332Dithered, buildSetIdentityMeta } from './avatar'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { loadAvatarRungs, rgb565, rgbaToRgb565BE, rgb332ToRgb565, rgbaToRgb332Dithered, buildSetIdentityMeta } from './avatar'
 import { FrameType, HEADER_SIZE } from './frame'
 
 describe('rgb565 packing', () => {
@@ -108,5 +108,40 @@ describe('rgbaToRgb332Dithered', () => {
     let sum = 0
     for (const b of out) sum += ((rgb332ToRgb565(b) >> 5) & 0x3f) * 255 / 63
     expect(Math.abs(sum / out.length - 100)).toBeLessThan(4)
+  })
+})
+
+describe('loadAvatarRungs', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  it('fetches and decodes once, draws once per side and closes the bitmap', async () => {
+    const close = vi.fn()
+    const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => new Blob() }))
+    const bitmapMock = vi.fn(async () => ({ width: 10, height: 10, close }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('createImageBitmap', bitmapMock)
+    const sides: number[] = []
+    vi.spyOn(document, 'createElement').mockImplementation(() => {
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          fillRect() {}, save() {}, beginPath() {}, arc() {}, clip() {}, drawImage() {}, restore() {},
+          getImageData: () => { sides.push(canvas.width); return { data: new Uint8ClampedArray(canvas.width * canvas.height * 4).fill(255) } },
+        }),
+      }
+      return canvas as unknown as HTMLCanvasElement
+    })
+    const out = await loadAvatarRungs('https://x/a.jpg', [
+      { side: 64, format: 'rgb565' }, { side: 64, format: 'rgb332' },
+      { side: 48, format: 'rgb565' }, { side: 48, format: 'rgb332' },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(bitmapMock).toHaveBeenCalledTimes(1)
+    expect(sides).toEqual([64, 48])
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(out.map((a) => [a.w, a.format, a.bytes.length])).toEqual([
+      [64, 'rgb565', 8192], [64, 'rgb332', 4096], [48, 'rgb565', 4608], [48, 'rgb332', 2304],
+    ])
   })
 })

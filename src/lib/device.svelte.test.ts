@@ -54,6 +54,9 @@ vi.mock('./profiles.js', async (orig) => {
 })
 vi.mock('./avatar.js', () => ({
   loadAvatar: loadAvatarMock,
+  // The real one fetches once for all rungs; here each rung goes through loadAvatarMock.
+  loadAvatarRungs: (url: string, rungs: { side: number; format: string }[]) =>
+    Promise.all(rungs.map((r) => loadAvatarMock(url, r.side, r.format))),
   placeholderAvatar: placeholderMock,
   buildSetIdentityMeta: buildMetaMock,
 }))
@@ -1309,16 +1312,23 @@ describe('syncIdentityMeta over USB', () => {
     expect(metaPushes()).toBe(1)
   })
 
-  it('starts at 64x64 RGB332 when only that fits', async () => {
+  it('tight storage: new firmware takes 64x64 RGB332 first and nothing else is sent', async () => {
     setup(fwWith({ nvs_free_entries: 340, nvs_total_entries: 756 }), [])
     expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full-fewer-colours' })
     expect(sizesSent()).toEqual(['64/rgb332'])
+    expect(metaPushes()).toBe(1)
   })
 
-  it('tries 48x48 Rgb565 when the estimate says nothing fits (the signer decides)', async () => {
-    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [])
+  it('tight storage: old firmware NACKs 64x64 RGB332, then takes 48x48 Rgb565', async () => {
+    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [NACK_EMPTY, ACK])
     expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
-    expect(sizesSent()).toEqual(['48/rgb565'])
+    expect(sizesSent()).toEqual(['64/rgb332', '48/rgb565'])
+  })
+
+  it('never starts below 64x64 RGB332, however full the storage', async () => {
+    setup(fwWith({ nvs_free_entries: 0, nvs_total_entries: 756 }), [])
+    await syncIdentityMeta()
+    expect(sizesSent()).toEqual(['64/rgb332'])
   })
 
   it('tries 64x64 when the firmware sends no stats', async () => {
@@ -1362,10 +1372,10 @@ describe('syncIdentityMeta over USB', () => {
   })
 
   it('says the signer has no room when every rung is refused, once each', async () => {
-    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [NACK_EMPTY, NACK_EMPTY])
+    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [NACK_EMPTY, NACK_EMPTY, NACK_EMPTY])
     await expect(syncIdentityMeta()).rejects.toThrow(/no room for the picture \(its storage is 74% full\)/)
-    expect(sizesSent()).toEqual(['48/rgb565', '48/rgb332'])
-    expect(metaPushes()).toBe(2)
+    expect(sizesSent()).toEqual(['64/rgb332', '48/rgb565', '48/rgb332'])
+    expect(metaPushes()).toBe(3)
   })
 
   it('omits the percentage when the signer did not report its storage', async () => {

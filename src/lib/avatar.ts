@@ -116,34 +116,57 @@ function packAvatar(rgba: Uint8ClampedArray, size: number, format: AvatarFormat)
  * to the fetch; hosts that refuse fall back to the placeholder upstream.
  */
 export async function loadAvatar(url: string, size = 64, format: AvatarFormat = 'rgb565'): Promise<Avatar> {
+  return (await loadAvatarRungs(url, [{ side: size, format }]))[0]!
+}
+
+/**
+ * As `loadAvatar`, for several pictures at once: the image is fetched and
+ * decoded a single time, then drawn once per side and packed once per format.
+ * Returns one Avatar per entry of `rungs`, in order.
+ */
+export async function loadAvatarRungs(
+  url: string,
+  rungs: readonly { side: number; format: AvatarFormat }[],
+): Promise<Avatar[]> {
   const resp = await fetch(url, { mode: 'cors', credentials: 'omit' })
   if (!resp.ok) throw new Error(`avatar image fetch failed: ${resp.status} ${url}`)
   const bitmap = await createImageBitmap(await resp.blob())
   try {
-    const canvas = document.createElement('canvas')
-    canvas.width = size
-    canvas.height = size
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('no 2d canvas context')
-
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, size, size)
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
-    ctx.clip()
-    // Cover-fit: scale so the image fills the square, centre-cropped.
-    const scale = Math.max(size / bitmap.width, size / bitmap.height)
-    const dw = bitmap.width * scale
-    const dh = bitmap.height * scale
-    ctx.drawImage(bitmap, (size - dw) / 2, (size - dh) / 2, dw, dh)
-    ctx.restore()
-
-    const { data } = ctx.getImageData(0, 0, size, size)
-    return packAvatar(data, size, format)
+    const pixels = new Map<number, Uint8ClampedArray>()
+    return rungs.map(({ side, format }) => {
+      let data = pixels.get(side)
+      if (!data) {
+        data = drawDisc(bitmap, side)
+        pixels.set(side, data)
+      }
+      return packAvatar(data, side, format)
+    })
   } finally {
     bitmap.close()
   }
+}
+
+/** Cover-fit `bitmap` into a `size`x`size` canvas, circular-crop on black, return RGBA pixels. */
+function drawDisc(bitmap: ImageBitmap, size: number): Uint8ClampedArray {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d canvas context')
+
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, size, size)
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
+  ctx.clip()
+  // Cover-fit: scale so the image fills the square, centre-cropped.
+  const scale = Math.max(size / bitmap.width, size / bitmap.height)
+  const dw = bitmap.width * scale
+  const dh = bitmap.height * scale
+  ctx.drawImage(bitmap, (size - dw) / 2, (size - dh) / 2, dw, dh)
+  ctx.restore()
+  return ctx.getImageData(0, 0, size, size).data
 }
 
 /** The firmware's Nostr-purple disc colour (palette.rs NOSTR, Rgb565 17/23/30).
