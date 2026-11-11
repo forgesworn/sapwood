@@ -65,6 +65,17 @@ describe('device labels', () => {
     expect(d.relays.length).toBeGreaterThan(0)
   })
 
+  it('keeps a saved device on its own relay when that relay is not a default', () => {
+    const own = 'wss://relay.example.org'
+    expect(DEFAULT_SIGNER_RELAYS).not.toContain(own)
+    rememberDevice(HEX_B, [own], 'signer')
+
+    rememberDevice(HEX_B, [])
+
+    const d = listKnownDevices().find((k) => k.pubHex === HEX_B)
+    expect(d?.relays).toEqual([own])
+  })
+
   it('merges relay updates instead of forgetting older relays', () => {
     rememberDevice(HEX_B, [
       'wss://relay.trotters.cc',
