@@ -1232,6 +1232,22 @@ describe('syncIdentityMeta over USB', () => {
     expect(sizesSent()).toEqual([64, 48])
   })
 
+  it('loads no picture between the version ping and the frame', async () => {
+    setup(FW_RESP, [NACK_EMPTY, ACK])
+    const order: string[] = []
+    const inner = serialMock.sendAndReceive.getMockImplementation()!
+    serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+      order.push(expect.includes(FrameType.FIRMWARE_INFO_RESPONSE) ? 'ping' : 'frame')
+      return inner(frame, expect)
+    })
+    loadAvatarMock.mockImplementation(async (_u: string, size: number) => {
+      order.push('load')
+      return size === 64 ? A64 : A48
+    })
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
+    expect(order).toEqual(['load', 'load', 'ping', 'frame', 'frame'])
+  })
+
   it('says the signer has no room when both sizes are refused, once each', async () => {
     setup(fwWith({ nvs_free_entries: 340, nvs_total_entries: 756 }), [NACK_EMPTY])
     await expect(syncIdentityMeta()).rejects.toThrow(/no room for the picture \(its storage is 55% full\)/)

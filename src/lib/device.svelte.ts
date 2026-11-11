@@ -623,7 +623,10 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
   // frame sent right behind it lands inside the same window. The same reply
   // carries the signer's free NVS entries, which pick the picture size.
   // Only timeouts and lost frames are retried: a NACK is the signer's answer.
-  const pictures = new Map<number, { avatar: Avatar; picture: IdentityCardPicture }>()
+  // Both sizes are prepared up front: a fetch and resize between the ping
+  // reply and the frame would let the frame slip out of the window.
+  const [full, small] = await Promise.all([pictureFor(64), pictureFor(48)])
+  const pictures = new Map<number, { avatar: Avatar; picture: IdentityCardPicture }>([[64, full], [48, small]])
   let lastErr: unknown = null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -640,11 +643,7 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
       // picks; if 64 still gets refused after "fits", 48 is still worth a go.
       const sides: number[] = choice.side === 64 ? [64, 48] : [48]
       for (const side of sides) {
-        let entry = pictures.get(side)
-        if (!entry) {
-          entry = await pictureFor(side)
-          pictures.set(side, entry)
-        }
+        const entry = pictures.get(side)!
         const frame = buildSetIdentityMeta(pubHex, name, entry.avatar)
         const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
         if (reply.type === FrameType.ACK) return { name, picture: entry.picture }
