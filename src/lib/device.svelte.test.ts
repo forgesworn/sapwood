@@ -1267,11 +1267,80 @@ describe('syncIdentityMeta over USB', () => {
     expect(sizesSent()).toEqual([64, 48])
   })
 
-  it('reports an unsigned USB session and does not step down', async () => {
-    setup(FW_RESP, [nackWith('bridge auth required')])
-    await expect(syncIdentityMeta()).rejects.toThrow(/not signed in/)
-    expect(sizesSent()).toEqual([64])
-    expect(metaPushes()).toBe(1)
+  describe('USB session', () => {
+    const PAIRING = 'ab'.repeat(32)
+    const sessionAck = (code: number) => ({ type: FrameType.SESSION_ACK, payload: new Uint8Array([code]) })
+    /** Frame types sent, in order: `auth`, `ping` or `card`. */
+    let sent: string[] = []
+
+    /** As `setup`, with a signer that answers the session frame from `authReplies`. */
+    function paired(authReplies: unknown[], metaReplies: unknown[], { stored = true } = {}) {
+      setup(FW_RESP, [])
+      if (stored) localStorage.setItem('heartwood.bridgeSecret', PAIRING)
+      device.bridgeAuthed = false
+      sent = []
+      const auths = [...authReplies]
+      const metas = [...metaReplies]
+      serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+        if (expect.includes(FrameType.SESSION_ACK)) { sent.push('auth'); return auths.shift() ?? sessionAck(0x00) }
+        if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) { sent.push('ping'); return FW_RESP }
+        if (frame !== FAKE_FRAME) throw new Error('unexpected frame')
+        sent.push('card')
+        return metas.shift() ?? ACK
+      })
+    }
+
+    it('opens the session with this browser\'s pairing before the ping', async () => {
+      paired([sessionAck(0x00)], [ACK])
+      expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+      expect(sent).toEqual(['auth', 'ping', 'card'])
+      expect(device.bridgeAuthed).toBe(true)
+    })
+
+    it('does not present the pairing again once the session is open', async () => {
+      paired([], [ACK])
+      device.bridgeAuthed = true
+      expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+      expect(sent).toEqual(['ping', 'card'])
+    })
+
+    it('reopens a session the signer dropped, once, and goes back through the ping', async () => {
+      paired([sessionAck(0x00)], [nackWith('bridge auth required'), ACK])
+      device.bridgeAuthed = true // stale: the signer restarted under the page
+      expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+      expect(sent).toEqual(['ping', 'card', 'auth', 'ping', 'card'])
+    })
+
+    it('stops when the signer still refuses after accepting the pairing', async () => {
+      paired([sessionAck(0x00), sessionAck(0x00)], [nackWith('bridge auth required'), nackWith('bridge auth required')])
+      await expect(syncIdentityMeta()).rejects.toThrow(/although it accepted this browser's USB pairing/)
+      expect(sent).toEqual(['auth', 'ping', 'card', 'auth', 'ping', 'card'])
+    })
+
+    it('reports a different pairing after one attempt and sends nothing more', async () => {
+      paired([sessionAck(0x01)], [])
+      await expect(syncIdentityMeta()).rejects.toThrow(/paired to a different USB browser/)
+      expect(sent).toEqual(['auth'])
+    })
+
+    it('never starts a pairing when the signer has none', async () => {
+      paired([sessionAck(0x02)], [ACK])
+      expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+      expect(sent).toEqual(['auth', 'ping', 'card'])
+      expect(device.awaitingButton).toBeNull()
+    })
+
+    it('makes no pairing in a browser that has none, and names the other pairing on refusal', async () => {
+      paired([], [nackWith('bridge auth required')], { stored: false })
+      await expect(syncIdentityMeta()).rejects.toThrow(/paired to a different USB browser/)
+      expect(sent).toEqual(['ping', 'card'])
+      expect(localStorage.getItem('heartwood.bridgeSecret')).toBeNull()
+    })
+
+    it('never tells the owner to sign in', async () => {
+      paired([sessionAck(0x00), sessionAck(0x00)], [nackWith('bridge auth required'), nackWith('bridge auth required')])
+      await expect(syncIdentityMeta()).rejects.not.toThrow(/sign in/i)
+    })
   })
 
   it('still retries a timeout, then succeeds', async () => {
@@ -1313,6 +1382,32 @@ describe('identity card auto-sync on serial master list', () => {
     emitMasterList([master])
     await new Promise((r) => setTimeout(r, 0))
     expect(metaPushes()).toBe(1)
+  })
+
+  it('does not present a refused pairing again on later refreshes', async () => {
+    const { pubHex, master } = freshMaster()
+    device.mode = 'serial'
+    device.connected = true
+    device.bridgeAuthed = false
+    localStorage.setItem('heartwood.bridgeSecret', 'cd'.repeat(32))
+    resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'alice', picture: 'https://x/a.jpg' }]]))
+    loadAvatarMock.mockResolvedValue(FAKE_AVATAR)
+    buildMetaMock.mockReturnValue(FAKE_FRAME)
+    let auths = 0
+    serialMock.sendAndReceive.mockImplementation(async (_frame: Uint8Array, expect: number[]) => {
+      if (expect.includes(FrameType.SESSION_ACK)) { auths++; return { type: FrameType.SESSION_ACK, payload: new Uint8Array([0x01]) } }
+      if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return FW_RESP
+      return ACK
+    })
+
+    emitMasterList([master])
+    await vi.waitFor(() => expect(device.logs.join('\n')).toContain('identity card sync failed: This signer is paired to a different USB browser'))
+    for (let i = 0; i < 4; i++) {
+      emitMasterList([master])
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    expect(auths).toBe(1)
+    expect(metaPushes()).toBe(0)
   })
 
   it('falls back to the placeholder disc when the profile has no picture', async () => {

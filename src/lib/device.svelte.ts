@@ -556,6 +556,9 @@ export interface IdentityCardSync {
 /** A refusal the signer gave as its answer; resending the frame cannot change it. */
 class IdentityCardRefused extends Error {}
 
+/** The signer dropped a USB session this page still believed was open. */
+class StaleUsbSession extends Error {}
+
 /** How full the signer's storage is, as a whole percentage, when it said. */
 function nvsPercentFull(info: FirmwareInfo | null): number | null {
   const total = info?.nvs_total_entries
@@ -628,8 +631,13 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
   const [full, small] = await Promise.all([pictureFor(64), pictureFor(48)])
   const pictures = new Map<number, { avatar: Avatar; picture: IdentityCardPicture }>([[64, full], [48, small]])
   let lastErr: unknown = null
+  let reopened = false
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      // A paired signer takes the card only from an open USB session, so open
+      // it here, ahead of the ping: nothing may sit between the ping's reply
+      // and the frame.
+      if ((await presentUsbPairing()) === 'wrong') throw new IdentityCardRefused(WRONG_USB_PAIRING)
       const ping = await serialTransport.sendAndReceive(
         buildFirmwareInfo(),
         [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
@@ -649,9 +657,17 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
         if (reply.type === FrameType.ACK) return { name, picture: entry.picture }
         const reason = new TextDecoder().decode(reply.payload).trim()
         if (reason === 'bridge auth required') {
-          throw new IdentityCardRefused(
-            'The signer did not accept the identity card because this USB session is not signed in to it. Sign in to the signer, then try again.',
-          )
+          // No pairing in this browser: the signer belongs to another one.
+          if (!hasUsbPairing()) throw new IdentityCardRefused(WRONG_USB_PAIRING)
+          if (reopened) {
+            throw new IdentityCardRefused(
+              'The signer refused the identity card although it accepted this browser\'s USB pairing. Unplug the signer, plug it back in and connect again. Signing is not affected.',
+            )
+          }
+          // The signer restarted under us and lost the session: open it again, once.
+          reopened = true
+          device.bridgeAuthed = false
+          throw new StaleUsbSession()
         }
       }
       const pct = nvsPercentFull(info)
@@ -660,6 +676,7 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
       )
     } catch (e) {
       if (e instanceof IdentityCardRefused) throw e
+      if (e instanceof StaleUsbSession) { attempt--; continue }
       lastErr = e // dead window or lost frame — wait out the blackout and retry
       await new Promise((r) => setTimeout(r, 2_000))
     }
@@ -710,7 +727,9 @@ async function autoSyncIdentityMeta() {
     }
   } catch (e) {
     idMetaSynced.delete(npub)
-    idMetaAttempts.set(npub, (idMetaAttempts.get(npub) ?? 0) + 1)
+    // A refusal is the signer's answer, so asking again unprompted cannot
+    // change it (and a wrong pairing must not be presented over and over).
+    idMetaAttempts.set(npub, e instanceof IdentityCardRefused ? ID_META_MAX_ATTEMPTS : (idMetaAttempts.get(npub) ?? 0) + 1)
     addLog(`identity card sync failed: ${e instanceof Error ? e.message : String(e)}`)
   }
 }
@@ -3420,6 +3439,33 @@ export function isThisBrowsersUsbPairing(secretHex: string): boolean {
   return /^[0-9a-f]{64}$/.test(ours) && secretHex.toLowerCase() === ours
 }
 
+const WRONG_USB_PAIRING = 'This signer is paired to a different USB browser or bridge. Do not factory-reset it: reconnect with that pairing, or deliberately replace the USB pairing with physical confirmation.'
+
+/** Whether this browser holds a USB pairing at all (without creating one). */
+function hasUsbPairing(): boolean {
+  return /^[0-9a-f]{64}$/.test(localStorage.getItem(BRIDGE_SECRET_KEY) ?? '')
+}
+
+/**
+ * Open the USB session with this browser's existing pairing, and never start
+ * one: unlike ensureBridgeAuth this cannot raise the button-hold pairing, so it
+ * is safe on paths that run unprompted. `unpaired` means there is nothing to
+ * present (no pairing here, or none on the signer, which then takes management
+ * frames from the cable alone). `wrong` is final: the signer answers a failed
+ * attempt with a cooldown, so callers must not present again on their own.
+ */
+async function presentUsbPairing(): Promise<'ok' | 'unpaired' | 'wrong'> {
+  if (device.mode !== 'serial') return 'unpaired'
+  if (device.bridgeAuthed) return 'ok'
+  if (!hasUsbPairing()) return 'unpaired'
+  const ack = await serialTransport.sendAndReceive(
+    buildSessionAuth(bridgeSecret()), [FrameType.SESSION_ACK], USB_READ_DEADLINE_MS, USB_READ_RETRY,
+  )
+  const code = ack.payload[0]
+  if (code === 0x00) { device.bridgeAuthed = true; return 'ok' }
+  return code === 0x02 ? 'unpaired' : 'wrong'
+}
+
 /** Forget the cached bridge authentication, so the next ensureBridgeAuth asks
  *  the signer again (after a restore that may have replaced its secret). */
 export function forgetBridgeAuth(): void {
@@ -3465,7 +3511,7 @@ export async function ensureBridgeAuth(): Promise<void> {
     }
     return
   }
-  throw new Error('This signer is paired to a different USB browser or bridge. Do not factory-reset it: reconnect with that pairing, or deliberately replace the USB pairing with physical confirmation.')
+  throw new Error(WRONG_USB_PAIRING)
 }
 
 // Which relays to embed in a bunker link built over USB. The firmware puts in
