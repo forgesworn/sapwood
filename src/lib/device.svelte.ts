@@ -29,6 +29,7 @@ import { dedupeIdentities } from './identity-key.js'
 import { bunkerUriWithEndpoint } from './bunker.js'
 import { dedupeBy } from './dedupe.js'
 import { loadAvatar, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
+import { pickPictureSide } from './nvs-room.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
 import {
@@ -542,6 +543,27 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin)
 }
 
+/** Which picture reached the signer's identity card. */
+export type IdentityCardPicture = 'full' | 'small' | 'placeholder'
+
+export interface IdentityCardSync {
+  name: string
+  /** `full` is 64x64, `small` is 48x48, `placeholder` is the initial on a disc
+   *  (the profile had no picture, or its host refused the fetch). */
+  picture: IdentityCardPicture
+}
+
+/** A refusal the signer gave as its answer; resending the frame cannot change it. */
+class IdentityCardRefused extends Error {}
+
+/** How full the signer's storage is, as a whole percentage, when it said. */
+function nvsPercentFull(info: FirmwareInfo | null): number | null {
+  const total = info?.nvs_total_entries
+  const free = info?.nvs_free_entries
+  if (total === undefined || free === undefined || total <= 0) return null
+  return Math.min(100, Math.max(0, Math.round(((total - free) / total) * 100)))
+}
+
 /**
  * Fetch the master's kind-0 profile, resize its avatar in-browser to a small
  * Rgb565 bitmap, and push the name + avatar to the signer — over USB
@@ -549,10 +571,11 @@ function bytesToBase64(bytes: Uint8Array): string {
  * (`set_identity_meta`, firmware ≥0.9.12). The signer stores it and shows it
  * on its identity card; it never fetches or decodes images itself. If the
  * picture is missing or its host refuses the fetch (CORS), an initial-on-disc
- * placeholder is pushed so the card still carries the name. Returns the synced
- * name, or null when there is no master / no resolvable profile.
+ * placeholder is pushed so the card still carries the name. Over USB the
+ * picture size follows the signer's free storage (64x64, else 48x48). Returns
+ * what was synced, or null when there is no master / no resolvable profile.
  */
-export async function syncIdentityMeta(): Promise<string | null> {
+export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
   if (device.mode !== 'serial' && device.mode !== 'relay') return null
   const master = device.masters[0]
   if (!master?.npub) return null
@@ -568,35 +591,39 @@ export async function syncIdentityMeta(): Promise<string | null> {
   const name = profileDisplayName(profile)
   if (!name) return null
 
-  // Relay pushes travel inside a NIP-44 event a classic ESP32 must parse while
-  // its TLS session already occupies the heap — 48x48 halves the bytes end to
-  // end (a 64x64 relay push OOM-rebooted a T-Display). USB keeps full 64x64.
-  const size = device.mode === 'relay' ? 48 : 64
-  let avatar: Avatar
-  try {
-    avatar = profile.picture ? await loadAvatar(profile.picture, size) : placeholderAvatar(name, size)
-  } catch {
-    avatar = placeholderAvatar(name, size) // image host refused — name + disc beats nothing
+  const pictureFor = async (size: number): Promise<{ avatar: Avatar; picture: IdentityCardPicture }> => {
+    const kind: IdentityCardPicture = size === 64 ? 'full' : 'small'
+    try {
+      if (profile.picture) return { avatar: await loadAvatar(profile.picture, size), picture: kind }
+    } catch {
+      // image host refused — name + disc beats nothing
+    }
+    return { avatar: placeholderAvatar(name, size), picture: 'placeholder' }
   }
 
   if (device.mode === 'relay') {
+    // Relay pushes travel inside a NIP-44 event a classic ESP32 must parse while
+    // its TLS session already occupies the heap — 48x48 halves the bytes end to
+    // end (a 64x64 relay push OOM-rebooted a T-Display).
+    const { avatar, picture } = await pictureFor(48)
     if (!relayTransport) return null
     await relayTransport.request(
       'set_identity_meta',
       { name, w: avatar.w, h: avatar.h, avatar_b64: bytesToBase64(avatar.bytes) },
       30_000,
     )
-    return name
+    return { name, picture }
   }
-
-  const frame = buildSetIdentityMeta(pubHex, name, avatar)
 
   // A wifi-mode signer only drains USB in windows (fast polls while wifi
   // retries, ~1s polls while its relay session is idle, nothing in between).
   // An 8KB frame launched into a dead window overflows the 4KB UART ring and
   // dies, so gate each attempt on a fresh FIRMWARE_INFO round-trip — a reply
   // means the signer polled the cable within the last instant, and the paced
-  // frame sent right behind it lands inside the same window.
+  // frame sent right behind it lands inside the same window. The same reply
+  // carries the signer's free NVS entries, which pick the picture size.
+  // Only timeouts and lost frames are retried: a NACK is the signer's answer.
+  const pictures = new Map<number, { avatar: Avatar; picture: IdentityCardPicture }>()
   let lastErr: unknown = null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -607,10 +634,33 @@ export async function syncIdentityMeta(): Promise<string | null> {
         USB_READ_RETRY,
       )
       if (ping.type === FrameType.NACK) throw new Error('device rejected the version query')
-      const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
-      if (reply.type === FrameType.NACK) throw new Error('device rejected identity metadata')
-      return name
+      const info = parseFirmwareInfo(ping.payload)
+      const choice = pickPictureSide({ free: info?.nvs_free_entries, total: info?.nvs_total_entries })
+      // Without stats, try 64 and step down once. With them, the estimate
+      // picks; if 64 still gets refused after "fits", 48 is still worth a go.
+      const sides: number[] = choice.side === 64 ? [64, 48] : [48]
+      for (const side of sides) {
+        let entry = pictures.get(side)
+        if (!entry) {
+          entry = await pictureFor(side)
+          pictures.set(side, entry)
+        }
+        const frame = buildSetIdentityMeta(pubHex, name, entry.avatar)
+        const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
+        if (reply.type === FrameType.ACK) return { name, picture: entry.picture }
+        const reason = new TextDecoder().decode(reply.payload).trim()
+        if (reason === 'bridge auth required') {
+          throw new IdentityCardRefused(
+            'The signer did not accept the identity card because this USB session is not signed in to it. Sign in to the signer, then try again.',
+          )
+        }
+      }
+      const pct = nvsPercentFull(info)
+      throw new IdentityCardRefused(
+        `The signer has no room for the picture${pct === null ? '' : ` (its storage is ${pct}% full)`}. Remove an app or identity you no longer use, then try again.`,
+      )
     } catch (e) {
+      if (e instanceof IdentityCardRefused) throw e
       lastErr = e // dead window or lost frame — wait out the blackout and retry
       await new Promise((r) => setTimeout(r, 2_000))
     }
@@ -649,9 +699,11 @@ async function autoSyncIdentityMeta() {
   if ((idMetaAttempts.get(npub) ?? 0) >= ID_META_MAX_ATTEMPTS) return
   idMetaSynced.add(npub) // claim before the await so overlapping triggers no-op
   try {
-    const name = await syncIdentityMeta()
-    if (name) {
-      addLog(`identity card synced to signer: ${name}`)
+    const synced = await syncIdentityMeta()
+    if (synced) {
+      const what = synced.picture === 'full' ? 'full picture'
+        : synced.picture === 'small' ? 'small picture' : 'initial disc'
+      addLog(`identity card synced to signer: ${synced.name} (${what})`)
     } else {
       // No profile on the relays yet — release for a later refresh to retry.
       idMetaSynced.delete(npub)
@@ -2863,22 +2915,10 @@ export interface FirmwareInfo {
   unlock_phone_count?: number | null
 }
 
-/**
- * Ask a USB-connected device which firmware version it is running. Read-only
- * and quick. Returns null if the device doesn't answer (older firmware without
- * the query, or we're not on USB) so callers can degrade gracefully.
- */
-export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
-  if (device.mode !== 'serial') return null
+/** Parse a FIRMWARE_INFO_RESPONSE payload; null when it is not the expected JSON. */
+function parseFirmwareInfo(payload: Uint8Array): FirmwareInfo | null {
   try {
-    const resp = await serialTransport.sendAndReceive(
-      buildFirmwareInfo(),
-      [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
-      USB_READ_DEADLINE_MS,
-      USB_READ_RETRY,
-    )
-    if (resp.type !== FrameType.FIRMWARE_INFO_RESPONSE) return null
-    const info = JSON.parse(new TextDecoder().decode(resp.payload))
+    const info = JSON.parse(new TextDecoder().decode(payload))
     if (typeof info?.version !== 'string') return null
     return {
       version: info.version,
@@ -2898,6 +2938,27 @@ export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
         ? { unlock_phone_count: typeof info.unlock_phone_count === 'number' ? info.unlock_phone_count : null }
         : {}),
     }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Ask a USB-connected device which firmware version it is running. Read-only
+ * and quick. Returns null if the device doesn't answer (older firmware without
+ * the query, or we're not on USB) so callers can degrade gracefully.
+ */
+export async function getFirmwareVersion(): Promise<FirmwareInfo | null> {
+  if (device.mode !== 'serial') return null
+  try {
+    const resp = await serialTransport.sendAndReceive(
+      buildFirmwareInfo(),
+      [FrameType.FIRMWARE_INFO_RESPONSE, FrameType.NACK],
+      USB_READ_DEADLINE_MS,
+      USB_READ_RETRY,
+    )
+    if (resp.type !== FrameType.FIRMWARE_INFO_RESPONSE) return null
+    return parseFirmwareInfo(resp.payload)
   } catch {
     return null // older firmware, or no response — treat as unknown
   }

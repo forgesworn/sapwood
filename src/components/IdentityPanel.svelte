@@ -111,22 +111,34 @@
 
   // --- Identity card (name + avatar) push to the signer ---
   let profileStatus = $state<string | null>(null)
+  let profileError = $state<string | null>(null)
   let profilePending = $state(false)
 
   async function handleSyncProfile() {
+    profileError = null
     if (device.mode !== 'serial' && device.mode !== 'relay') {
-      profileStatus = 'Syncing the identity card needs a USB or WiFi connection.'
+      profileStatus = null
+      profileError = 'Syncing the identity card needs a USB or WiFi connection.'
       return
     }
     profilePending = true
     profileStatus = 'Fetching the profile and resizing the picture…'
     try {
-      const name = await syncIdentityMeta()
-      profileStatus = name
-        ? `Sent "${name}" and its picture to the signer.`
-        : 'No profile found for this identity on the profile relays yet.'
+      const synced = await syncIdentityMeta()
+      if (!synced) {
+        profileStatus = 'No profile found for this identity on the profile relays yet.'
+      } else if (synced.picture === 'placeholder') {
+        profileStatus = `Sent "${synced.name}" with its initial on a disc, because the profile picture was missing or could not be loaded.`
+      } else if (synced.picture === 'small') {
+        profileStatus = device.mode === 'serial'
+          ? `Sent "${synced.name}" with a smaller picture, because the signer's storage is tight.`
+          : `Sent "${synced.name}" with a smaller picture, which suits a WiFi push.`
+      } else {
+        profileStatus = `Sent "${synced.name}" and its full picture to the signer.`
+      }
     } catch (e) {
-      profileStatus = e instanceof Error ? e.message : 'Could not sync the profile.'
+      profileStatus = null
+      profileError = e instanceof Error ? e.message : 'Could not sync the profile.'
     } finally {
       profilePending = false
     }
@@ -298,6 +310,7 @@
       <button class="btn btn-secondary" onclick={handleSyncProfile} disabled={profilePending}>
         {profilePending ? 'Syncing…' : 'Re-sync profile to signer'}
       </button>
+      {#if profileError}<p class="error-text" role="alert">{profileError}</p>{/if}
       {#if profileStatus}<p class="hint-sm status">{profileStatus}</p>{/if}
     </section>
   {/if}

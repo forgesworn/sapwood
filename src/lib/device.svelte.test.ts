@@ -1177,6 +1177,107 @@ describe('staged remote network management', () => {
   })
 })
 
+describe('syncIdentityMeta over USB', () => {
+  const NACK_EMPTY = { type: FrameType.NACK, payload: new Uint8Array() }
+  const nackWith = (text: string) => ({ type: FrameType.NACK, payload: new TextEncoder().encode(text) })
+  const fwWith = (stats: Record<string, number>) => ({
+    type: FrameType.FIRMWARE_INFO_RESPONSE,
+    payload: new TextEncoder().encode(JSON.stringify({ version: '0.18.0', board: 'lilygo', ...stats })),
+  })
+  const A64 = { w: 64, h: 64, bytes: new Uint8Array(1) }
+  const A48 = { w: 48, h: 48, bytes: new Uint8Array(1) }
+
+  /** Reply to the version ping with `fw`, and to each meta frame from `metaReplies` in turn. */
+  function setup(fw: unknown, metaReplies: unknown[]) {
+    const { pubHex, master } = freshMaster()
+    device.mode = 'serial'
+    device.connected = true
+    device.masters = [master]
+    resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'zed', picture: 'https://x/z.jpg' }]]))
+    loadAvatarMock.mockImplementation(async (_u: string, size: number) => (size === 64 ? A64 : A48))
+    placeholderMock.mockImplementation((_n: string, size: number) => (size === 64 ? A64 : A48))
+    buildMetaMock.mockReturnValue(FAKE_FRAME)
+    const queue = [...metaReplies]
+    serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
+      if (expect.includes(FrameType.FIRMWARE_INFO_RESPONSE)) return fw
+      if (frame !== FAKE_FRAME) throw new Error('unexpected frame')
+      const next = queue.shift()
+      if (next instanceof Error) throw next
+      return next ?? ACK
+    })
+  }
+  const sizesSent = () => buildMetaMock.mock.calls.map((c) => (c[2] as { w: number }).w)
+
+  it('sends 64x64 when the stats say it fits', async () => {
+    setup(fwWith({ nvs_free_entries: 500, nvs_total_entries: 756 }), [])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+    expect(sizesSent()).toEqual([64])
+  })
+
+  it('sends 48x48 straight away when only that fits', async () => {
+    setup(fwWith({ nvs_free_entries: 340, nvs_total_entries: 756 }), [])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
+    expect(sizesSent()).toEqual([48])
+  })
+
+  it('tries 64x64 when the firmware sends no stats', async () => {
+    setup(FW_RESP, [])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+    expect(sizesSent()).toEqual([64])
+  })
+
+  it('steps down to 48x48 after an empty NACK at 64x64, without resending 64x64', async () => {
+    setup(FW_RESP, [NACK_EMPTY, ACK])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
+    expect(sizesSent()).toEqual([64, 48])
+  })
+
+  it('says the signer has no room when both sizes are refused, once each', async () => {
+    setup(fwWith({ nvs_free_entries: 340, nvs_total_entries: 756 }), [NACK_EMPTY])
+    await expect(syncIdentityMeta()).rejects.toThrow(/no room for the picture \(its storage is 55% full\)/)
+    expect(sizesSent()).toEqual([48])
+    expect(metaPushes()).toBe(1)
+  })
+
+  it('tries 48x48 once even when the estimate says it will not fit', async () => {
+    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
+    expect(sizesSent()).toEqual([48])
+  })
+
+  it('omits the percentage when the signer did not report its storage', async () => {
+    setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY])
+    await expect(syncIdentityMeta()).rejects.toThrow(/^The signer has no room for the picture\./)
+    expect(sizesSent()).toEqual([64, 48])
+  })
+
+  it('reports an unsigned USB session and does not step down', async () => {
+    setup(FW_RESP, [nackWith('bridge auth required')])
+    await expect(syncIdentityMeta()).rejects.toThrow(/not signed in/)
+    expect(sizesSent()).toEqual([64])
+    expect(metaPushes()).toBe(1)
+  })
+
+  it('still retries a timeout, then succeeds', async () => {
+    vi.useFakeTimers()
+    try {
+      setup(FW_RESP, [new Error('timeout'), ACK])
+      const p = syncIdentityMeta()
+      await vi.advanceTimersByTimeAsync(2_500)
+      expect(await p).toEqual({ name: 'zed', picture: 'full' })
+      expect(metaPushes()).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports the placeholder when the picture fetch fails', async () => {
+    setup(FW_RESP, [])
+    loadAvatarMock.mockRejectedValue(new Error('tainted canvas'))
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'placeholder' })
+  })
+})
+
 describe('identity card auto-sync on serial master list', () => {
   it('pushes name + avatar once the master npub is known, and dedupes repeats', async () => {
     const { pubHex, master } = freshMaster()
@@ -1190,7 +1291,7 @@ describe('identity card auto-sync on serial master list', () => {
     emitMasterList([master])
     await vi.waitFor(() => expect(serialMock.sendAndReceive).toHaveBeenCalledWith(FAKE_FRAME, [FrameType.ACK, FrameType.NACK], 20_000))
     expect(device.masters).toEqual([master])
-    expect(device.logs.join('\n')).toContain('identity card synced to signer: alice')
+    expect(device.logs.join('\n')).toContain('identity card synced to signer: alice (full picture)')
 
     // A second list refresh must not rewrite the signer's NVS.
     emitMasterList([master])
@@ -1273,6 +1374,8 @@ describe('identity card auto-sync on serial master list', () => {
       })
       // Relay pushes shrink to 48x48 — a 64x64 event OOM-rebooted a T-Display.
       expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48)
+      expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(device.logs.join('\n')).toContain('identity card synced to signer: erin (small picture)'))
     } finally {
       await disconnect() // clears the 4s status poll
     }
