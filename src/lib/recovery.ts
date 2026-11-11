@@ -30,11 +30,9 @@ const MAX_EXTRAS = 50
 const NAME_CAP = 200
 
 /** Relays the wizard offers by default, user-editable. My Signet's sync rails
- * write to exactly one relay (the user's primary, `relay.trotters.cc` unless
- * changed), so that goes first; the rest are the ecosystem defaults in case
- * the roster was published from an edited preference. */
+ * write to exactly one relay (the user's primary), so an owner whose roster
+ * lives elsewhere adds that relay here; these are the ecosystem defaults. */
 export const DEFAULT_MANIFEST_RELAYS: readonly string[] = [
-  'wss://relay.trotters.cc',
   'wss://nos.lol',
   'wss://relay.damus.io',
   'wss://relay.primal.net',

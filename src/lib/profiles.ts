@@ -4,7 +4,8 @@
 // The relays are operator-configurable (profile-relays.ts): all are read from,
 // and any profile found is mirrored (the signed event re-published verbatim)
 // to the relays marked `write` — so a kind-0 that only lives on the public
-// indexes becomes resolvable from the project relay next time. The newest
+// indexes becomes resolvable from the operator's chosen relay next time. None
+// is marked `write` by default, so nothing is mirrored until one is. The newest
 // kind-0 per author wins. Pure parsing is split out (parseKind0Content) so it
 // can be unit-tested without a relay, and the relay query + publish are
 // injectable for the same reason.

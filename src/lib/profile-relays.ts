@@ -3,31 +3,29 @@
 // Profiles are resolved by querying kind-0 events from ALL of these relays
 // (see profiles.ts). Relays marked `write` additionally receive a mirror of
 // any profile found — so a kind-0 that only lives on the big public indexes
-// becomes resolvable from the project relay next time. The list is
-// operator-configurable in Settings and persisted in localStorage. Separate
+// becomes resolvable from the operator's own relay next time. No relay is a
+// write target by default. The list is operator-configurable in Settings and
+// persisted in localStorage. Separate
 // from the device's own relays (known-devices.ts) and the bridge config.
 
 const LS_KEY = 'heartwood.profileRelays'
 
 /** A profile relay: always read from; `write: true` also receives mirrored
- *  kind-0s (the project relay, so profiles accumulate where our devices look). */
+ *  kind-0s (so profiles accumulate on a relay the operator chooses). */
 export interface ProfileRelay {
   url: string
   write: boolean
 }
 
-const PROJECT_RELAY = 'wss://relay.trotters.cc'
-
-// The project relay is the only write target; the rest are the widely-mirrored
-// public indexes the pallasite apps read profiles from, so a profile published
-// from any mainstream client still resolves — and gets mirrored home.
+// The widely-mirrored public indexes the pallasite apps read profiles from,
+// so a profile published from any mainstream client still resolves. All are
+// read-only: mirroring happens only to a relay the operator marks as write.
 // relay.nostr.band and relay.ditto.pub were dropped after going dark (probed
 // 2026-07-15: nostr.band unreachable, ditto.pub 502) — every lookup against
 // them cost a browser-side timeout. relay.damus.io dropped 1 November 2026:
 // it escalates request traffic from one address to an outright ban, which
 // turns profile reads into timeouts on any address it has flagged.
 export const DEFAULT_PROFILE_RELAYS: ProfileRelay[] = [
-  { url: PROJECT_RELAY, write: true },
   { url: 'wss://purplepag.es', write: false },
   { url: 'wss://nos.lol', write: false },
   { url: 'wss://relay.primal.net', write: false },
@@ -47,12 +45,11 @@ export function isValidRelayUrl(url: string): boolean {
 }
 
 /** Coerce one stored entry to a ProfileRelay, or null if unusable. A bare
- *  string is the pre-read/write storage shape: the project relay keeps its
- *  write role, anything else is read-only (nothing was ever published there). */
+ *  string is the pre-read/write storage shape and is read-only. */
 function coerce(entry: unknown): ProfileRelay | null {
   if (typeof entry === 'string') {
     const url = entry.trim()
-    return isValidRelayUrl(url) ? { url, write: url === PROJECT_RELAY } : null
+    return isValidRelayUrl(url) ? { url, write: false } : null
   }
   if (typeof entry === 'object' && entry !== null) {
     const rec = entry as Record<string, unknown>

@@ -28,6 +28,7 @@
   import { transport as serialTransport } from '../lib/serial.js'
   import { generateBridgeSecret, bridgeArtifacts, type BridgeArtifacts } from '../lib/bridge-setup.js'
   import { copyText } from '../lib/clipboard.js'
+  import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
   import ResetCallout from './ResetCallout.svelte'
 
   type Step = 'intro' | 'flash' | 'provision' | 'bridge' | 'done'
@@ -190,7 +191,7 @@
 
   // --- Bridge daemon config ----------------------------------------------
   let hostPort = $state(defaultPort)
-  let relaysText = $state('wss://relay.trotters.cc')
+  let relaysText = $state(DEFAULT_SIGNER_RELAYS.join('\n'))
   let copied = $state('')
 
   let artifacts: BridgeArtifacts | null = $derived.by(() => {

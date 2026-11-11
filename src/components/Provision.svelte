@@ -42,7 +42,7 @@
         const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
         if (Array.isArray(saved) && saved.length) relays = saved
       } catch { /* not a wifi flash */ }
-      rememberDevice(hex, relays ?? ['wss://relay.trotters.cc'], deviceLabel || undefined)
+      rememberDevice(hex, relays ?? [], deviceLabel || undefined)
       // Only offer the WiFi handoff for devices flashed in wifi mode.
       handoff = relays ? { hex, relays } : null
     } catch { /* non-fatal */ }

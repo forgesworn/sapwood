@@ -1,6 +1,7 @@
 <script lang="ts">
   import { device, connectSerial, connectHttp, connectRelay, disconnect, HttpTransport } from '../lib/device.svelte.js'
   import { listKnownDevices, type KnownDevice } from '../lib/known-devices.js'
+  import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
   import { findAttachedGrantedPort } from '../lib/serial-ports.js'
   import { probeBridge } from '../lib/bridge-probe.js'
   import { navigate } from '../lib/route.svelte.js'
@@ -34,7 +35,7 @@
   let showRelayForm = $state(false)
   let knownDevices = $state<KnownDevice[]>([])
   let relayPubInput = $state('')
-  let relayUrlInput = $state('wss://relay.trotters.cc')
+  let relayUrlInput = $state(DEFAULT_SIGNER_RELAYS.join(', '))
   let relayError = $state('')
 
   // --- Smart connect ---
@@ -325,7 +326,7 @@
               class="field-input"
               type="text"
               bind:value={relayUrlInput}
-              placeholder="wss://relay.trotters.cc, wss://nos.lol"
+              placeholder="wss://nos.lol, wss://relay.primal.net"
               disabled={connecting}
               aria-describedby="relay-url-hint"
               autocapitalize="off"

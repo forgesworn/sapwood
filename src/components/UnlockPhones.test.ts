@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { getConversationKey, encrypt as nip44Encrypt } from 'nostr-tools/nip44'
 import { hexToBytes } from '@noble/hashes/utils.js'
+import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
 
 const P = 'a1'.repeat(32)
 const R = 'b2'.repeat(16)
@@ -312,10 +313,12 @@ describe('UnlockPhones', () => {
       render(UnlockPhones)
       await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
       await screen.findByText('Scan this with Cambium')
-      expect(relays.ensureRelay).toHaveBeenCalledWith('wss://relay.trotters.cc', expect.anything())
+      for (const url of DEFAULT_SIGNER_RELAYS) {
+        expect(relays.ensureRelay).toHaveBeenCalledWith(url, expect.anything())
+      }
       expect(relays.subscribe).toHaveBeenCalledOnce()
       const [subRelays, filter, opts] = relays.subscribe.mock.calls[0]
-      expect(subRelays).toEqual(['wss://relay.trotters.cc'])
+      expect(subRelays).toEqual([...DEFAULT_SIGNER_RELAYS])
       expect(filter).toMatchObject({ kinds: [24137], '#h': [INVITE_RENDEZVOUS] })
 
       const p = '11'.repeat(32)

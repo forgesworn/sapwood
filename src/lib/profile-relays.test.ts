@@ -11,7 +11,7 @@ afterEach(() => localStorage.clear())
 describe('isValidRelayUrl', () => {
   it('accepts wss:// URLs (whitespace trimmed)', () => {
     expect(isValidRelayUrl('wss://relay.example.com')).toBe(true)
-    expect(isValidRelayUrl('  wss://relay.trotters.cc  ')).toBe(true)
+    expect(isValidRelayUrl('  wss://relay.example.net  ')).toBe(true)
   })
 
   it('accepts ws:// only against localhost (dev)', () => {
@@ -33,9 +33,9 @@ describe('getProfileRelays / setProfileRelays', () => {
     expect(getProfileRelays()).toEqual(DEFAULT_PROFILE_RELAYS)
   })
 
-  it('defaults to the project relay as the only write target', () => {
-    const writes = DEFAULT_PROFILE_RELAYS.filter((r) => r.write)
-    expect(writes).toEqual([{ url: 'wss://relay.trotters.cc', write: true }])
+  it('has no write target by default', () => {
+    expect(DEFAULT_PROFILE_RELAYS.length).toBeGreaterThan(0)
+    expect(DEFAULT_PROFILE_RELAYS.filter((r) => r.write)).toEqual([])
   })
 
   it('round-trips a stored list with read/write flags', () => {
@@ -62,13 +62,13 @@ describe('getProfileRelays / setProfileRelays', () => {
     ])
   })
 
-  it('migrates the legacy string[] shape: project relay writes, the rest read', () => {
+  it('migrates the legacy string[] shape as read-only', () => {
     localStorage.setItem(
       'heartwood.profileRelays',
-      JSON.stringify(['wss://relay.trotters.cc', 'wss://purplepag.es']),
+      JSON.stringify(['wss://relay.example.net', 'wss://purplepag.es']),
     )
     expect(getProfileRelays()).toEqual([
-      { url: 'wss://relay.trotters.cc', write: true },
+      { url: 'wss://relay.example.net', write: false },
       { url: 'wss://purplepag.es', write: false },
     ])
   })

@@ -139,7 +139,7 @@
         const raw = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
         if (Array.isArray(raw) && raw.length) relays = raw
       } catch { /* not a wifi flash */ }
-      rememberDevice(hex, relays ?? ['wss://relay.trotters.cc'], friendlyLabel(name))
+      rememberDevice(hex, relays ?? [], friendlyLabel(name))
       handoff = relays ? { hex, relays } : null
     } catch { /* non-fatal */ }
   }

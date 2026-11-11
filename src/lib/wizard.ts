@@ -40,7 +40,6 @@ export type NetMode = 'wifi' | 'usb'
  *  A signer whose bunker URI leads with damus fails exactly like the relay
  *  being down for every client on that address. */
 export const DEFAULT_SIGNER_RELAYS: readonly string[] = [
-  'wss://relay.trotters.cc',
   'wss://nos.lol',
   'wss://relay.primal.net',
 ]
