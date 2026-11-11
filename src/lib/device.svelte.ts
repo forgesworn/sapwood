@@ -2707,6 +2707,19 @@ export async function configureNetworkRemotely(patch: RemoteNetworkPatch): Promi
 }
 
 /**
+ * What to tell the owner when the signer refuses GENERATE_IDENTITY. The
+ * firmware names its reason in the NACK payload: its RNG self-test (after a
+ * fresh install's full erase it must restart once before it makes keys) or
+ * at-rest encryption being on. Only an empty payload is a storage or frame
+ * failure.
+ */
+export function generateRefusalMessage(payload: Uint8Array): string {
+  const reason = new TextDecoder().decode(payload).trim()
+  if (!reason) return 'The device could not generate an identity (storage write failed). Try again.'
+  return `The signer refused to generate an identity: ${reason}.`
+}
+
+/**
  * Ask a USB-connected device to generate its OWN identity: it creates the seed
  * from its hardware RNG, shows the 12-word recovery phrase on its OWN screen,
  * and stores it. No phrase or secret crosses the cable — the ACK carries only
@@ -2722,9 +2735,7 @@ export async function generateIdentity(label = 'default', words: 12 | 24 = 12): 
     // 90 s game cap, then PBKDF2 + derivation. 200 s covers the slowest path.
     200_000,
   )
-  if (resp.type !== FrameType.ACK) {
-    throw new Error('The device could not generate an identity (storage write failed). Try again.')
-  }
+  if (resp.type !== FrameType.ACK) throw new Error(generateRefusalMessage(resp.payload))
   const npub = new TextDecoder().decode(resp.payload).trim()
   // Best-effort: the device reboots into WiFi right after a first provision, so
   // a follow-up read may fail — the npub from the ACK is what we rely on.

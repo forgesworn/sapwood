@@ -114,7 +114,7 @@ import {
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
   mgmtApplyPresetPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
-  usbDisplayFlip, setDisplayFlip, mgmtSetAwayApproval,
+  usbDisplayFlip, setDisplayFlip, mgmtSetAwayApproval, generateRefusalMessage,
 } from './device.svelte.js'
 import { joinedSsid } from './joined-network.js'
 import { kithmootPermissionChanges, KITHMOOT_PRIVATE_PRESET } from './client-permission-upgrade.js'
@@ -3293,5 +3293,23 @@ describe('screen orientation over USB', () => {
     } finally {
       reset()
     }
+  })
+})
+
+describe('generateRefusalMessage', () => {
+  const bytes = (s: string) => new TextEncoder().encode(s)
+
+  it('passes on the signer’s reason, such as the post-wipe RNG restart', () => {
+    const msg = generateRefusalMessage(
+      bytes('RNG continuity unverified after a wipe: power-cycle the signer once, then retry'),
+    )
+    expect(msg).toBe(
+      'The signer refused to generate an identity: RNG continuity unverified after a wipe: power-cycle the signer once, then retry.',
+    )
+  })
+
+  it('keeps the storage-failure wording for a bare NACK', () => {
+    expect(generateRefusalMessage(new Uint8Array())).toMatch(/storage write failed/)
+    expect(generateRefusalMessage(bytes('  '))).toMatch(/storage write failed/)
   })
 })
