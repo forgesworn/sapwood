@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  CHUNK_MAX_SIZE, PAGE_ENTRIES, availableEntries, avatarBlobLength, blobWriteEntries, pickPictureSide,
+  CHUNK_MAX_SIZE, PAGE_ENTRIES, availableEntries, avatarBlobLength, blobWriteEntries, pickPictureSide, pickPictureStart,
 } from './nvs-room'
 
 describe('nvs-room', () => {
@@ -34,5 +34,25 @@ describe('nvs-room', () => {
   it('assumes 64 when the stats are absent', () => {
     expect(pickPictureSide({})).toEqual({ side: 64, fits: null })
     expect(pickPictureSide({ free: 340 })).toEqual({ side: 64, fits: null })
+  })
+})
+
+describe('pickPictureStart', () => {
+  it('sizes the RGB332 blobs', () => {
+    expect(avatarBlobLength(64, 1)).toBe(4098)
+    expect(avatarBlobLength(48, 1)).toBe(2306)
+  })
+
+  it('starts at the top without stats', () => {
+    expect(pickPictureStart({})).toEqual({ start: 0, fits: null })
+  })
+
+  it('starts at 64x64 Rgb565 when it fits, 64x64 RGB332 when only that does', () => {
+    expect(pickPictureStart({ free: 126 + 277, total: 756 })).toEqual({ start: 0, fits: true })
+    expect(pickPictureStart({ free: 126 + 276, total: 756 })).toEqual({ start: 1, fits: true })
+  })
+
+  it('starts at 48x48 Rgb565 when nothing fits, leaving the signer to decide', () => {
+    expect(pickPictureStart({ free: 200, total: 756 })).toEqual({ start: 2, fits: false })
   })
 })

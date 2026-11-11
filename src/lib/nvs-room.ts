@@ -42,9 +42,9 @@ export function availableEntries(free: number): number {
   return Math.max(0, free - PAGE_ENTRIES)
 }
 
-/** Stored length of an identity-card picture: a 2-byte header plus Rgb565 pixels. */
-export function avatarBlobLength(side: number): number {
-  return 2 + side * side * 2
+/** Stored length of an identity-card picture: a 2-byte header plus the pixels. */
+export function avatarBlobLength(side: number, bytesPerPixel = 2): number {
+  return 2 + side * side * bytesPerPixel
 }
 
 /** The picture sizes (square sides) Sapwood can send. */
@@ -64,4 +64,34 @@ export function pickPictureSide(
   if (blobWriteEntries(avatarBlobLength(64), pages) <= room) return { side: 64, fits: true }
   if (blobWriteEntries(avatarBlobLength(48), pages) <= room) return { side: 48, fits: true }
   return { side: 48, fits: false }
+}
+
+/** One picture Sapwood can send: a side and a pixel format. */
+export interface PictureRung {
+  side: PictureSide
+  format: 'rgb565' | 'rgb332'
+}
+
+/** Richest first: a bigger picture beats more colours, and the signer's NACK steps down. */
+export const PICTURE_LADDER: readonly PictureRung[] = [
+  { side: 64, format: 'rgb565' },
+  { side: 64, format: 'rgb332' },
+  { side: 48, format: 'rgb565' },
+  { side: 48, format: 'rgb332' },
+]
+
+/**
+ * Where on PICTURE_LADDER to start given the signer's NVS stats. Without stats
+ * (older firmware) start at the top. With them, start at the first rung the
+ * estimate says fits; if none does, start at 48x48 Rgb565 and let the signer
+ * decide (it may still take it, or the ladder steps on to RGB332).
+ */
+export function pickPictureStart(stats: { free?: number; total?: number }): { start: number; fits: boolean | null } {
+  if (stats.free === undefined || stats.total === undefined) return { start: 0, fits: null }
+  const pages = Math.floor(stats.total / PAGE_ENTRIES)
+  const room = availableEntries(stats.free)
+  const start = PICTURE_LADDER.findIndex(
+    (r) => blobWriteEntries(avatarBlobLength(r.side, r.format === 'rgb332' ? 1 : 2), pages) <= room,
+  )
+  return start === -1 ? { start: 2, fits: false } : { start, fits: true }
 }
