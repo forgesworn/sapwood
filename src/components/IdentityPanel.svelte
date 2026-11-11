@@ -129,6 +129,8 @@
         profileStatus = 'No profile found for this identity on the profile relays yet.'
       } else if (synced.picture === 'placeholder') {
         profileStatus = `Sent "${synced.name}" with its initial on a disc, because the profile picture was missing or could not be loaded.`
+      } else if (synced.picture === 'full-fewer-colours') {
+        profileStatus = `Sent "${synced.name}" with a full-size picture in fewer colours, because the signer's storage is tight.`
       } else if (synced.picture === 'small') {
         profileStatus = device.mode === 'serial'
           ? `Sent "${synced.name}" with a smaller picture, because the signer's storage is tight.`
