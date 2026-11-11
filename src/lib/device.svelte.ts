@@ -657,7 +657,7 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
       }
       const pct = nvsPercentFull(info)
       throw new IdentityCardRefused(
-        `The signer has no room for the picture${pct === null ? '' : ` (its storage is ${pct}% full)`}. Remove an app or identity you no longer use, then try again.`,
+        `The signer has no room for the picture${pct === null ? '' : ` (its storage is ${pct}% full)`}. Signing is not affected; the signer's card shows an initial instead.`,
       )
     } catch (e) {
       if (e instanceof IdentityCardRefused) throw e
