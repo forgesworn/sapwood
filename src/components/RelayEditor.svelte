@@ -182,7 +182,7 @@
   .add-row { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
   .add-row input { flex: 1; padding: 0.4rem 0.6rem; font-size: 0.82rem; }
 
-  .health-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.15rem; }
+  .health-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.75rem; margin-bottom: 0.15rem; }
   .health-legend { display: flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; color: var(--text-muted); }
   .health-legend .health-dot { margin-left: 0.5rem; }
   .health-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: #444; display: inline-block; }
