@@ -417,6 +417,38 @@ describe('Connectivity relay order and the owner default', () => {
     expect(resetButton().disabled).toBe(true)
   })
 
+  it('disables Reset to default whenever Save is blocked by a pending network trial', async () => {
+    setDefaultSignerRelays(MINE)
+    vi.mocked(getNetworkConfig).mockResolvedValue({
+      ...ACTIVE,
+      revision: 6,
+      trial: {
+        transaction_id: 'tx-staged',
+        phase: 'staged' as const,
+        attempted: 0,
+        mode: 'wifi' as const,
+        ssid: 'Candidate',
+        relays: ['wss://new.example'],
+        password_set: true,
+      },
+    })
+    render(Connectivity)
+    await screen.findByRole('button', { name: 'Discard pending change' })
+    expect((screen.getByRole('button', { name: 'Test & save network' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(resetButton().disabled).toBe(true)
+  })
+
+  it('disables Reset to default on USB firmware that cannot safely patch its network', () => {
+    setDefaultSignerRelays(MINE)
+    // A different display list, so Reset is not disabled merely for matching.
+    localStorage.setItem('heartwood.lastRelays', JSON.stringify(['wss://elsewhere.example']))
+    setDevice({ mode: 'serial', usbNetworkSupport: 'unsupported', usbNetworkState: null })
+    render(Connectivity)
+    expect(screen.getByText('wss://elsewhere.example')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save to device' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(resetButton().disabled).toBe(true)
+  })
+
   describe('the relay-set indicator', () => {
     it('says "Your default relays" when the proven list equals the default set in order', async () => {
       setDefaultSignerRelays(MINE)

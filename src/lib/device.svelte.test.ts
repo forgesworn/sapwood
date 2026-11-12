@@ -877,6 +877,98 @@ describe('staged remote network management', () => {
     }
   })
 
+  it('stages a reorder-only relay change in the new order and remembers that order', async () => {
+    // Same relays, new order: a real change on the signer, which keeps its
+    // first relay open as its home relay. Nothing may treat it as a set.
+    const { pubHex } = freshMaster()
+    const oldRelays = ['wss://home.example', 'wss://second.example']
+    const nextRelays = ['wss://second.example', 'wss://home.example']
+    let transactionId = ''
+    let activated = false
+    let committed = false
+    resolveMock.mockResolvedValue(new Map())
+    relayRequestMock.mockImplementation(async (method: unknown, params: unknown) => {
+      if (method === 'get_status') {
+        return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: oldRelays[0] }
+      }
+      if (method === 'list_clients') return { clients: [] }
+      if (method === 'stage_network_config') {
+        const request = params as { transaction_id: string; base_revision: number; patch: Record<string, unknown> }
+        expect(request.patch).toEqual({
+          mode: 'wifi',
+          ssid: 'Home',
+          relays: nextRelays,
+          password: { action: 'keep' },
+        })
+        if (!transactionId) transactionId = request.transaction_id
+        throw new Error('timeout waiting for device (stage_network_config)')
+      }
+      if (method === 'activate_network_config') {
+        expect(pendingNetworkHandoff(pubHex)).toEqual(expect.objectContaining({
+          transactionId,
+          revision: 13,
+          oldRelays,
+          candidateRelays: nextRelays,
+        }))
+        activated = true
+        return { transaction_id: transactionId, revision: 13, rebooting: true }
+      }
+      if (method === 'get_network_config') {
+        if (!transactionId) {
+          return {
+            revision: 12,
+            active: { mode: 'wifi', ssid: 'Home', relays: oldRelays, password_set: true },
+            trial: null,
+          }
+        }
+        if (committed) {
+          return {
+            revision: 13,
+            active: { mode: 'wifi', ssid: 'Home', relays: nextRelays, password_set: true },
+            trial: null,
+            last_result: { transaction_id: transactionId, revision: 13, outcome: 'committed' },
+          }
+        }
+        return {
+          revision: 13,
+          active: { mode: 'wifi', ssid: 'Home', relays: oldRelays, password_set: true },
+          trial: {
+            transaction_id: transactionId,
+            phase: activated ? 'trying' : 'staged',
+            attempted: activated ? 1 : 0,
+            mode: 'wifi',
+            ssid: 'Home',
+            relays: nextRelays,
+            password_set: true,
+          },
+        }
+      }
+      if (method === 'commit_network_config') {
+        committed = true
+        return { transaction_id: transactionId, committed: true, revision: 13 }
+      }
+      if (method === 'abort_network_config') throw new Error('abort should not run')
+      return { ok: true }
+    })
+
+    await connectRelay(pubHex, oldRelays, 'remote signer')
+    try {
+      const observed = await configureNetworkRemotely({
+        mode: 'wifi',
+        ssid: 'Home',
+        relays: nextRelays,
+        password: { action: 'keep' },
+      })
+      expect(observed.active.relays).toEqual(nextRelays)
+      expect(device.relays).toEqual(nextRelays)
+      expect(device.relayConfiguredRelays).toEqual(nextRelays)
+      expect(listKnownDevices().find((known) => known.pubHex === pubHex)?.relays).toEqual(nextRelays)
+      expect(relayInstances.find((instance) => !instance.closed)?.relays).toEqual(nextRelays)
+    } finally {
+      await disconnect()
+    }
+  })
+
   it('recovers a committed candidate route after a mobile page kill', async () => {
     const { pubHex } = freshMaster()
     const oldRelays = ['wss://old.example']

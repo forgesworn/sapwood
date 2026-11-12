@@ -94,6 +94,13 @@
     provenRelays ? (sameRelayOrder(provenRelays, defaults) ? 'Your default relays' : 'Custom') : '',
   )
 
+  // Save cannot run: Reset to default follows it, so it never stages a list
+  // (or replaces a pending-trial notice) that the Save button cannot apply.
+  const saveBlocked = $derived(
+    !canConfigure || loading || status === 'sending' || pendingTrial !== null
+      || (overUsb && device.usbNetworkSupport === 'unsupported'),
+  )
+
   /** Load the owner's default set into the editor; the normal Save applies it. */
   function resetRelaysToDefault() {
     relays = defaultSignerRelays()
@@ -613,7 +620,7 @@
         />
         <div class="relay-reset">
           <button type="button" class="btn-link" onclick={resetRelaysToDefault}
-            disabled={!canConfigure || loading || status === 'sending' || sameRelayOrder(relays, defaults)}>
+            disabled={saveBlocked || sameRelayOrder(relays, defaults)}>
             Reset to default
           </button>
         </div>
@@ -632,7 +639,7 @@
     <button
       class="btn btn-secondary form-submit"
       onclick={send}
-      disabled={!canConfigure || loading || status === 'sending' || pendingTrial !== null || (overUsb && device.usbNetworkSupport === 'unsupported')}
+      disabled={saveBlocked}
     >
       {loading ? 'Loading…' : status === 'sending' ? (overRelay ? 'Testing network…' : 'Sending…') : overRelay ? 'Test & save network' : 'Save to device'}
     </button>
