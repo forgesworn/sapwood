@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
   WIZARD_STEPS,
   USER_STEPS,
@@ -14,6 +14,14 @@ import {
   stepIndex,
   isTerminal,
   friendlyStage,
+  DEFAULT_SIGNER_RELAYS,
+  cleanRelayList,
+  defaultSignerRelays,
+  hasOwnDefaultRelays,
+  onDefaultRelaysChange,
+  setDefaultSignerRelays,
+  clearDefaultSignerRelays,
+  sameRelayOrder,
   type WizardData,
 } from './wizard'
 
@@ -155,5 +163,109 @@ describe('friendlyStage', () => {
     for (const s of ['starting', 'erasing flash', 'bootloader', 'config', 'done', 'unknown']) {
       expect(friendlyStage(s)).not.toContain('!')
     }
+  })
+})
+
+describe('owner default relays', () => {
+  const KEY = 'heartwood.defaultSignerRelays'
+  afterEach(() => localStorage.clear())
+
+  it('is the built-in set when nothing is stored, as a copy', () => {
+    expect(defaultSignerRelays()).toEqual([...DEFAULT_SIGNER_RELAYS])
+    expect(hasOwnDefaultRelays()).toBe(false)
+    const first = defaultSignerRelays()
+    first.push('wss://mutated.example')
+    expect(defaultSignerRelays()).toEqual([...DEFAULT_SIGNER_RELAYS])
+  })
+
+  it('keeps the order it is given and round-trips', () => {
+    const list = ['wss://z.example', 'wss://a.example', 'wss://m.example']
+    expect(setDefaultSignerRelays(list)).toEqual(list)
+    expect(defaultSignerRelays()).toEqual(list)
+    expect(hasOwnDefaultRelays()).toBe(true)
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(list)
+  })
+
+  it('cleans the list: trims, drops non-strings and non-ws(s) URLs, de-duplicates', () => {
+    const stored = setDefaultSignerRelays([
+      '  wss://Keep.example/  ',
+      'wss://keep.example',
+      'WSS://KEEP.EXAMPLE//',
+      'https://not-a-relay.example',
+      'not a url',
+      'wss://',
+      'ws://lan.example:7777',
+      42 as unknown as string,
+      null as unknown as string,
+      'wss://other.example',
+    ])
+    // The first spelling of a duplicate wins.
+    expect(stored).toEqual(['wss://Keep.example/', 'ws://lan.example:7777', 'wss://other.example'])
+    expect(defaultSignerRelays()).toEqual(stored)
+  })
+
+  it('cleanRelayList is pure and keeps order', () => {
+    expect(cleanRelayList(['wss://b.example', ' wss://a.example ', 'wss://B.example/'])).toEqual([
+      'wss://b.example', 'wss://a.example',
+    ])
+    expect(cleanRelayList([])).toEqual([])
+  })
+
+  it('an empty (or all-invalid) list clears the setting and returns the built-in set', () => {
+    setDefaultSignerRelays(['wss://mine.example'])
+    expect(setDefaultSignerRelays([])).toEqual([...DEFAULT_SIGNER_RELAYS])
+    expect(hasOwnDefaultRelays()).toBe(false)
+    expect(localStorage.getItem(KEY)).toBeNull()
+
+    setDefaultSignerRelays(['wss://mine.example'])
+    expect(setDefaultSignerRelays(['junk', 'https://x.example'])).toEqual([...DEFAULT_SIGNER_RELAYS])
+    expect(hasOwnDefaultRelays()).toBe(false)
+  })
+
+  it('falls back to the built-in set for corrupt, non-array or all-invalid stored values', () => {
+    for (const raw of ['{not json', '{"a":1}', '"wss://x.example"', '[]', '[1, null, "https://x.example"]']) {
+      localStorage.setItem(KEY, raw)
+      expect(defaultSignerRelays(), raw).toEqual([...DEFAULT_SIGNER_RELAYS])
+    }
+  })
+
+  it('cleans a hand-edited stored list when reading it', () => {
+    localStorage.setItem(KEY, JSON.stringify([' wss://a.example ', 7, 'wss://A.example/', 'wss://b.example']))
+    expect(defaultSignerRelays()).toEqual(['wss://a.example', 'wss://b.example'])
+  })
+
+  it('clear restores the built-in set', () => {
+    setDefaultSignerRelays(['wss://mine.example'])
+    clearDefaultSignerRelays()
+    expect(defaultSignerRelays()).toEqual([...DEFAULT_SIGNER_RELAYS])
+    expect(hasOwnDefaultRelays()).toBe(false)
+  })
+
+  it('notifies listeners on set and clear, and stops after unsubscribe', () => {
+    const fn = vi.fn()
+    const off = onDefaultRelaysChange(fn)
+    setDefaultSignerRelays(['wss://mine.example'])
+    expect(fn).toHaveBeenCalledTimes(1)
+    clearDefaultSignerRelays()
+    expect(fn).toHaveBeenCalledTimes(2)
+    off()
+    setDefaultSignerRelays(['wss://mine.example'])
+    clearDefaultSignerRelays()
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
+  it('sameRelayOrder is order-sensitive and exact', () => {
+    expect(sameRelayOrder(['wss://a', 'wss://b'], ['wss://a', 'wss://b'])).toBe(true)
+    expect(sameRelayOrder(['wss://a', 'wss://b'], ['wss://b', 'wss://a'])).toBe(false)
+    expect(sameRelayOrder(['wss://a'], ['wss://a', 'wss://b'])).toBe(false)
+    expect(sameRelayOrder(['wss://a'], ['wss://A'])).toBe(false)
+    expect(sameRelayOrder([], [])).toBe(true)
+  })
+
+  it('initialData().relays uses the stored set', () => {
+    expect(initialData().relays).toEqual([...DEFAULT_SIGNER_RELAYS])
+    setDefaultSignerRelays(['wss://second.example', 'wss://first.example'])
+    expect(initialData().relays).toEqual(['wss://second.example', 'wss://first.example'])
+    expect(initialData({ relays: ['wss://override.example'] }).relays).toEqual(['wss://override.example'])
   })
 })

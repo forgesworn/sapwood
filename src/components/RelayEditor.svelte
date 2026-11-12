@@ -1,7 +1,10 @@
 <script lang="ts">
-  // Add/remove editor for a relay list, with one-tap suggestions from the
-  // ecosystem set. Pure control: the caller owns the list and validation of
-  // the whole (e.g. "at least one"); this validates only what's being added.
+  // Add/remove/reorder editor for a signer relay list, with one-tap
+  // suggestions from the ecosystem set. Pure control: the caller owns the list
+  // and validation of the whole (e.g. "at least one"); this validates only
+  // what's being added. Order matters on the signer: it keeps its first relay
+  // open all the time as its home relay (a T-Display serves only that one).
+  import { untrack } from 'svelte'
   import { probeRelays, type RelayProbe } from '../lib/relay-health.js'
 
   interface Props {
@@ -40,8 +43,13 @@
       checking = false
     }
   }
+  // Keyed on the set, not the order, so moving a relay up or down does not
+  // re-probe every relay. The effect depends on this one derived key only:
+  // checkHealth reads `relays` synchronously, so it runs untracked, otherwise
+  // the list itself (order included) would become a dependency.
+  const probeKey = $derived(showHealth ? [...relays].sort().join(',') : '')
   $effect(() => {
-    if (showHealth && relays.join(',')) void checkHealth()
+    if (probeKey) untrack(() => void checkHealth())
   })
   function dotTitle(p: RelayProbe | undefined): string {
     if (!p) return 'Checking…'
@@ -74,6 +82,16 @@
     error = null
     onchange(relays.filter((_, i) => i !== index))
   }
+
+  /** Swap the relay at `index` with its neighbour (`step` -1 = up, +1 = down). */
+  function move(index: number, step: -1 | 1) {
+    const target = index + step
+    if (target < 0 || target >= relays.length) return
+    error = null
+    const next = [...relays]
+    ;[next[index], next[target]] = [next[target]!, next[index]!]
+    onchange(next)
+  }
 </script>
 
 <div class="relay-editor">
@@ -95,9 +113,19 @@
         <span class="health-dot health-{health[relay]?.health ?? 'unknown'}" title={dotTitle(health[relay])}></span>
       {/if}
       <span class="mono relay-url">{relay}</span>
-      <button type="button" class="btn btn-secondary btn-sm" {disabled} onclick={() => remove(i)}>Remove</button>
+      {#if i === 0}<span class="tag tag--green home-tag" title="Kept open all the time">home</span>{/if}
+      <span class="row-actions">
+        <button type="button" class="btn btn-secondary btn-sm move" aria-label="Move {relay} up"
+          disabled={disabled || i === 0} onclick={() => move(i, -1)}>↑</button>
+        <button type="button" class="btn btn-secondary btn-sm move" aria-label="Move {relay} down"
+          disabled={disabled || i === relays.length - 1} onclick={() => move(i, 1)}>↓</button>
+        <button type="button" class="btn btn-secondary btn-sm" {disabled} onclick={() => remove(i)}>Remove</button>
+      </span>
     </div>
   {/each}
+  {#if relays.length}
+    <p class="hint-sm home-hint">The Heartwood keeps its first relay open all the time, so put the relay your phones and apps use first.</p>
+  {/if}
 
   {#if available.length}
     <div class="suggestions">
@@ -133,7 +161,13 @@
 <style>
   .relay-editor { display: flex; flex-direction: column; gap: 0.4rem; }
   .relay-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .relay-url { flex: 1; }
+  .relay-url { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .home-tag { flex-shrink: 0; }
+  .row-actions { display: flex; gap: 0.3rem; flex-shrink: 0; }
+  .move { padding-left: 0.6rem; padding-right: 0.6rem; }
+  @media (pointer: coarse) {
+    .row-actions .btn { min-height: 2.25rem; min-width: 2.25rem; }
+  }
   .suggestions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.2rem; }
   .suggestion {
     background: var(--surface); border: 1px solid var(--border); border-radius: 4px;

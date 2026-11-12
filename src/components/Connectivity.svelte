@@ -8,21 +8,30 @@
   import { joinedSsid } from '../lib/joined-network.js'
   import { getOrCreateOperator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
-  import { DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS } from '../lib/wizard.js'
+  import {
+    SUGGESTED_SIGNER_RELAYS, defaultSignerRelays, onDefaultRelaysChange, sameRelayOrder,
+  } from '../lib/wizard.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import RelayEditor from './RelayEditor.svelte'
 
   // Older firmware has no USB read-back, so these are display-only defaults
   // until the signer proves its own exact redacted state. They are never used
-  // as authority for a current-firmware patch.
+  // as authority for a current-firmware patch. (An unconfigured board is seeded
+  // from the owner's default set instead, below: `lastRelays` may be another
+  // Heartwood's custom list.)
   function savedRelays(): string[] {
     try {
       const raw = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
       const list = Array.isArray(raw) ? raw.filter((r): r is string => typeof r === 'string' && !!r) : []
       if (list.length) return list
     } catch { /* fall through to defaults */ }
-    return [...DEFAULT_SIGNER_RELAYS]
+    return defaultSignerRelays()
   }
+
+  // The owner's default set, re-read when it is saved elsewhere on the page
+  // (localStorage is not reactive).
+  let defaults = $state(defaultSignerRelays())
+  $effect(() => onDefaultRelaysChange(() => { defaults = defaultSignerRelays() }))
 
   let mode = $state<'usb' | 'wifi'>('wifi')
   let ssid = $state('')
@@ -67,6 +76,30 @@
   const usbConfigured = $derived(overUsb && usbState?.configured === true)
   const canConfigure = $derived(overUsb || overRelay)
   const supportsNetworkList = $derived((usbConfigured || overRelay) && storedNetworks !== undefined)
+
+  // The relays this signer has proven it holds, from an authenticated read-back:
+  // never the A+B recovery union in `device.relays`, never a browser guess.
+  // Null while unknown, so the indicator stays quiet rather than guess.
+  const provenRelays = $derived.by((): string[] | null => {
+    if (overRelay) return device.relayConfiguredRelays?.length ? device.relayConfiguredRelays : null
+    if (overUsb) {
+      const state = device.usbNetworkState
+      return state?.configured && state.mode === 'wifi' && state.trial === null && state.relays?.length
+        ? state.relays
+        : null
+    }
+    return null
+  })
+  const relaySetWord = $derived(
+    provenRelays ? (sameRelayOrder(provenRelays, defaults) ? 'Your default relays' : 'Custom') : '',
+  )
+
+  /** Load the owner's default set into the editor; the normal Save applies it. */
+  function resetRelaysToDefault() {
+    relays = defaultSignerRelays()
+    status = 'idle'
+    message = 'Your default relays are loaded. Save to apply them to this Heartwood.'
+  }
   const MAX_FALLBACKS = 7
 
   function addFallback() {
@@ -195,6 +228,12 @@
 
   $effect(() => {
     const state = device.usbNetworkState
+    // A current board with no network yet: its first configuration proposes
+    // the owner's default set.
+    if (overUsb && state && !state.configured) {
+      relays = defaultSignerRelays()
+      return
+    }
     if (!overUsb || !state?.configured || !state.mode) return
     mode = state.mode
     ssid = state.ssid ?? ''
@@ -561,7 +600,10 @@
         <p class="hint-sm">This signer's firmware predates the fallback-network list. Update it over USB to use one.</p>
       {/if}
       <div class="field">
-        <span class="field-label">Relays</span>
+        <div class="relay-head">
+          <span class="field-label">Relays</span>
+          {#if relaySetWord}<span class="relay-set">{relaySetWord}</span>{/if}
+        </div>
         <RelayEditor
           {relays}
           suggestions={SUGGESTED_SIGNER_RELAYS}
@@ -569,6 +611,12 @@
           showHealth
           onchange={(next) => (relays = next)}
         />
+        <div class="relay-reset">
+          <button type="button" class="btn-link" onclick={resetRelaysToDefault}
+            disabled={!canConfigure || loading || status === 'sending' || sameRelayOrder(relays, defaults)}>
+            Reset to default
+          </button>
+        </div>
       </div>
       {#if overUsb}
         {#if usbConfigured}
@@ -596,6 +644,10 @@
 </div>
 
 <style>
+  .relay-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+  .relay-set { font-size: 0.72rem; color: var(--text-muted); }
+  .relay-reset { display: flex; justify-content: flex-end; }
+
   /* Outlined so the fields and the Save button that commits them read as one
      unit — mid-page, an unboxed Save looked detached from the section. */
   .form {

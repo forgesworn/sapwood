@@ -23,17 +23,17 @@
   import ConfirmButton from './ConfirmButton.svelte'
   import QrScanner from './QrScanner.svelte'
   import WordPairs from './WordPairs.svelte'
-  import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
+  import { defaultSignerRelays } from '../lib/wizard.js'
   import TogglePair from './TogglePair.svelte'
 
   /** Fallback relays for a fresh invite: the ones Sapwood already uses for
    *  this signer over the relay, its USB-reported WiFi relays, or failing
-   *  both the default signer relays. The invite names its relays, so the
+   *  both the owner's default relays. The invite names its relays, so the
    *  phone follows whichever are chosen here. */
   function defaultInviteRelays(): string[] {
     if (device.mode === 'relay' && device.relayConfiguredRelays?.length) return [...device.relayConfiguredRelays]
     if (device.mode === 'serial' && device.usbNetworkState?.relays?.length) return [...device.usbNetworkState.relays]
-    return [...DEFAULT_SIGNER_RELAYS]
+    return defaultSignerRelays()
   }
 
   function formatCountdown(totalSeconds: number): string {

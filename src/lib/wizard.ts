@@ -1,4 +1,5 @@
-// Pure state + validation for the first-run flashing wizard (the /flash surface).
+// Pure state + validation for the first-run flashing wizard (the /flash surface),
+// plus the owner's default relay set (the one localStorage-backed setting here).
 //
 // All logic lives here as pure functions so it can be exhaustively unit-tested
 // without a browser or hardware. The Svelte components hold the reactive `$state`
@@ -55,6 +56,98 @@ export const SUGGESTED_SIGNER_RELAYS: readonly string[] = [
   'wss://offchain.pub',
 ]
 
+// --- Your default relays ---------------------------------------------------
+//
+// The owner's own default set for new Heartwoods, kept per Sapwood install in
+// localStorage. Nothing is stored until the owner edits it, so an unedited
+// install follows DEFAULT_SIGNER_RELAYS as it changes. Every place that
+// proposes or applies a relay list to a signer reads defaultSignerRelays();
+// each signer still keeps its own list on the board.
+
+const DEFAULT_RELAYS_KEY = 'heartwood.defaultSignerRelays'
+
+/** Trim, drop anything that is not a ws(s):// address, and de-duplicate the
+ *  way the signer does (case and a trailing slash ignored; the first spelling
+ *  wins). Order is kept: the first relay is the signer's home relay. */
+export function cleanRelayList(relays: readonly unknown[]): string[] {
+  const seen = new Set<string>()
+  const clean: string[] = []
+  for (const value of relays) {
+    if (typeof value !== 'string') continue
+    const relay = value.trim()
+    if (!/^wss?:\/\/\S+$/i.test(relay)) continue
+    const key = relay.replace(/\/+$/, '').toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    clean.push(relay)
+  }
+  return clean
+}
+
+/** The relays a new Heartwood starts with: the owner's saved set, or the
+ *  built-in DEFAULT_SIGNER_RELAYS when none is saved (or it is unreadable). */
+export function defaultSignerRelays(): string[] {
+  try {
+    const raw = localStorage.getItem(DEFAULT_RELAYS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      const clean = Array.isArray(parsed) ? cleanRelayList(parsed) : []
+      if (clean.length) return clean
+    }
+  } catch { /* unavailable or corrupt: use the built-in set */ }
+  return [...DEFAULT_SIGNER_RELAYS]
+}
+
+/** True when the owner has saved their own default set. */
+export function hasOwnDefaultRelays(): boolean {
+  try {
+    return localStorage.getItem(DEFAULT_RELAYS_KEY) !== null
+  } catch {
+    return false
+  }
+}
+
+const defaultRelayListeners = new Set<() => void>()
+
+/** Call `fn` whenever the default set is saved or cleared in this tab.
+ *  localStorage is not reactive; components re-read on this signal. */
+export function onDefaultRelaysChange(fn: () => void): () => void {
+  defaultRelayListeners.add(fn)
+  return () => { defaultRelayListeners.delete(fn) }
+}
+
+function notifyDefaultRelays(): void {
+  for (const fn of defaultRelayListeners) fn()
+}
+
+/** Save the owner's default set (cleaned, order kept) and return what was
+ *  stored. An empty list clears the setting back to the built-in set. */
+export function setDefaultSignerRelays(relays: readonly string[]): string[] {
+  const clean = cleanRelayList(relays)
+  if (!clean.length) {
+    clearDefaultSignerRelays()
+    return defaultSignerRelays()
+  }
+  try {
+    localStorage.setItem(DEFAULT_RELAYS_KEY, JSON.stringify(clean))
+  } catch { /* localStorage unavailable: the setting does not persist */ }
+  notifyDefaultRelays()
+  return clean
+}
+
+/** Forget the owner's set; new Heartwoods follow the built-in set again. */
+export function clearDefaultSignerRelays(): void {
+  try {
+    localStorage.removeItem(DEFAULT_RELAYS_KEY)
+  } catch { /* nothing to clear */ }
+  notifyDefaultRelays()
+}
+
+/** Same relays in the same order (exact strings). */
+export function sameRelayOrder(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((relay, index) => relay === b[index])
+}
+
 export interface WizardData {
   /** BoardSpec.id of the chosen board. */
   boardId: string
@@ -75,7 +168,7 @@ export function initialData(overrides: Partial<WizardData> = {}): WizardData {
     netMode: 'wifi',
     ssid: '',
     password: '',
-    relays: [...DEFAULT_SIGNER_RELAYS],
+    relays: defaultSignerRelays(),
     fullErase: false,
     ...overrides,
   }
