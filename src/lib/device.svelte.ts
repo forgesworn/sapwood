@@ -11,7 +11,7 @@ import {
   buildSessionAuth, buildSessionEnd, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
   buildFirmwareInfo, buildWifiScan, buildDisplayFlip, buildPhoneUnlockCmd,
   buildConnSlotCreate, buildConnSlotList, buildConnSlotRevoke, buildConnSlotUpdate, buildConnSlotUri,
-  buildDeriveIdentity, buildProvisionRemove,
+  buildDeriveIdentity, buildProvisionRemove, slotListRefusal,
 } from './frame.js'
 import type { ConnectSlot, ExactClientPolicy, MasterInfo } from './types.js'
 import { policiesEqual, managerClientPolicy, MANAGER_METHODS, MANAGER_SLOT_LABEL } from './client-policy.js'
@@ -3674,7 +3674,7 @@ async function serialFetchSlots(masterSlot: number): Promise<ConnectSlot[]> {
     SERIAL_RTT_MS,
   )
   if (resp.type !== FrameType.CONNSLOT_LIST_RESP) {
-    throw new Error('The signer would not list its connections.')
+    throw new Error(slotListRefusal(resp.payload))
   }
   const slots = JSON.parse(new TextDecoder().decode(resp.payload)) as ConnectSlot[]
   device.slots = slots
@@ -4354,7 +4354,7 @@ export async function mgmtApplyPresetPermissions(review: PresetPermissionReview)
           SERIAL_RTT_MS,
         )
         assertContext()
-        if (resp.type === FrameType.NACK) throw new Error('Slot list read denied')
+        if (resp.type === FrameType.NACK) throw new Error(slotListRefusal(resp.payload))
         let root: unknown
         try {
           root = JSON.parse(new TextDecoder().decode(resp.payload))

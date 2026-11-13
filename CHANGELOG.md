@@ -26,6 +26,12 @@ All notable changes to Sapwood are recorded here. Format loosely follows
 
 ### Fixed
 
+- **A refused connection list over USB now says why.** Firmware with
+  heartwood-esp32 #279 names the reason when it cannot send its connection
+  list (`slot list too large`, `low memory`), and Sapwood showed "Slot list
+  read denied" or "The signer would not list its connections." whatever it
+  said. Both reads now put the reason in words; a bare NACK from older
+  firmware reads "The signer would not list its connections."
 - **Unlocking a locked signer no longer takes two goes.** Over USB, Sapwood
   waited 35 s for the unlock ACK, but the signer only answers once every sealed
   identity is unsealed — measured at 73.8 s for three (heartwood-esp32 #118).
