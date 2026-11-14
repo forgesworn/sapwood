@@ -47,7 +47,8 @@ import { VaultAnnouncementWatcher, publishVaultDelivery, loadVaultKey } from './
 import {
   PHONE_UNLOCK_CAPABILITY, RELAY_ENROL_CAPABILITY, parsePhoneList, type UnlockPhoneList,
 } from './phone-unlock.js'
-import { DEFAULT_SIGNER_RELAYS, defaultSignerRelays } from './wizard.js'
+import { DEFAULT_SIGNER_RELAYS, defaultSignerRelays, storedLastRelays } from './wizard.js'
+import { relayAddressProblem } from './relay-rule.js'
 import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
@@ -2190,34 +2191,8 @@ function cleanRelaySet(
   const clean: string[] = []
   for (const value of relays) {
     const relay = value
-    if (!relay.startsWith('wss://')) {
-      throw new Error(`Remote relay addresses must start with wss:// (${value})`)
-    }
-    if (utf8Length(relay) > 255) throw new Error('Remote relay addresses must be no longer than 255 bytes.')
-    if ([...relay].some((char) => /\s/.test(char) || char.codePointAt(0)! < 0x20 || char.codePointAt(0) === 0x7f)) {
-      throw new Error(`Remote relay addresses cannot contain whitespace or control characters (${value})`)
-    }
-
-    const afterScheme = relay.slice(6)
-    const suffixAt = afterScheme.search(/[/?#]/)
-    const authority = suffixAt === -1 ? afterScheme : afterScheme.slice(0, suffixAt)
-    const suffix = suffixAt === -1 ? '' : afterScheme.slice(suffixAt)
-    if (authority.includes('@')) {
-      throw new Error(`Remote relay addresses cannot contain credentials (${value})`)
-    }
-    const host = authority.split(':')[0] ?? ''
-    if (!host
-      || !/[A-Za-z0-9]/.test(host)
-      || !/^[A-Za-z0-9.-]+$/.test(host)) {
-      throw new Error(`Remote relay addresses require an ASCII hostname using letters, digits, dots, or hyphens (${value})`)
-    }
-    const port = authority.slice(host.length)
-    if (port && port !== ':443') {
-      throw new Error(`Remote relay URL ports must be 443 (${value})`)
-    }
-    if (suffix && suffix !== '/') {
-      throw new Error(`Remote relay URL paths, queries, and fragments are not supported (${value})`)
-    }
+    const problem = relayAddressProblem(relay)
+    if (problem) throw new Error(problem)
     const key = relay.replace(/\/+$/, '').toLowerCase()
     if (seen.has(key)) {
       if (deduplicate) continue
@@ -3545,11 +3520,8 @@ function lastRelays(): string[] {
     ? device.usbNetworkState.relays
     : null
   if (exact?.length) return [...exact]
-  try {
-    const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-    const list = Array.isArray(saved) ? saved.filter((r): r is string => typeof r === 'string' && !!r) : []
-    if (list.length) return list
-  } catch { /* fall through to defaults */ }
+  const list = storedLastRelays()
+  if (list.length) return list
   return [...DEFAULT_SIGNER_RELAYS]
 }
 

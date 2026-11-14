@@ -18,6 +18,26 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
+describe('RelayEditor with a repeated relay', () => {
+  it('renders a list that holds the same address twice, without throwing', () => {
+    render(RelayEditor, { relays: [A, B, A], onchange: vi.fn() })
+    expect(screen.getAllByText(A)).toHaveLength(2)
+    expect(screen.getAllByText(B)).toHaveLength(1)
+  })
+
+  it('moves and removes the row that was pressed, not its twin', async () => {
+    const onchange = vi.fn()
+    render(RelayEditor, { relays: [A, B, A], onchange })
+    const [firstDown, secondDown] = screen.getAllByRole('button', { name: `Move ${A} down` }) as HTMLButtonElement[]
+    expect(secondDown!.disabled).toBe(true)
+    await fireEvent.click(firstDown!)
+    expect(onchange).toHaveBeenLastCalledWith([B, A, A])
+    const removes = screen.getAllByRole('button', { name: 'Remove' })
+    await fireEvent.click(removes[2]!)
+    expect(onchange).toHaveBeenLastCalledWith([A, B])
+  })
+})
+
 describe('RelayEditor ordering', () => {
   it('moves a relay down and up by calling onchange with the swapped list', async () => {
     const onchange = vi.fn()

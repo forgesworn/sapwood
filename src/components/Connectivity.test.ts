@@ -344,6 +344,53 @@ describe('Connectivity USB network changes', () => {
   })
 })
 
+describe('Connectivity with stored relay lists the signer would not take', () => {
+  const setDevice = (patch: Record<string, unknown>) => Object.assign(device, patch)
+
+  it('survives a lastRelays value that repeats an address', async () => {
+    localStorage.setItem('heartwood.lastRelays', JSON.stringify(['wss://dup.example', 'wss://dup.example', 'wss://other.example']))
+    setDevice({ connected: false, mode: 'none' })
+    render(Connectivity)
+    expect(await screen.findAllByText('wss://dup.example')).toHaveLength(1)
+    expect(screen.getByText('wss://other.example')).toBeTruthy()
+  })
+
+  it('seeds an unconfigured board only with defaults the signer accepts', async () => {
+    localStorage.setItem('heartwood.defaultSignerRelays', JSON.stringify(['ws://lan.example', 'wss://ok.example']))
+    setDevice({
+      mode: 'serial', usbNetworkSupport: 'supported',
+      usbNetworkState: { version: 1, configured: false, revision: 0, recovery_ok: true, trial: null },
+    })
+    render(Connectivity)
+    await waitFor(() => expect(screen.getByText('wss://ok.example')).toBeTruthy())
+    expect(screen.queryAllByText('ws://lan.example')).toHaveLength(0)
+  })
+
+  it('blocks Save over USB while the signer\'s state is unknown, and never takes the whole-config path', async () => {
+    setDevice({ mode: 'serial', usbNetworkSupport: 'unknown', usbNetworkState: null })
+    render(Connectivity)
+    const save = screen.getByRole('button', { name: 'Save to device' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    await fireEvent.click(save)
+    expect(configureNetwork).not.toHaveBeenCalled()
+    expect(getOrCreateOperator).not.toHaveBeenCalled()
+  })
+
+  it('refuses a ws:// relay on the first write to an unconfigured board', async () => {
+    setDevice({
+      mode: 'serial', usbNetworkSupport: 'supported',
+      usbNetworkState: { version: 1, configured: false, revision: 0, recovery_ok: true, trial: null },
+    })
+    render(Connectivity)
+    await fireEvent.input(await screen.findByLabelText('WiFi SSID'), { target: { value: 'Home' } })
+    await fireEvent.input(screen.getByPlaceholderText(/wss:\/\//), { target: { value: 'ws://lan.example' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Save to device' }))
+    expect(await screen.findByText(/must start with wss:\/\//)).toBeTruthy()
+    expect(configureNetwork).not.toHaveBeenCalled()
+  })
+})
+
 describe('Connectivity relay order and the owner default', () => {
   const MINE = ['wss://home.example', 'wss://second.example', 'wss://third.example']
   const resetButton = () => screen.getByRole('button', { name: 'Reset to default' }) as HTMLButtonElement

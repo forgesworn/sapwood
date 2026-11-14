@@ -8,6 +8,8 @@
 //
 // Tone: calm and plain, no jargon, no exclamation marks (house voice).
 
+import { relayAddressProblem } from './relay-rule.js'
+
 /** Linear steps of the happy-path flow. `flashing` and `done` are driven by the
  *  flash itself, not by the user clicking "next". */
 export type WizardStep = 'welcome' | 'board' | 'network' | 'review' | 'flashing' | 'done'
@@ -66,29 +68,42 @@ export const SUGGESTED_SIGNER_RELAYS: readonly string[] = [
 
 const DEFAULT_RELAYS_KEY = 'heartwood.defaultSignerRelays'
 
-/** Trim, drop anything that is not a ws(s):// address, lower-case the scheme
- *  (the rest of the address stays as typed) and de-duplicate the way the
- *  signer does (case and a trailing slash ignored; the first spelling wins).
- *  Order is kept: the first relay is the signer's home relay. */
-export function cleanRelayList(relays: readonly unknown[]): string[] {
+/** Same relay once, however it is spelled (case and a trailing slash ignored). */
+function relayKey(relay: string): string {
+  return relay.replace(/\/+$/, '').toLowerCase()
+}
+
+/** Trim, drop empties and non-strings, and keep each relay once (case and a
+ *  trailing slash ignored; the first spelling wins), in the order given.
+ *  Judges nothing else: use it where the list is shown or sent as typed. */
+export function uniqueRelays(relays: readonly unknown[]): string[] {
   const seen = new Set<string>()
   const clean: string[] = []
   for (const value of relays) {
     if (typeof value !== 'string') continue
     const relay = value.trim()
-    if (!/^wss?:\/\/\S+$/i.test(relay)) continue
-    const key = relay.replace(/\/+$/, '').toLowerCase()
+    if (!relay) continue
+    const key = relayKey(relay)
     if (seen.has(key)) continue
     seen.add(key)
-    clean.push(relay.replace(/^wss?:\/\//i, (scheme) => scheme.toLowerCase()))
+    clean.push(relay)
   }
   return clean
 }
 
+/** Trim, drop anything the signer would refuse (see relay-rule.ts: wss:// on
+ *  the standard port, no login, no path), lower-case the scheme (the rest of
+ *  the address stays as typed) and de-duplicate the way the signer does (case
+ *  and a trailing slash ignored; the first spelling wins). Order is kept: the
+ *  first relay is the signer's home relay. */
+export function cleanRelayList(relays: readonly unknown[]): string[] {
+  const lowered = uniqueRelays(relays).map((relay) =>
+    relay.replace(/^wss?:\/\//i, (scheme) => scheme.toLowerCase()))
+  return uniqueRelays(lowered.filter((relay) => relayAddressProblem(relay) === null))
+}
+
 /** The most relays a Heartwood holds. */
 const MAX_SIGNER_RELAYS = 8
-/** The longest relay address, in UTF-8 bytes, a Heartwood accepts. */
-const MAX_RELAY_BYTES = 255
 
 /** The relays a new Heartwood starts with: the owner's saved set, or the
  *  built-in DEFAULT_SIGNER_RELAYS when none is saved (or it is unreadable). */
@@ -141,16 +156,24 @@ function notifyDefaultRelays(): void {
  *  browser will not store it. Use clearDefaultSignerRelays() to go back to the
  *  built-in set. */
 export function setDefaultSignerRelays(relays: readonly string[]): string[] {
+  const encoder = new TextEncoder()
+  const candidates = uniqueRelays(relays).filter((relay) => /^wss?:\/\/\S/i.test(relay))
+  // An address that looks like a relay but that the signer would refuse is
+  // reported, never silently left out of a list that is then called saved.
+  for (const relay of candidates) {
+    if (encoder.encode(relay).length > 255) {
+      throw new Error('A relay address can be at most 255 bytes long.')
+    }
+    if (relayAddressProblem(relay.replace(/^wss?:\/\//i, (scheme) => scheme.toLowerCase())) !== null) {
+      throw new Error(`"${relay}" will not work as a Heartwood relay. Use a wss:// address on the standard port, with no login, path or spaces.`)
+    }
+  }
   const clean = cleanRelayList(relays)
   if (!clean.length) {
-    throw new Error('Add at least one relay address that starts with wss:// or ws://.')
+    throw new Error('Add at least one relay address that starts with wss://.')
   }
   if (clean.length > MAX_SIGNER_RELAYS) {
     throw new Error('A Heartwood holds at most eight relays.')
-  }
-  const encoder = new TextEncoder()
-  if (clean.some((relay) => encoder.encode(relay).length > MAX_RELAY_BYTES)) {
-    throw new Error('A relay address can be at most 255 bytes long.')
   }
   try {
     localStorage.setItem(DEFAULT_RELAYS_KEY, JSON.stringify(clean))
@@ -169,12 +192,32 @@ export function clearDefaultSignerRelays(): void {
   notifyDefaultRelays()
 }
 
+const LAST_RELAYS_KEY = 'heartwood.lastRelays'
+
+/** A relay address worth remembering: ws:// or wss://, no spaces. A bridge on
+ *  your own network may be ws://, so this is looser than the signer's rule. */
+function looksLikeRelay(relay: string): boolean {
+  return /^wss?:\/\/\S+$/i.test(relay)
+}
+
+/** The relays last given to a signer or bridge, read back clean: each once,
+ *  only addresses, in order. A missing, corrupt or already-repeated stored
+ *  value reads as what is usable in it (empty when nothing is). */
+export function storedLastRelays(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAST_RELAYS_KEY) ?? '[]') as unknown
+    return Array.isArray(raw) ? uniqueRelays(raw).filter(looksLikeRelay) : []
+  } catch {
+    return []
+  }
+}
+
 /** Remember the relays a signer or bridge was just given, so cable-made app
- *  links name them (device.svelte.ts reads this key). Storage errors are
- *  swallowed: the memory is a convenience. */
+ *  links name them (device.svelte.ts reads this key). Each is stored once.
+ *  Storage errors are swallowed: the memory is a convenience. */
 export function recordLastRelays(relays: readonly string[]): void {
   try {
-    localStorage.setItem('heartwood.lastRelays', JSON.stringify([...relays]))
+    localStorage.setItem(LAST_RELAYS_KEY, JSON.stringify(uniqueRelays(relays).filter(looksLikeRelay)))
   } catch { /* storage unavailable: nothing remembered */ }
 }
 
