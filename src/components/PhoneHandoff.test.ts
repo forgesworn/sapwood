@@ -9,8 +9,8 @@ const handoff = vi.hoisted(() => ({
   copyText: vi.fn(async () => true),
 }))
 
-vi.mock('@paulmillr/qr', () => ({
-  encodeQR: vi.fn((link: string) => `<svg aria-label="pairing QR" data-link="${link}"></svg>`),
+vi.mock('../lib/qr.js', () => ({
+  qrSvg: vi.fn((link: string) => `<svg aria-label="pairing QR" data-link="${link}"></svg>`),
 }))
 
 vi.mock('../lib/device.svelte.js', async () => {

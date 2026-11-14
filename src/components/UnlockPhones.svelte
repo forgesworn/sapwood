@@ -5,7 +5,7 @@
   // seals each phone's unlock secret to a key only that phone holds.
   import { onDestroy, tick, untrack } from 'svelte'
   import { SimplePool } from 'nostr-tools/pool'
-  import { encodeQR } from '@paulmillr/qr'
+  import { qrSvg } from '../lib/qr.js'
   import {
     device, listUnlockPhones, revokeUnlockPhone, setAnnounceOperator, enrolUnlockPhone,
     PhoneUnlockAuthRequired, supportsPhoneEnrolRelay,
@@ -193,7 +193,7 @@
   let inviteTicker: ReturnType<typeof setInterval> | null = null
   let inviteNow = $state(Date.now())
 
-  const inviteQr = $derived(invite ? encodeQR(invite.uri, 'svg') : '')
+  const inviteQr = $derived(invite ? qrSvg(invite.uri) : '')
   const inviteSecondsLeft = $derived(invite ? Math.ceil((invite.expiresAt * 1000 - inviteNow) / 1000) : 0)
 
   /** Close the invite's subscription and pool, and zero its secret. Safe to
