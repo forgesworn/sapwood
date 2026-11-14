@@ -111,7 +111,7 @@ export function removeVaultKey(devicePubHex: string): void {
 // --- USB (Web Serial) paths ---
 
 /** Read a NACK payload's reason text (empty payload → generic fallback). */
-function nackReason(payload: Uint8Array, fallback: string): string {
+export function nackReason(payload: Uint8Array, fallback: string): string {
   const text = new TextDecoder().decode(payload).trim()
   return text || fallback
 }

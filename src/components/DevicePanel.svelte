@@ -20,7 +20,7 @@
   import { copyText } from '../lib/clipboard.js'
   import {
     generateVaultKeyHex, loadVaultKey, storeVaultKey, removeVaultKey,
-    normaliseVaultKeyHex, serialVaultSet,
+    normaliseVaultKeyHex, serialVaultSet, nackReason,
   } from '../lib/vault.js'
   import { checkForUpdate, type UpdateCheck } from '../lib/update-check.js'
   import {
@@ -202,7 +202,9 @@
       )
       pinStatus = frame.type === FrameType.ACK
         ? (pinValue ? 'PIN set.' : 'PIN cleared. The signer stores its keys in plaintext again, and no phone can unlock it.')
-        : 'The device rejected the PIN change.'
+        // The signer names why it refused (for example, keeping at-rest on
+        // while a note cannot be read); show that rather than a bare refusal.
+        : nackReason(frame.payload, 'The device rejected the PIN change.')
       if (frame.type === FrameType.ACK) {
         setEncryptionKnown(!!pinValue)
         // Clearing turns encryption off whichever secret held it, so a vault
