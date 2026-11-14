@@ -10,8 +10,9 @@
   import type { NetConfig } from '../lib/frame'
   import {
     SUGGESTED_SIGNER_RELAYS, defaultSignerRelays, onDefaultRelaysChange, recordLastRelays,
-    sameRelayOrder,
+    sameRelayOrder, storedLastRelays, uniqueRelays,
   } from '../lib/wizard.js'
+  import { relayAddressProblem } from '../lib/relay-rule.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import RelayEditor from './RelayEditor.svelte'
 
@@ -21,12 +22,8 @@
   // from the owner's default set instead, below: `lastRelays` may be another
   // Heartwood's custom list.)
   function savedRelays(): string[] {
-    try {
-      const raw = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-      const list = Array.isArray(raw) ? raw.filter((r): r is string => typeof r === 'string' && !!r) : []
-      if (list.length) return list
-    } catch { /* fall through to defaults */ }
-    return defaultSignerRelays()
+    const list = storedLastRelays()
+    return list.length ? list : defaultSignerRelays()
   }
 
   // The owner's default set, re-read when it is saved elsewhere on the page
@@ -99,7 +96,7 @@
   // (or replaces a pending-trial notice) that the Save button cannot apply.
   const saveBlocked = $derived(
     !canConfigure || loading || status === 'sending' || pendingTrial !== null
-      || (overUsb && device.usbNetworkSupport === 'unsupported'),
+      || (overUsb && device.usbNetworkSupport !== 'supported'),
   )
 
   const RESET_NOTICE = 'Your default relays are loaded. Save to apply them to this Heartwood.'
@@ -338,7 +335,7 @@
     status = 'sending'
     message = ''
     const cleanSsid = ssid.trim()
-    const cleanRelays = relays.map((relay) => relay.trim()).filter(Boolean)
+    const cleanRelays = uniqueRelays(relays)
     if (mode === 'wifi' && (!cleanSsid || cleanRelays.length === 0)) {
       status = 'error'
       message = 'WiFi mode needs an SSID and at least one relay'
@@ -428,6 +425,17 @@
       } else {
         if (device.usbNetworkSupport === 'unsupported') {
           throw new Error('This signer firmware cannot safely preserve its stored password and operator during a network edit. Update the firmware over USB first.')
+        }
+        // A whole-config write carries a blank password and this browser's
+        // operator key, so it needs the signer's own state read cleanly first.
+        if (device.usbNetworkSupport !== 'supported') {
+          throw new Error('Sapwood has not read this signer\'s network state yet. Wait for it, or unplug and reconnect the cable.')
+        }
+        // The signer takes a ws:// relay on this first write but later reads
+        // it back as malformed, so hold every address to the patch rule here.
+        for (const relay of mode === 'wifi' ? cleanRelays : []) {
+          const problem = relayAddressProblem(relay)
+          if (problem) throw new Error(problem)
         }
         // A current, genuinely unconfigured device needs one full initial
         // configuration. This is the only path that deliberately establishes

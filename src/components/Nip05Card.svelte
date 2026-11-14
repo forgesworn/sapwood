@@ -9,6 +9,7 @@
   import { identityKey } from '../lib/identity-key.js'
   import { copyText } from '../lib/clipboard.js'
   import { nip19 } from 'nostr-tools'
+  import { storedLastRelays } from '../lib/wizard.js'
 
   let name = $state('')
   let domain = $state('')
@@ -30,11 +31,7 @@
   function relaysFor(hex: string): string[] {
     const known = listKnownDevices().find((d) => d.pubHex === hex)
     if (known?.relays.length) return known.relays
-    try {
-      const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-      if (Array.isArray(saved) && saved.length) return saved
-    } catch { /* none */ }
-    return []
+    return storedLastRelays()
   }
 
   const hex = $derived(masterHex(masterIdx))

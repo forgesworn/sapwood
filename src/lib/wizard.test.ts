@@ -22,6 +22,8 @@ import {
   setDefaultSignerRelays,
   clearDefaultSignerRelays,
   recordLastRelays,
+  storedLastRelays,
+  uniqueRelays,
   sameRelayOrder,
   type WizardData,
 } from './wizard'
@@ -195,13 +197,12 @@ describe('owner default relays', () => {
       'https://not-a-relay.example',
       'not a url',
       'wss://',
-      'ws://lan.example:7777',
+      'wss://other.example/',
       42 as unknown as string,
       null as unknown as string,
-      'wss://other.example',
     ])
     // The first spelling of a duplicate wins; the scheme is lower-cased and the rest left as typed.
-    expect(stored).toEqual(['wss://Keep.example/', 'ws://lan.example:7777', 'wss://other.example'])
+    expect(stored).toEqual(['wss://Keep.example/', 'wss://other.example/'])
     expect(defaultSignerRelays()).toEqual(stored)
   })
 
@@ -213,14 +214,48 @@ describe('owner default relays', () => {
   })
 
   it('lower-cases the scheme and leaves the rest of the address as typed', () => {
-    expect(cleanRelayList(['WSS://Relay.Example/Path', 'Ws://LAN.example:7777'])).toEqual([
-      'wss://Relay.Example/Path', 'ws://LAN.example:7777',
+    expect(cleanRelayList(['WSS://Relay.Example/', 'WSS://Other.Example'])).toEqual([
+      'wss://Relay.Example/', 'wss://Other.Example',
     ])
+  })
+
+  // Corrected expectation: this used to lock in ws://, ports and paths being
+  // accepted. The signer refuses them (a board that stored one is later read
+  // back as malformed), so a saved default must follow the signer's rule.
+  it('holds a saved default to the rule the signer enforces', () => {
+    for (const bad of [
+      'ws://lan.example',
+      'wss://relay.example:7777',
+      'wss://relay.example/nostr',
+      'wss://relay.example?x=1',
+      'wss://user:pw@relay.example',
+      'wss://exa mple.example',
+      'wss://r\u00e9lay.example',
+    ]) {
+      expect(cleanRelayList([bad]), bad).toEqual([])
+      expect(() => setDefaultSignerRelays([bad]), bad).toThrow(/wss:\/\//)
+    }
+    expect(cleanRelayList(['wss://relay.example:443', 'wss://other.example/'])).toEqual([
+      'wss://relay.example:443', 'wss://other.example/',
+    ])
+  })
+
+  it('does not hide a rejected address behind a "Saved" for the rest of the list', () => {
+    setDefaultSignerRelays(['wss://mine.example'])
+    expect(() => setDefaultSignerRelays(['wss://ok.example', 'ws://lan.example'])).toThrow(/ws:\/\/lan\.example/)
+    expect(defaultSignerRelays()).toEqual(['wss://mine.example'])
+  })
+
+  it('ignores a stored default that the signer would refuse', () => {
+    localStorage.setItem(KEY, JSON.stringify(['ws://lan.example', 'wss://ok.example', 'wss://ok.example:9000']))
+    expect(defaultSignerRelays()).toEqual(['wss://ok.example'])
+    localStorage.setItem(KEY, JSON.stringify(['ws://lan.example']))
+    expect(defaultSignerRelays()).toEqual([...DEFAULT_SIGNER_RELAYS])
   })
 
   it('refuses an empty or all-invalid list, keeping what is stored', () => {
     setDefaultSignerRelays(['wss://mine.example'])
-    const message = 'Add at least one relay address that starts with wss:// or ws://.'
+    const message = 'Add at least one relay address that starts with wss://.'
     expect(() => setDefaultSignerRelays([])).toThrow(message)
     expect(() => setDefaultSignerRelays(['junk', 'https://x.example'])).toThrow(message)
     expect(defaultSignerRelays()).toEqual(['wss://mine.example'])
@@ -355,6 +390,35 @@ describe('recordLastRelays', () => {
   it('stores the list as JSON under heartwood.lastRelays', () => {
     recordLastRelays(['wss://b.example', 'wss://a.example'])
     expect(localStorage.getItem('heartwood.lastRelays')).toBe('["wss://b.example","wss://a.example"]')
+  })
+
+  it('stores each relay once, however it is spelled, and drops what is not an address', () => {
+    recordLastRelays(['wss://a.example', 'WSS://A.example/', 'wss://b.example', 'wss://a.example', 'nonsense', ''])
+    expect(JSON.parse(localStorage.getItem('heartwood.lastRelays')!)).toEqual(['wss://a.example', 'wss://b.example'])
+  })
+
+  it('keeps a ws:// LAN relay: a bridge on your own network is legitimate here', () => {
+    recordLastRelays(['ws://lan.example:7777'])
+    expect(storedLastRelays()).toEqual(['ws://lan.example:7777'])
+  })
+
+  it('reads an already-poisoned value back without repeats', () => {
+    localStorage.setItem('heartwood.lastRelays', JSON.stringify(['wss://a.example', 'wss://a.example', 7, 'wss://b.example/']))
+    expect(storedLastRelays()).toEqual(['wss://a.example', 'wss://b.example/'])
+  })
+
+  it('reads nothing from a missing, corrupt or non-list value', () => {
+    expect(storedLastRelays()).toEqual([])
+    localStorage.setItem('heartwood.lastRelays', '{oops')
+    expect(storedLastRelays()).toEqual([])
+    localStorage.setItem('heartwood.lastRelays', '"wss://a.example"')
+    expect(storedLastRelays()).toEqual([])
+  })
+
+  it('uniqueRelays keeps order and the first spelling, and judges nothing else', () => {
+    expect(uniqueRelays(['wss://A.example', 'wss://a.example/', 'junk', 'junk', 'wss://b.example'])).toEqual([
+      'wss://A.example', 'junk', 'wss://b.example',
+    ])
   })
 
   it('swallows a storage error', () => {

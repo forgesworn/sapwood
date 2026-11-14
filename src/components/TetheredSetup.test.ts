@@ -85,3 +85,16 @@ describe('TetheredSetup bridge relays', () => {
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual([...DEFAULT_SIGNER_RELAYS])
   })
 })
+
+describe('TetheredSetup repeated relays', () => {
+  it('names each bridge relay once, in what it records and in the config it builds', async () => {
+    await reachBridgeStep()
+    const relays = screen.getByLabelText('Relays (one per line)') as HTMLTextAreaElement
+    await fireEvent.input(relays, { target: { value: 'wss://one.example\nwss://one.example\nwss://One.example/, wss://two.example' } })
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Copy' })[0]!)
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(['wss://one.example', 'wss://two.example'])
+    const copied = vi.mocked(copyText).mock.calls[0]![0]
+    expect(copied.match(/wss:\/\/one\.example/gi)).toHaveLength(1)
+  })
+})
+

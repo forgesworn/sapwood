@@ -26,6 +26,7 @@
   import { nip19 } from 'nostr-tools'
   import PasswordReveal from './PasswordReveal.svelte'
   import { compareVersions } from '../lib/version.js'
+  import { storedLastRelays } from '../lib/wizard.js'
 
   // The just-provisioned wifi device, if any — only set when this device was
   // flashed in wifi mode (lastRelays present); drives the network-reachable note.
@@ -37,11 +38,8 @@
       const decoded = nip19.decode(npub)
       if (decoded.type !== 'npub') return
       const hex = decoded.data as string
-      let relays: string[] | null = null
-      try {
-        const saved = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-        if (Array.isArray(saved) && saved.length) relays = saved
-      } catch { /* not a wifi flash */ }
+      const saved = storedLastRelays()
+      const relays: string[] | null = saved.length ? saved : null
       rememberDevice(hex, relays ?? [], deviceLabel || undefined)
       // Only offer the WiFi handoff for devices flashed in wifi mode.
       handoff = relays ? { hex, relays } : null

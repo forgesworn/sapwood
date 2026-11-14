@@ -21,6 +21,18 @@
   let input = $state('')
   let error = $state<string | null>(null)
 
+  // One key per row, unique even when an address is repeated (a stored list
+  // can hold one): the first occurrence keeps the address as its key, so a
+  // normal list keys exactly as before and reordering keeps focus on the row.
+  const rows = $derived.by(() => {
+    const seen = new Map<string, number>()
+    return relays.map((relay) => {
+      const n = seen.get(relay) ?? 0
+      seen.set(relay, n + 1)
+      return { relay, key: n === 0 ? relay : `${relay}\u0000${n}` }
+    })
+  })
+
   const available = $derived(suggestions.filter((s) => !relays.includes(s)))
 
   // A ws:// relay is cleartext Nostr: payloads stay NIP-44-encrypted, but the
@@ -107,7 +119,7 @@
       </button>
     </div>
   {/if}
-  {#each relays as relay, i (relay)}
+  {#each rows as { relay, key: _key }, i (_key)}
     <div class="relay-row">
       {#if showHealth}
         <span class="health-dot health-{health[relay]?.health ?? 'unknown'}" title={dotTitle(health[relay])}></span>
