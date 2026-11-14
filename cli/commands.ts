@@ -25,6 +25,7 @@ import {
   decryptNcryptsec,
 } from '../src/lib/restore.js'
 import { decodeNsec, zeroize } from '../src/lib/provision.js'
+import { parseStorageOutcome } from '../src/lib/storage-outcomes.js'
 import { createNsecRecoveryWords, isRecoveryWords } from '../src/lib/recovery-words.js'
 import {
   generateOperatorMnemonic,
@@ -583,6 +584,22 @@ export async function cmdAppsRevoke(
   )
   if (resp.type !== FrameType.CONNSLOT_REVOKE_RESP) {
     const reason = nackReason(resp)
+    // The revocation itself is never rolled back on this frame (see
+    // heartwood-esp32 PR #197): a recognised storage outcome means the app
+    // was still revoked, it just may not survive a restart, so report it as
+    // a warning rather than a failure.
+    const outcome = parseStorageOutcome(reason)
+    if (outcome?.applied) {
+      return {
+        data: {
+          revoked: slotIndex,
+          identity: identity.label,
+          storage_warning: outcome.message,
+          restart_advised: outcome.restartAdvised,
+        },
+        lines: [`⚠ revoked app slot ${slotIndex} on '${identity.label}': ${outcome.message}`],
+      }
+    }
     // The signer says WHY it refused; add the bit only the CLI knows, which is
     // how to satisfy it from here.
     if (!bridgeSecret && reason.includes('authenticated bridge session')) {
@@ -590,7 +607,7 @@ export async function cmdAppsRevoke(
         `${reason}. Set SAPWOOD_BRIDGE_SECRET, or pass --bridge-secret - to read it from stdin.`,
       )
     }
-    throw new CommandError(reason || `The signer refused to revoke app slot ${slotIndex}.`)
+    throw new CommandError(outcome?.message ?? (reason || `The signer refused to revoke app slot ${slotIndex}.`))
   }
   return {
     data: { revoked: slotIndex, identity: identity.label },
