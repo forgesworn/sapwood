@@ -68,8 +68,9 @@ export const PICTURE_LADDER: readonly PictureRung[] = [
  * Where on PICTURE_LADDER to start, given the signer's NVS stats: rung 0
  * (64x64 Rgb565) without stats or when the estimate says it fits, otherwise
  * rung 1 (64x64 RGB332). Never lower: the estimate assumes the new blob is
- * written beside the stored one, but the signer may remove the stored picture
- * first to make room, and Sapwood cannot see how big that is. The signer's
+ * written beside the stored one, but the signer's storage write erases the
+ * stored picture before writing the new one, and Sapwood cannot see how big
+ * that is. The signer's
  * NACKs walk the rest of the ladder.
  */
 export function pickPictureStart(stats: { free?: number; total?: number }): number {
