@@ -28,7 +28,7 @@
   import { transport as serialTransport } from '../lib/serial.js'
   import { generateBridgeSecret, bridgeArtifacts, type BridgeArtifacts } from '../lib/bridge-setup.js'
   import { copyText } from '../lib/clipboard.js'
-  import { defaultSignerRelays, recordLastRelays } from '../lib/wizard.js'
+  import { defaultSignerRelays, recordLastRelays, uniqueRelays } from '../lib/wizard.js'
   import ResetCallout from './ResetCallout.svelte'
 
   type Step = 'intro' | 'flash' | 'provision' | 'bridge' | 'done'
@@ -194,7 +194,7 @@
   let relaysText = $state(defaultSignerRelays().join('\n'))
   let copied = $state('')
 
-  const bridgeRelays = $derived(relaysText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))
+  const bridgeRelays = $derived(uniqueRelays(relaysText.split(/[\n,]/)))
 
   let artifacts: BridgeArtifacts | null = $derived.by(() => {
     if (!/^[0-9a-f]{64}$/i.test(bridgeSecret)) return null

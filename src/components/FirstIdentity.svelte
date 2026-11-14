@@ -24,6 +24,7 @@
   import { zeroize, decodeNsec, type ProvisionMode } from '../lib/provision.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import { nip19 } from 'nostr-tools'
+  import { storedLastRelays } from '../lib/wizard.js'
 
   interface Props {
     /** Jump to the advanced cockpit (the raw panels, for power users). */
@@ -134,11 +135,8 @@
       const decoded = nip19.decode(npub)
       if (decoded.type !== 'npub') return
       const hex = decoded.data as string
-      let relays: string[] | null = null
-      try {
-        const raw = JSON.parse(localStorage.getItem('heartwood.lastRelays') ?? '[]')
-        if (Array.isArray(raw) && raw.length) relays = raw
-      } catch { /* not a wifi flash */ }
+      const saved = storedLastRelays()
+      const relays: string[] | null = saved.length ? saved : null
       rememberDevice(hex, relays ?? [], friendlyLabel(name))
       handoff = relays ? { hex, relays } : null
     } catch { /* non-fatal */ }
