@@ -119,3 +119,45 @@ describe('DevicePanel: the session override on a fresh firmware report', () => {
     expect(screen.getByText('Anyone holding it can read the keys.')).toBeTruthy()
   })
 })
+
+describe('DevicePanel: a refused PIN change says why', () => {
+  async function clearPin(container: HTMLElement) {
+    const button = (label: string) =>
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement
+    await fireEvent.click(button('Clear PIN'))
+    const ack = container.querySelector('label.ack input[type="checkbox"]') as HTMLInputElement
+    await fireEvent.click(ack)
+    await fireEvent.click(button('Clear the PIN'))
+  }
+
+  beforeEach(() => {
+    ;(device as { mode: string }).mode = 'serial'
+    ;(device as { masters: unknown[] }).masters = [{ slot: 0, npub: NPUB }]
+  })
+
+  it("shows the signer's reason when it keeps at-rest on", async () => {
+    // heartwood-esp32 refuses an empty SET_PIN while a note is sealed or
+    // unreadable, and names the reason in the NACK payload.
+    vi.mocked(serialTransport.sendAndReceive).mockResolvedValue({
+      type: FrameType.NACK,
+      payload: new TextEncoder().encode('at-rest stays on while notes cannot be read'),
+    })
+    const { container } = render(DevicePanel)
+    await waitFor(() => expect(container.querySelector('#boot-pin-input')).toBeTruthy())
+
+    await clearPin(container)
+
+    await waitFor(() => expect(screen.getByText('at-rest stays on while notes cannot be read')).toBeTruthy())
+    expect(screen.queryByText(/PIN cleared/)).toBeNull()
+  })
+
+  it('falls back to the generic refusal when the NACK carries no reason', async () => {
+    vi.mocked(serialTransport.sendAndReceive).mockResolvedValue({ type: FrameType.NACK, payload: new Uint8Array() })
+    const { container } = render(DevicePanel)
+    await waitFor(() => expect(container.querySelector('#boot-pin-input')).toBeTruthy())
+
+    await clearPin(container)
+
+    await waitFor(() => expect(screen.getByText('The device rejected the PIN change.')).toBeTruthy())
+  })
+})
