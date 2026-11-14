@@ -5,7 +5,7 @@
   // encrypt it with a PIN (NIP-49): the QR is useless to anyone who photographs
   // it without the code, which the phone prompts for. A "no PIN" fallback exists
   // for a quick scan on a trusted screen. See lib/import-link (the phone side).
-  import { encodeQR } from '@paulmillr/qr'
+  import { qrSvg } from '../lib/qr.js'
   import { onDestroy } from 'svelte'
   import { device } from '../lib/device.svelte.js'
   import { findStoredOperatorByPubHex, type Operator } from '../lib/op-mgmt.js'
@@ -108,7 +108,7 @@
   const activeLink = $derived(
     authorityKey && linkAuthorityKey === authorityKey ? link : '',
   )
-  const qr = $derived(activeLink ? encodeQR(activeLink, 'svg') : '')
+  const qr = $derived(activeLink ? qrSvg(activeLink) : '')
 
   $effect(() => {
     const current = authorityKey

@@ -157,7 +157,7 @@ Regardless of tier, firmware updates, factory reset and PIN changes always requi
 
 ## Dependencies
 
-Runtime (compiled into bundle): `@noble/ciphers`, `@noble/curves`, `@noble/hashes`, `@paulmillr/qr`, `@scure/bip32`, `@scure/bip39`, `esptool-js`, `nostr-tools`, `serialport` (CLI only).
+Runtime (compiled into bundle): `@noble/ciphers`, `@noble/curves`, `@noble/hashes`, `@forgesworn/qr`, `@paulmillr/qr` (camera scanner only), `@scure/bip32`, `@scure/bip39`, `esptool-js`, `nostr-tools`, `serialport` (CLI only).
 
 Dev: `svelte`, `@sveltejs/vite-plugin-svelte`, `vite`, `typescript`, `vitest`, `jsdom`, `@testing-library/svelte`, `@playwright/test`, `esbuild`.
 

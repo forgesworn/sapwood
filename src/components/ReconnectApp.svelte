@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { encodeQR } from '@paulmillr/qr'
+  import { qrSvg } from '../lib/qr.js'
   import { device, mgmtClientUri } from '../lib/device.svelte.js'
   import { copyText } from '../lib/clipboard.js'
   import { bunkerHasRelay } from '../lib/bunker.js'
@@ -12,7 +12,7 @@
   let uri = $state('')
   let error = $state('')
   let copied = $state(false)
-  const qr = $derived(uri ? encodeQR(uri, 'svg') : '')
+  const qr = $derived(uri ? qrSvg(uri) : '')
 
   $effect(() => {
     if (!device.connected || device.connectionGeneration !== generation || device.selectedSlot !== identity) onclose()
