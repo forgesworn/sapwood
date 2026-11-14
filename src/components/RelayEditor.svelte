@@ -65,7 +65,7 @@
 
   function add(url: string) {
     const clean = url.trim()
-    if (!/^wss?:\/\/.+/i.test(clean)) {
+    if (!/^wss?:\/\/\S+$/i.test(clean)) {
       error = 'A relay address starts with wss:// (or ws:// on your own network).'
       return
     }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import Connectivity from './Connectivity.svelte'
 import {
   abortNetworkConfig, configureNetwork, configureNetworkRemotely, device, getNetworkConfig,
@@ -372,6 +372,31 @@ describe('Connectivity relay order and the owner default', () => {
     })))
   })
 
+  it('drops the Reset notice once the owner edits the list, and leaves other messages alone', async () => {
+    setDefaultSignerRelays(MINE)
+    render(Connectivity)
+    await loaded()
+    await fireEvent.click(resetButton())
+    expect(screen.getByText(/Your default relays are loaded\. Save to apply them/)).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: `Move ${MINE[0]} down` }))
+
+    expect(screen.queryByText(/Your default relays are loaded/)).toBeNull()
+    expect(screen.getByText(MINE[1]!)).toBeTruthy()
+  })
+
+  it('keeps an unrelated message when the list is edited', async () => {
+    vi.mocked(configureNetworkRemotely).mockRejectedValue(new Error('Relay said no'))
+    render(Connectivity)
+    await loaded()
+    await fireEvent.click(screen.getByRole('button', { name: 'Test & save network' }))
+    await screen.findByText('Relay said no')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+    expect(screen.getByText('Relay said no')).toBeTruthy()
+  })
+
   it('Reset to default falls back to the built-in set when nothing is stored', async () => {
     render(Connectivity)
     await loaded()
@@ -593,6 +618,25 @@ describe('Connectivity relay order and the owner default', () => {
       await waitFor(() => expect((screen.getByLabelText('Mode') as HTMLSelectElement).value).toBe('usb'))
       expect(screen.queryByText('Your default relays')).toBeNull()
       expect(screen.queryByText('Custom')).toBeNull()
+    })
+
+    it('follows a change to the defaults made while the panel is open', async () => {
+      setDefaultSignerRelays(MINE)
+      usb({ ...CONFIGURED, relays: [...MINE] })
+      render(Connectivity)
+      await waitFor(() => expect(screen.getByText('Your default relays')).toBeTruthy())
+
+      // The owner saves a different default elsewhere on the page.
+      act(() => { setDefaultSignerRelays(['wss://elsewhere.example']) })
+      await waitFor(() => expect(screen.getByText('Custom')).toBeTruthy())
+      expect(screen.queryByText('Your default relays')).toBeNull()
+
+      // And back again, this time as another tab would: a storage event.
+      await act(() => {
+        localStorage.setItem('heartwood.defaultSignerRelays', JSON.stringify(MINE))
+        window.dispatchEvent(new StorageEvent('storage', { key: 'heartwood.defaultSignerRelays' }))
+      })
+      await waitFor(() => expect(screen.getByText('Your default relays')).toBeTruthy())
     })
   })
 })

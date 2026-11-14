@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, screen, within, waitFor } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
 import Home from './Home.svelte'
-import { device, refreshSlots, mgmtApproveSigning, mgmtClientUri, mgmtRevokeClient, mgmtUpdateClient } from '../lib/device.svelte.js'
-import { setDeviceLabel } from '../lib/known-devices.js'
+import { device, connectRelay, refreshSlots, mgmtApproveSigning, mgmtClientUri, mgmtRevokeClient, mgmtUpdateClient } from '../lib/device.svelte.js'
+import { rememberDevice, setDeviceLabel } from '../lib/known-devices.js'
+import { DEFAULT_SIGNER_RELAYS, setDefaultSignerRelays } from '../lib/wizard.js'
 import { copyText } from '../lib/clipboard.js'
 
 const HEX = 'c'.repeat(64)
@@ -248,5 +249,31 @@ describe('Home', () => {
     expect(screen.queryByText('This signer needs an identity')).toBeNull()
     await fireEvent.click(screen.getByText('Restore operator key'))
     expect(onadvanced).toHaveBeenCalledWith('identity')
+  })
+})
+
+describe('Home: reaching a silent signer over the network', () => {
+  it('tries the signer\'s relays, the built-in set and the owner\'s set together', async () => {
+    const own = ['wss://mine-one.example', 'wss://mine-two.example']
+    setDefaultSignerRelays(own)
+    // Remembered before the owner changed the defaults, on a relay of its own.
+    rememberDevice(HEX, ['wss://board.example'], 'Kitchen signer')
+    ;(device as { masters: unknown[] }).masters = []
+    ;(device as { mode: string }).mode = 'serial'
+    ;(device as { usbSilent: boolean }).usbSilent = true
+    ;(device as { usbProbing: boolean }).usbProbing = false
+    ;(device as { error: unknown }).error = null
+    vi.mocked(connectRelay).mockClear()
+
+    render(Home)
+    await fireEvent.click(await screen.findByRole('button', { name: /Kitchen signer/ }))
+
+    await waitFor(() => expect(connectRelay).toHaveBeenCalled())
+    const [pub, relays, label] = vi.mocked(connectRelay).mock.calls[0]!
+    expect(pub).toBe(HEX)
+    expect(label).toBe('Kitchen signer')
+    expect(relays).toEqual(expect.arrayContaining(['wss://board.example', ...DEFAULT_SIGNER_RELAYS, ...own]))
+    expect(new Set(relays).size).toBe(relays.length)
+    ;(device as { usbSilent: boolean }).usbSilent = false
   })
 })

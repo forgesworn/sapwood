@@ -21,6 +21,7 @@ import {
   onDefaultRelaysChange,
   setDefaultSignerRelays,
   clearDefaultSignerRelays,
+  recordLastRelays,
   sameRelayOrder,
   type WizardData,
 } from './wizard'
@@ -199,7 +200,7 @@ describe('owner default relays', () => {
       null as unknown as string,
       'wss://other.example',
     ])
-    // The first spelling of a duplicate wins.
+    // The first spelling of a duplicate wins; the scheme is lower-cased and the rest left as typed.
     expect(stored).toEqual(['wss://Keep.example/', 'ws://lan.example:7777', 'wss://other.example'])
     expect(defaultSignerRelays()).toEqual(stored)
   })
@@ -211,15 +212,68 @@ describe('owner default relays', () => {
     expect(cleanRelayList([])).toEqual([])
   })
 
-  it('an empty (or all-invalid) list clears the setting and returns the built-in set', () => {
-    setDefaultSignerRelays(['wss://mine.example'])
-    expect(setDefaultSignerRelays([])).toEqual([...DEFAULT_SIGNER_RELAYS])
-    expect(hasOwnDefaultRelays()).toBe(false)
-    expect(localStorage.getItem(KEY)).toBeNull()
+  it('lower-cases the scheme and leaves the rest of the address as typed', () => {
+    expect(cleanRelayList(['WSS://Relay.Example/Path', 'Ws://LAN.example:7777'])).toEqual([
+      'wss://Relay.Example/Path', 'ws://LAN.example:7777',
+    ])
+  })
 
+  it('refuses an empty or all-invalid list, keeping what is stored', () => {
     setDefaultSignerRelays(['wss://mine.example'])
-    expect(setDefaultSignerRelays(['junk', 'https://x.example'])).toEqual([...DEFAULT_SIGNER_RELAYS])
+    const message = 'Add at least one relay address that starts with wss:// or ws://.'
+    expect(() => setDefaultSignerRelays([])).toThrow(message)
+    expect(() => setDefaultSignerRelays(['junk', 'https://x.example'])).toThrow(message)
+    expect(defaultSignerRelays()).toEqual(['wss://mine.example'])
+    expect(hasOwnDefaultRelays()).toBe(true)
+  })
+
+  it('refuses more than eight relays, and accepts exactly eight', () => {
+    const nine = Array.from({ length: 9 }, (_, i) => `wss://r${i}.example`)
+    expect(() => setDefaultSignerRelays(nine)).toThrow('A Heartwood holds at most eight relays.')
     expect(hasOwnDefaultRelays()).toBe(false)
+    expect(setDefaultSignerRelays(nine.slice(0, 8))).toEqual(nine.slice(0, 8))
+    // Duplicates collapse before the count.
+    expect(setDefaultSignerRelays([...nine.slice(0, 8), 'wss://R0.example/'])).toEqual(nine.slice(0, 8))
+  })
+
+  it('refuses an address over 255 UTF-8 bytes, counting bytes not characters', () => {
+    const prefix = 'wss://'
+    const ok = prefix + 'a'.repeat(255 - prefix.length)
+    expect(ok.length).toBe(255)
+    expect(setDefaultSignerRelays([ok])).toEqual([ok])
+    const message = 'A relay address can be at most 255 bytes long.'
+    expect(() => setDefaultSignerRelays([ok + 'a'])).toThrow(message)
+    // 130 two-byte characters: 136 characters, 266 bytes.
+    const wide = prefix + '\u00e9'.repeat(130)
+    expect(wide.length).toBeLessThan(255)
+    expect(() => setDefaultSignerRelays([wide])).toThrow(message)
+    expect(defaultSignerRelays()).toEqual([ok])
+  })
+
+  it('throws when the browser will not store it, without notifying or changing anything', () => {
+    setDefaultSignerRelays(['wss://mine.example'])
+    const fn = vi.fn()
+    const off = onDefaultRelaysChange(fn)
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+    try {
+      expect(() => setDefaultSignerRelays(['wss://other.example']))
+        .toThrow('This browser did not save the setting. Check that it allows site data for this page.')
+    } finally {
+      spy.mockRestore()
+      off()
+    }
+    expect(fn).not.toHaveBeenCalled()
+    expect(defaultSignerRelays()).toEqual(['wss://mine.example'])
+  })
+
+  it('does not notify when a save is refused', () => {
+    const fn = vi.fn()
+    const off = onDefaultRelaysChange(fn)
+    expect(() => setDefaultSignerRelays([])).toThrow()
+    off()
+    expect(fn).not.toHaveBeenCalled()
   })
 
   it('falls back to the built-in set for corrupt, non-array or all-invalid stored values', () => {
@@ -227,6 +281,14 @@ describe('owner default relays', () => {
       localStorage.setItem(KEY, raw)
       expect(defaultSignerRelays(), raw).toEqual([...DEFAULT_SIGNER_RELAYS])
     }
+  })
+
+  it('treats a stored list of more than eight relays as invalid', () => {
+    const nine = Array.from({ length: 9 }, (_, i) => `wss://r${i}.example`)
+    localStorage.setItem(KEY, JSON.stringify(nine))
+    expect(defaultSignerRelays()).toEqual([...DEFAULT_SIGNER_RELAYS])
+    localStorage.setItem(KEY, JSON.stringify(nine.slice(0, 8)))
+    expect(defaultSignerRelays()).toEqual(nine.slice(0, 8))
   })
 
   it('cleans a hand-edited stored list when reading it', () => {
@@ -254,6 +316,23 @@ describe('owner default relays', () => {
     expect(fn).toHaveBeenCalledTimes(2)
   })
 
+  it('notifies listeners on a storage event for its key or a cleared store, not another key', () => {
+    const fn = vi.fn()
+    const off = onDefaultRelaysChange(fn)
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key: KEY }))
+      expect(fn).toHaveBeenCalledTimes(1)
+      window.dispatchEvent(new StorageEvent('storage', { key: null }))
+      expect(fn).toHaveBeenCalledTimes(2)
+      window.dispatchEvent(new StorageEvent('storage', { key: 'heartwood.lastRelays' }))
+      expect(fn).toHaveBeenCalledTimes(2)
+    } finally {
+      off()
+    }
+    window.dispatchEvent(new StorageEvent('storage', { key: KEY }))
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
   it('sameRelayOrder is order-sensitive and exact', () => {
     expect(sameRelayOrder(['wss://a', 'wss://b'], ['wss://a', 'wss://b'])).toBe(true)
     expect(sameRelayOrder(['wss://a', 'wss://b'], ['wss://b', 'wss://a'])).toBe(false)
@@ -267,5 +346,26 @@ describe('owner default relays', () => {
     setDefaultSignerRelays(['wss://second.example', 'wss://first.example'])
     expect(initialData().relays).toEqual(['wss://second.example', 'wss://first.example'])
     expect(initialData({ relays: ['wss://override.example'] }).relays).toEqual(['wss://override.example'])
+  })
+})
+
+describe('recordLastRelays', () => {
+  afterEach(() => localStorage.clear())
+
+  it('stores the list as JSON under heartwood.lastRelays', () => {
+    recordLastRelays(['wss://b.example', 'wss://a.example'])
+    expect(localStorage.getItem('heartwood.lastRelays')).toBe('["wss://b.example","wss://a.example"]')
+  })
+
+  it('swallows a storage error', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+    try {
+      expect(() => recordLastRelays(['wss://a.example'])).not.toThrow()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(localStorage.getItem('heartwood.lastRelays')).toBeNull()
   })
 })

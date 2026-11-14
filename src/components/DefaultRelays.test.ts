@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import DefaultRelays from './DefaultRelays.svelte'
 import {
   DEFAULT_SIGNER_RELAYS, defaultSignerRelays, hasOwnDefaultRelays, setDefaultSignerRelays,
@@ -12,6 +12,7 @@ vi.mock('../lib/relay-health.js', () => ({
 afterEach(() => {
   cleanup()
   localStorage.clear()
+  vi.restoreAllMocks()
 })
 
 const [FIRST, SECOND] = DEFAULT_SIGNER_RELAYS as readonly [string, string]
@@ -95,5 +96,89 @@ describe('DefaultRelays', () => {
     expect(screen.getByText(SAVED)).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: `Move ${FIRST} up`, ...q }))
     expect(screen.queryByText(SAVED)).toBeNull()
+  })
+
+  it('shows the error, not Saved, when the browser will not store the set, and keeps the panel state', async () => {
+    render(DefaultRelays)
+    await fireEvent.click(screen.getByRole('button', { name: `Move ${FIRST} down`, ...q }))
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+
+    await fireEvent.click(saveButton())
+
+    expect(screen.getByText(
+      'This browser did not save the setting. Check that it allows site data for this page.',
+    )).toBeTruthy()
+    expect(screen.queryByText(SAVED)).toBeNull()
+    // Nothing was saved: the edit is still pending and there is no own set.
+    expect(saveButton().disabled).toBe(false)
+    expect(screen.getByRole('button', { name: 'Discard changes', ...q })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /built-in set/, ...q })).toBeNull()
+    expect(hasOwnDefaultRelays()).toBe(false)
+  })
+
+  it('shows the rule message for a set the signer would reject', async () => {
+    render(DefaultRelays)
+    const input = screen.getByPlaceholderText('wss://relay.example.com')
+    // Two built-in relays plus seven more: nine in all.
+    for (let i = 0; i < 7; i++) {
+      await fireEvent.input(input, { target: { value: `wss://extra${i}.example` } })
+      await fireEvent.click(screen.getByRole('button', { name: 'Add', ...q }))
+    }
+
+    await fireEvent.click(saveButton())
+
+    expect(screen.getByText('A Heartwood holds at most eight relays.')).toBeTruthy()
+    expect(screen.queryByText(SAVED)).toBeNull()
+    expect(hasOwnDefaultRelays()).toBe(false)
+  })
+
+  it('clears the error on the next edit', async () => {
+    render(DefaultRelays)
+    await fireEvent.click(screen.getByRole('button', { name: `Move ${FIRST} down`, ...q }))
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+    await fireEvent.click(saveButton())
+    spy.mockRestore()
+    expect(screen.getByRole('alert', q)).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: `Move ${FIRST} up`, ...q }))
+    expect(screen.queryByRole('alert', q)).toBeNull()
+  })
+
+  describe('a change made in another tab', () => {
+    const otherTab = (relays: string[]) => act(() => {
+      localStorage.setItem('heartwood.defaultSignerRelays', JSON.stringify(relays))
+      window.dispatchEvent(new StorageEvent('storage', { key: 'heartwood.defaultSignerRelays' }))
+    })
+
+    it('replaces the list when the panel has no unsaved edits', async () => {
+      render(DefaultRelays)
+      expect(screen.getByText(FIRST)).toBeTruthy()
+
+      await otherTab(['wss://theirs.example'])
+
+      expect(screen.getByText('wss://theirs.example')).toBeTruthy()
+      expect(screen.queryByText(FIRST)).toBeNull()
+      expect(saveButton().disabled).toBe(true)
+      expect(screen.getByRole('button', { name: "Use Sapwood's built-in set", ...q })).toBeTruthy()
+    })
+
+    it('keeps what the owner is typing when there are unsaved edits', async () => {
+      render(DefaultRelays)
+      await fireEvent.click(screen.getByRole('button', { name: `Move ${FIRST} down`, ...q }))
+
+      await otherTab(['wss://theirs.example'])
+
+      // The draft (reordered built-ins) is untouched and still unsaved.
+      expect(screen.queryByText('wss://theirs.example')).toBeNull()
+      expect(screen.getByText(FIRST)).toBeTruthy()
+      expect(saveButton().disabled).toBe(false)
+      // The saved side did follow the other tab: discarding reveals it.
+      await fireEvent.click(screen.getByRole('button', { name: 'Discard changes', ...q }))
+      expect(screen.getByText('wss://theirs.example')).toBeTruthy()
+    })
   })
 })

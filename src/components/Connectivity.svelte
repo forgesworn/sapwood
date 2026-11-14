@@ -9,7 +9,8 @@
   import { getOrCreateOperator } from '../lib/op-mgmt.js'
   import type { NetConfig } from '../lib/frame'
   import {
-    SUGGESTED_SIGNER_RELAYS, defaultSignerRelays, onDefaultRelaysChange, sameRelayOrder,
+    SUGGESTED_SIGNER_RELAYS, defaultSignerRelays, onDefaultRelaysChange, recordLastRelays,
+    sameRelayOrder,
   } from '../lib/wizard.js'
   import PasswordReveal from './PasswordReveal.svelte'
   import RelayEditor from './RelayEditor.svelte'
@@ -101,11 +102,13 @@
       || (overUsb && device.usbNetworkSupport === 'unsupported'),
   )
 
+  const RESET_NOTICE = 'Your default relays are loaded. Save to apply them to this Heartwood.'
+
   /** Load the owner's default set into the editor; the normal Save applies it. */
   function resetRelaysToDefault() {
     relays = defaultSignerRelays()
     status = 'idle'
-    message = 'Your default relays are loaded. Save to apply them to this Heartwood.'
+    message = RESET_NOTICE
   }
   const MAX_FALLBACKS = 7
 
@@ -453,7 +456,7 @@
       // and the USB bunker-URI builder (serialGetUri reads lastRelays) hands out
       // links that name them.
       if (ok && mode === 'wifi') {
-        try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(cleanRelays)) } catch { /* ignore */ }
+        recordLastRelays(cleanRelays)
       }
     } catch (e) {
       if (epoch !== loadEpoch || connectionKey() !== requestKey) return
@@ -616,7 +619,11 @@
           suggestions={SUGGESTED_SIGNER_RELAYS}
           disabled={!canConfigure || loading || status === 'sending'}
           showHealth
-          onchange={(next) => (relays = next)}
+          onchange={(next) => {
+            relays = next
+            // The Reset notice describes the list as loaded; it is stale once edited.
+            if (message === RESET_NOTICE) message = ''
+          }}
         />
         <div class="relay-reset">
           <button type="button" class="btn-link" onclick={resetRelaysToDefault}

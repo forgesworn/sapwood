@@ -114,3 +114,27 @@ describe('RelayEditor health probing', () => {
     expect(probeRelays).not.toHaveBeenCalled()
   })
 })
+
+describe('RelayEditor adding an address', () => {
+  const MESSAGE = 'A relay address starts with wss:// (or ws:// on your own network).'
+  const type = (value: string) =>
+    fireEvent.input(screen.getByPlaceholderText('wss://relay.example.com'), { target: { value } })
+
+  it('adds a well-formed address', async () => {
+    const onchange = vi.fn()
+    render(RelayEditor, { relays: [A], onchange })
+    await type(' wss://new.example ')
+    await fireEvent.click(button('Add'))
+    expect(onchange).toHaveBeenCalledWith([A, 'wss://new.example'])
+    expect(screen.queryByText(MESSAGE)).toBeNull()
+  })
+
+  it('refuses an address with a space inside it', async () => {
+    const onchange = vi.fn()
+    render(RelayEditor, { relays: [A], onchange })
+    await type('wss://bad host.example')
+    await fireEvent.click(button('Add'))
+    expect(onchange).not.toHaveBeenCalled()
+    expect(screen.getByText(MESSAGE)).toBeTruthy()
+  })
+})

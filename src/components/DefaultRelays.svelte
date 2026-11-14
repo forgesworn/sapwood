@@ -4,7 +4,8 @@
   // signer keeps its own list on the board and can be reset to this set.
   import {
     DEFAULT_SIGNER_RELAYS, SUGGESTED_SIGNER_RELAYS, clearDefaultSignerRelays,
-    defaultSignerRelays, hasOwnDefaultRelays, sameRelayOrder, setDefaultSignerRelays,
+    defaultSignerRelays, hasOwnDefaultRelays, onDefaultRelaysChange, sameRelayOrder,
+    setDefaultSignerRelays,
   } from '../lib/wizard.js'
   import RelayEditor from './RelayEditor.svelte'
 
@@ -12,6 +13,7 @@
   let draft = $state(defaultSignerRelays())
   let own = $state(hasOwnDefaultRelays())
   let message = $state('')
+  let saveError = $state('')
 
   const dirty = $derived(!sameRelayOrder(draft, saved))
   const isBuiltIn = $derived(sameRelayOrder(saved, DEFAULT_SIGNER_RELAYS))
@@ -19,21 +21,41 @@
   function edit(next: string[]) {
     draft = next
     message = ''
+    saveError = ''
   }
 
   function save() {
     if (!draft.length) return
-    saved = setDefaultSignerRelays(draft)
+    let stored: string[]
+    try {
+      stored = setDefaultSignerRelays(draft)
+    } catch (e) {
+      message = ''
+      saveError = e instanceof Error ? e.message : String(e)
+      return
+    }
+    saved = stored
     draft = [...saved]
     own = true
+    saveError = ''
     message = 'Saved. New Heartwoods start with these relays.'
   }
+
+  // The defaults can change from another tab. Re-read them, and replace the
+  // draft only when the owner has no unsaved edits here.
+  $effect(() => onDefaultRelaysChange(() => {
+    const wasClean = sameRelayOrder(draft, saved)
+    saved = defaultSignerRelays()
+    own = hasOwnDefaultRelays()
+    if (wasClean) draft = [...saved]
+  }))
 
   function useBuiltIn() {
     clearDefaultSignerRelays()
     saved = defaultSignerRelays()
     draft = [...saved]
     own = false
+    saveError = ''
     message = 'Sapwood\'s built-in relays are your default again.'
   }
 </script>
@@ -46,6 +68,7 @@
   </p>
   <RelayEditor relays={draft} suggestions={SUGGESTED_SIGNER_RELAYS} onchange={edit} />
   {#if !draft.length}<p class="error-text">Keep at least one relay.</p>{/if}
+  {#if saveError}<p class="error-text" role="alert">{saveError}</p>{/if}
   <div class="actions">
     <button type="button" class="btn btn-secondary btn-sm" disabled={!dirty || !draft.length} onclick={save}>
       Save defaults

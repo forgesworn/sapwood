@@ -14,7 +14,7 @@
   import {
     type WizardStep, type WizardData,
     USER_STEPS, initialData, networkError, canAdvance,
-    nextStep, prevStep, friendlyStage, SUGGESTED_SIGNER_RELAYS,
+    nextStep, prevStep, friendlyStage, recordLastRelays, SUGGESTED_SIGNER_RELAYS,
   } from './lib/wizard.js'
   import TetheredSetup from './components/TetheredSetup.svelte'
   import PasswordReveal from './components/PasswordReveal.svelte'
@@ -142,7 +142,7 @@
     // Remember relays so the admin console can default this device's relay.
     // A USB-only signer has none — it is reached over the cable (or its bridge).
     if (wifi) {
-      try { localStorage.setItem('heartwood.lastRelays', JSON.stringify(relays)) } catch { /* ignore */ }
+      recordLastRelays(relays)
     }
 
     step = 'flashing'
