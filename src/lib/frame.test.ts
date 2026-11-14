@@ -22,6 +22,7 @@ import {
   buildBackupImportRequest,
   buildVaultSet,
   buildVaultUnlock,
+  slotListRefusal,
 } from './frame.js'
 
 describe('crc32', () => {
@@ -375,5 +376,21 @@ describe('vault frames', () => {
   it('rejects keys that are not 32 bytes', () => {
     expect(() => buildVaultSet(new Uint8Array(31))).toThrow(/32 bytes/)
     expect(() => buildVaultUnlock(new Uint8Array(0))).toThrow(/32 bytes/)
+  })
+})
+
+describe('slotListRefusal', () => {
+  const nack = (reason: string) => new TextEncoder().encode(reason)
+
+  it('names the two reasons the firmware gives', () => {
+    expect(slotListRefusal(nack('slot list too large'))).toMatch(/too large to send over USB/)
+    expect(slotListRefusal(nack('low memory'))).toMatch(/low on memory.*try again/)
+  })
+
+  it('passes any other reason through, and words a bare NACK plainly', () => {
+    expect(slotListRefusal(nack('no such identity'))).toBe(
+      'The signer would not list its connections: no such identity.',
+    )
+    expect(slotListRefusal(new Uint8Array(0))).toBe('The signer would not list its connections.')
   })
 })

@@ -56,6 +56,7 @@
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
+    "@forgesworn/qr": "^0.1.0",
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",

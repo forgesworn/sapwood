@@ -4,7 +4,7 @@
   // Wraps the existing mgmt actions (mgmtCreateClient / mgmtUpdateClient) so it
   // works identically over WiFi (relay) and USB. Logic lives in connect-flow.ts
   // and client-presets.ts (both pure + unit-tested); this holds the reactive UI.
-  import { encodeQR } from '@paulmillr/qr'
+  import { qrSvg } from '../lib/qr.js'
   import {
     device, mgmtCreateClient, mgmtNostrconnect, supportsPairingIdentity,
   } from '../lib/device.svelte.js'
@@ -92,7 +92,7 @@
       return d.type === 'npub' ? (d.data as string).toLowerCase() : null
     } catch { return null }
   })
-  const qr = $derived(created?.bunker_uri ? encodeQR(created.bunker_uri, 'svg') : '')
+  const qr = $derived(created?.bunker_uri ? qrSvg(created.bunker_uri) : '')
   const commonKindSet = new Set(COMMON_KINDS.map((k) => k.kind))
   const customExtraKinds = $derived(customKinds.filter((k) => !commonKindSet.has(k)).sort((a, b) => a - b))
 

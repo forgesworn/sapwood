@@ -436,6 +436,22 @@ export function buildConnSlotList(masterSlot: number): Uint8Array {
   return buildFrame(FrameType.CONNSLOT_LIST, new Uint8Array([masterSlot]))
 }
 
+/** Why the signer refused CONNSLOT_LIST, in words for the owner, from its NACK
+ *  payload. Newer firmware names the reason (`slot list too large`, `low
+ *  memory`); older builds send a bare NACK. */
+export function slotListRefusal(payload: Uint8Array): string {
+  const reason = new TextDecoder().decode(payload).trim()
+  if (/too large/i.test(reason)) {
+    return 'The signer\'s connection list is too large to send over USB.'
+  }
+  if (/low memory/i.test(reason)) {
+    return 'The signer is low on memory, so it could not list its connections. Wait a moment and try again.'
+  }
+  return reason
+    ? `The signer would not list its connections: ${reason}.`
+    : 'The signer would not list its connections.'
+}
+
 /** CONNSLOT_UPDATE: payload [master_slot][JSON {slot_index, label?, allowed_kinds?, auto_approve?}]. Button-confirmed. */
 export function buildConnSlotUpdate(masterSlot: number, changes: Record<string, unknown>): Uint8Array {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(changes))
