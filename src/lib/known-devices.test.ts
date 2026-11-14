@@ -5,7 +5,7 @@ import {
   clearPendingNetworkHandoff, networkRecoveryRelays, pendingNetworkHandoff,
   savePendingNetworkHandoff,
 } from './known-devices.js'
-import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
+import { DEFAULT_SIGNER_RELAYS, setDefaultSignerRelays } from './wizard.js'
 import { nip19 } from 'nostr-tools'
 
 const HEX_A = 'a'.repeat(64)
@@ -63,6 +63,18 @@ describe('device labels', () => {
     const d = rememberDevice(HEX_B, [])
     expect(d.relays).toEqual([...DEFAULT_SIGNER_RELAYS])
     expect(d.relays.length).toBeGreaterThan(0)
+  })
+
+  it('gives a new device the owner\'s stored default relays, in order, when none are known', () => {
+    setDefaultSignerRelays(['wss://second.example', 'wss://first.example'])
+    try {
+      const d = rememberDevice(HEX_B, [])
+      expect(d.relays).toEqual(['wss://second.example', 'wss://first.example'])
+      expect(listKnownDevices().find((k) => k.pubHex === HEX_B)?.relays)
+        .toEqual(['wss://second.example', 'wss://first.example'])
+    } finally {
+      localStorage.clear()
+    }
   })
 
   it('keeps a saved device on its own relay when that relay is not a default', () => {

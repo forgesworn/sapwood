@@ -3,6 +3,7 @@ import { render, fireEvent, screen } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
 import ConnectionPicker from './ConnectionPicker.svelte'
 import { rememberDevice } from '../lib/known-devices.js'
+import { DEFAULT_SIGNER_RELAYS, setDefaultSignerRelays } from '../lib/wizard.js'
 import { connectRelay, device } from '../lib/device.svelte.js'
 
 const HEX = 'd'.repeat(64)
@@ -65,5 +66,23 @@ describe('ConnectionPicker', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Connect remotely' }))
 
     expect(vi.mocked(connectRelay)).toHaveBeenCalledWith(HEX, relays, 'TheCryptoDonkey')
+  })
+
+  it('prefills the relay field with the built-in set when there is no known device and no stored default', async () => {
+    render(ConnectionPicker)
+    await fireEvent.click(screen.getByRole('button', { name: /Connect by signer address/ }))
+    expect((screen.getByLabelText(/The relays it uses/) as HTMLInputElement).value)
+      .toBe(DEFAULT_SIGNER_RELAYS.join(', '))
+  })
+
+  it('prefills the relay field with the owner\'s stored default, in order, when no device is known', async () => {
+    const mine = ['wss://second.example', 'wss://first.example', 'wss://third.example']
+    setDefaultSignerRelays(mine)
+
+    render(ConnectionPicker)
+    await fireEvent.click(screen.getByRole('button', { name: /Connect by signer address/ }))
+
+    expect((screen.getByLabelText(/The relays it uses/) as HTMLInputElement).value)
+      .toBe(mine.join(', '))
   })
 })

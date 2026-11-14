@@ -28,6 +28,7 @@
   } from '../lib/pairing-backup.js'
   import { resolveUnlockMode, shouldRetireEncryptionKnown, type UnlockMode } from '../lib/phone-unlock.js'
   import Connectivity from './Connectivity.svelte'
+  import DefaultRelays from './DefaultRelays.svelte'
   import UnlockPhones from './UnlockPhones.svelte'
   import OtaUpdate from './OtaUpdate.svelte'
   import Backup from './Backup.svelte'
@@ -950,6 +951,7 @@
         <span class="section-row-state">{networkStateWord}</span>
       </summary>
       <Connectivity heading={false} />
+      <DefaultRelays />
       {#if overUsb}
         <details class="disclosure advanced-block">
           <summary>Advanced: bridge secret</summary>

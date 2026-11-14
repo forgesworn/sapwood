@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { getConversationKey, encrypt as nip44Encrypt } from 'nostr-tools/nip44'
 import { hexToBytes } from '@noble/hashes/utils.js'
-import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
+import { DEFAULT_SIGNER_RELAYS, setDefaultSignerRelays } from '../lib/wizard.js'
 
 const P = 'a1'.repeat(32)
 const R = 'b2'.repeat(16)
@@ -138,7 +138,10 @@ function inviteReply(plaintext: string, rendezvous = INVITE_RENDEZVOUS) {
   }, throwaway)
 }
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+})
 
 describe('UnlockPhones', () => {
   it('lists the phones and revokes one', async () => {
@@ -329,6 +332,20 @@ describe('UnlockPhones', () => {
       await fireEvent.click(screen.getByRole('button', { name: 'Send to the signer' }))
       expect(await screen.findByText('9B6 164')).toBeTruthy()
       expect(api.enrolUnlockPhone).toHaveBeenCalledWith(p, 'Pixel 8', expect.stringMatching(/compare the five words/i))
+    })
+
+    it('falls back to the owner\'s stored default relays, in order, instead of the built-in set', async () => {
+      const mine = ['wss://second.example', 'wss://first.example']
+      setDefaultSignerRelays(mine)
+      render(UnlockPhones)
+      await fireEvent.click(await screen.findByRole('button', { name: 'Add a phone' }))
+      await screen.findByText('Scan this with Cambium')
+      for (const url of mine) {
+        expect(relays.ensureRelay).toHaveBeenCalledWith(url, expect.anything())
+      }
+      expect(relays.subscribe).toHaveBeenCalledOnce()
+      expect(relays.subscribe.mock.calls[0][0]).toEqual(mine)
+      expect(invite.createInvite.mock.calls[0][0]).toEqual(mine)
     })
 
     it('ignores a repeat of the identical reply', async () => {

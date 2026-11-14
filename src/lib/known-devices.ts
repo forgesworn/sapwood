@@ -8,7 +8,7 @@
 // Persisted in localStorage; the operator secret lives separately in op-mgmt.ts.
 
 import { nip19 } from 'nostr-tools'
-import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
+import { defaultSignerRelays } from './wizard.js'
 
 const LS_KEY = 'heartwood.knownDevices'
 const NETWORK_HANDOFF_KEY = 'heartwood.pendingNetworkHandoffs.v1'
@@ -224,7 +224,7 @@ export function rememberDevice(pubHex: string, relays: string[], label?: string)
   }
   const entry: KnownDevice = {
     pubHex: key,
-    relays: relays.length ? mergeRelays(relays) : [...DEFAULT_SIGNER_RELAYS],
+    relays: relays.length ? mergeRelays(relays) : defaultSignerRelays(),
     label: label || npubShort(key),
     lastSeen: now,
   }

@@ -28,7 +28,7 @@
   import { transport as serialTransport } from '../lib/serial.js'
   import { generateBridgeSecret, bridgeArtifacts, type BridgeArtifacts } from '../lib/bridge-setup.js'
   import { copyText } from '../lib/clipboard.js'
-  import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
+  import { defaultSignerRelays, recordLastRelays } from '../lib/wizard.js'
   import ResetCallout from './ResetCallout.svelte'
 
   type Step = 'intro' | 'flash' | 'provision' | 'bridge' | 'done'
@@ -191,8 +191,10 @@
 
   // --- Bridge daemon config ----------------------------------------------
   let hostPort = $state(defaultPort)
-  let relaysText = $state(DEFAULT_SIGNER_RELAYS.join('\n'))
+  let relaysText = $state(defaultSignerRelays().join('\n'))
   let copied = $state('')
+
+  const bridgeRelays = $derived(relaysText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))
 
   let artifacts: BridgeArtifacts | null = $derived.by(() => {
     if (!/^[0-9a-f]{64}$/i.test(bridgeSecret)) return null
@@ -200,7 +202,7 @@
       return bridgeArtifacts({
         devicePort: hostPort,
         secretHex: bridgeSecret.toLowerCase(),
-        relays: relaysText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+        relays: bridgeRelays,
       })
     } catch {
       return null
@@ -208,6 +210,8 @@
   })
 
   async function copy(label: string, text: string) {
+    // The bridge listens on these relays, so cable-made app links should name them.
+    recordLastRelays(bridgeRelays)
     if (await copyText(text)) {
       copied = label
       setTimeout(() => (copied = copied === label ? '' : copied), 1500)
@@ -338,7 +342,7 @@
         </div>
         <pre>{artifacts.runCommand}</pre>
       </div>
-      <button class="btn btn-secondary" onclick={() => (step = 'done')}>Done →</button>
+      <button class="btn btn-secondary" onclick={() => { recordLastRelays(bridgeRelays); step = 'done' }}>Done →</button>
     {:else}
       <p class="hint-sm">Enter the signer's port and at least one relay to generate the bridge config.</p>
     {/if}

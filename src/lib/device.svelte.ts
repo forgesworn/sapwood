@@ -47,7 +47,7 @@ import { VaultAnnouncementWatcher, publishVaultDelivery, loadVaultKey } from './
 import {
   PHONE_UNLOCK_CAPABILITY, RELAY_ENROL_CAPABILITY, parsePhoneList, type UnlockPhoneList,
 } from './phone-unlock.js'
-import { DEFAULT_SIGNER_RELAYS } from './wizard.js'
+import { DEFAULT_SIGNER_RELAYS, defaultSignerRelays } from './wizard.js'
 import { nip19 } from 'nostr-tools'
 import { SimplePool } from 'nostr-tools/pool'
 import { kindLabel } from './kinds.js'
@@ -3610,7 +3610,7 @@ export async function relayProvisionIdentity(
     existing: res.existing === true,
   }
   if (!info.existing) {
-    rememberDevice(hex, device.relays.length ? device.relays : [...DEFAULT_SIGNER_RELAYS], info.label)
+    rememberDevice(hex, device.relays.length ? device.relays : defaultSignerRelays(), info.label)
   }
   return info
 }
@@ -3639,7 +3639,7 @@ export async function relayDeriveIdentity(
   }
   if (!info.existing) {
     // Make the new identity one-tap connectable once the signer is back.
-    rememberDevice(hex, device.relays.length ? device.relays : [...DEFAULT_SIGNER_RELAYS], info.label)
+    rememberDevice(hex, device.relays.length ? device.relays : defaultSignerRelays(), info.label)
   }
   return info
 }

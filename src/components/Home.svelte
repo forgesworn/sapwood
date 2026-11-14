@@ -22,7 +22,7 @@
     PAIRING_BACKUP_EVENT, pairingBackupStatus, pairingBackupRelativeTime,
     type PairingBackupStatus,
   } from '../lib/pairing-backup.js'
-  import { DEFAULT_SIGNER_RELAYS } from '../lib/wizard.js'
+  import { DEFAULT_SIGNER_RELAYS, defaultSignerRelays } from '../lib/wizard.js'
   import ConnectApp from './ConnectApp.svelte'
   import FirstIdentity from './FirstIdentity.svelte'
   import PhoneHandoff from './PhoneHandoff.svelte'
@@ -236,9 +236,9 @@
     wifiErr = ''
     try {
       // Cast a wider net on a flaky link: the signer's remembered relays plus the
-      // standard defaults, so a single slow or dead relay isn't the only path and
-      // we still share one with a signer (re)configured with the defaults.
-      const relays = [...new Set([...d.relays, ...DEFAULT_SIGNER_RELAYS])]
+      // built-in set and the owner's set, so a board on either is reached and a
+      // single slow or dead relay isn't the only path.
+      const relays = [...new Set([...d.relays, ...DEFAULT_SIGNER_RELAYS, ...defaultSignerRelays()])]
       await connectRelay(d.pubHex, relays, d.label)
     } catch (e) {
       wifiErr = e instanceof Error ? e.message
