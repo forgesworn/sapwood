@@ -42,7 +42,7 @@ export function availableEntries(free: number): number {
   return Math.max(0, free - PAGE_ENTRIES)
 }
 
-/** Stored length of an identity-card picture: a 2-byte header plus Rgb565 pixels. */
+/** Stored length of a 64x64 or 48x48 Rgb565 identity-card picture: a 2-byte header plus pixels. */
 export function avatarBlobLength(side: number): number {
   return 2 + side * side * 2
 }
@@ -50,18 +50,31 @@ export function avatarBlobLength(side: number): number {
 /** The picture sizes (square sides) Sapwood can send. */
 export type PictureSide = 64 | 48
 
+/** One picture Sapwood can send: a side and a pixel format. */
+export interface PictureRung {
+  side: PictureSide
+  format: 'rgb565' | 'rgb332'
+}
+
+/** Richest first: a bigger picture beats more colours, and the signer's NACK steps down. */
+export const PICTURE_LADDER: readonly PictureRung[] = [
+  { side: 64, format: 'rgb565' },
+  { side: 64, format: 'rgb332' },
+  { side: 48, format: 'rgb565' },
+  { side: 48, format: 'rgb332' },
+]
+
 /**
- * Which picture side to send given the signer's NVS stats. Returns 64 when
- * the stats are absent (older firmware); 64 when it fits; otherwise 48, even
- * when 48 does not fit by the estimate (the signer decides).
+ * Where on PICTURE_LADDER to start, given the signer's NVS stats: rung 0
+ * (64x64 Rgb565) without stats or when the estimate says it fits, otherwise
+ * rung 1 (64x64 RGB332). Never lower: the estimate assumes the new blob is
+ * written beside the stored one, but the signer's storage write erases the
+ * stored picture before writing the new one, and Sapwood cannot see how big
+ * that is. The signer's
+ * NACKs walk the rest of the ladder.
  */
-export function pickPictureSide(
-  stats: { free?: number; total?: number },
-): { side: PictureSide; fits: boolean | null } {
-  if (stats.free === undefined || stats.total === undefined) return { side: 64, fits: null }
+export function pickPictureStart(stats: { free?: number; total?: number }): number {
+  if (stats.free === undefined || stats.total === undefined) return 0
   const pages = Math.floor(stats.total / PAGE_ENTRIES)
-  const room = availableEntries(stats.free)
-  if (blobWriteEntries(avatarBlobLength(64), pages) <= room) return { side: 64, fits: true }
-  if (blobWriteEntries(avatarBlobLength(48), pages) <= room) return { side: 48, fits: true }
-  return { side: 48, fits: false }
+  return blobWriteEntries(avatarBlobLength(64), pages) <= availableEntries(stats.free) ? 0 : 1
 }

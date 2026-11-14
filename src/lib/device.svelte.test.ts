@@ -54,6 +54,9 @@ vi.mock('./profiles.js', async (orig) => {
 })
 vi.mock('./avatar.js', () => ({
   loadAvatar: loadAvatarMock,
+  // The real one fetches once for all rungs; here each rung goes through loadAvatarMock.
+  loadAvatarRungs: (url: string, rungs: { side: number; format: string }[]) =>
+    Promise.all(rungs.map((r) => loadAvatarMock(url, r.side, r.format))),
   placeholderAvatar: placeholderMock,
   buildSetIdentityMeta: buildMetaMock,
 }))
@@ -128,7 +131,7 @@ import {
   listKnownDevices, pendingNetworkHandoff, rememberDevice, savePendingNetworkHandoff,
 } from './known-devices.js'
 
-const FAKE_AVATAR = { w: 2, h: 2, bytes: new Uint8Array(8) }
+const FAKE_AVATAR = { w: 2, h: 2, format: 'rgb565', bytes: new Uint8Array(8) }
 const FAKE_FRAME = new Uint8Array([0xaa])
 const ACK = { type: FrameType.ACK, payload: new Uint8Array() }
 const LS_MNEMONIC = 'heartwood.opMgmt.mnemonic'
@@ -1276,8 +1279,7 @@ describe('syncIdentityMeta over USB', () => {
     type: FrameType.FIRMWARE_INFO_RESPONSE,
     payload: new TextEncoder().encode(JSON.stringify({ version: '0.18.0', board: 'lilygo', ...stats })),
   })
-  const A64 = { w: 64, h: 64, bytes: new Uint8Array(1) }
-  const A48 = { w: 48, h: 48, bytes: new Uint8Array(1) }
+  const avatarOf = (size: number, format: string) => ({ w: size, h: size, format, bytes: new Uint8Array(1) })
 
   /** Reply to the version ping with `fw`, and to each meta frame from `metaReplies` in turn. */
   function setup(fw: unknown, metaReplies: unknown[]) {
@@ -1286,8 +1288,8 @@ describe('syncIdentityMeta over USB', () => {
     device.connected = true
     device.masters = [master]
     resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'zed', picture: 'https://x/z.jpg' }]]))
-    loadAvatarMock.mockImplementation(async (_u: string, size: number) => (size === 64 ? A64 : A48))
-    placeholderMock.mockImplementation((_n: string, size: number) => (size === 64 ? A64 : A48))
+    loadAvatarMock.mockImplementation(async (_u: string, size: number, format: string) => avatarOf(size, format))
+    placeholderMock.mockImplementation((_n: string, size: number, format: string) => avatarOf(size, format))
     buildMetaMock.mockReturnValue(FAKE_FRAME)
     const queue = [...metaReplies]
     serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
@@ -1298,65 +1300,88 @@ describe('syncIdentityMeta over USB', () => {
       return next ?? ACK
     })
   }
-  const sizesSent = () => buildMetaMock.mock.calls.map((c) => (c[2] as { w: number }).w)
-
-  it('sends 64x64 when the stats say it fits', async () => {
-    setup(fwWith({ nvs_free_entries: 500, nvs_total_entries: 756 }), [])
-    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
-    expect(sizesSent()).toEqual([64])
+  const sizesSent = () => buildMetaMock.mock.calls.map((c) => {
+    const a = c[2] as { w: number; format: string }
+    return `${a.w}/${a.format}`
   })
 
-  it('sends 48x48 straight away when only that fits', async () => {
+  it('sends 64x64 Rgb565 first try when the stats say it fits, and nothing else', async () => {
+    setup(fwWith({ nvs_free_entries: 500, nvs_total_entries: 756 }), [])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
+    expect(sizesSent()).toEqual(['64/rgb565'])
+    expect(metaPushes()).toBe(1)
+  })
+
+  it('tight storage: new firmware takes 64x64 RGB332 first and nothing else is sent', async () => {
     setup(fwWith({ nvs_free_entries: 340, nvs_total_entries: 756 }), [])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full-fewer-colours' })
+    expect(sizesSent()).toEqual(['64/rgb332'])
+    expect(metaPushes()).toBe(1)
+  })
+
+  it('tight storage: old firmware NACKs 64x64 RGB332, then takes 48x48 Rgb565', async () => {
+    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [NACK_EMPTY, ACK])
     expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
-    expect(sizesSent()).toEqual([48])
+    expect(sizesSent()).toEqual(['64/rgb332', '48/rgb565'])
+  })
+
+  it('never starts below 64x64 RGB332, however full the storage', async () => {
+    setup(fwWith({ nvs_free_entries: 0, nvs_total_entries: 756 }), [])
+    await syncIdentityMeta()
+    expect(sizesSent()).toEqual(['64/rgb332'])
   })
 
   it('tries 64x64 when the firmware sends no stats', async () => {
     setup(FW_RESP, [])
     expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full' })
-    expect(sizesSent()).toEqual([64])
+    expect(sizesSent()).toEqual(['64/rgb565'])
   })
 
-  it('steps down to 48x48 after an empty NACK at 64x64, without resending 64x64', async () => {
+  it('new firmware: takes 64x64 RGB332 after refusing 64x64 Rgb565', async () => {
     setup(FW_RESP, [NACK_EMPTY, ACK])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'full-fewer-colours' })
+    expect(sizesSent()).toEqual(['64/rgb565', '64/rgb332'])
+  })
+
+  it('old firmware: NACKs both RGB332 rungs and ends on 48x48 Rgb565', async () => {
+    setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY, ACK])
     expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
-    expect(sizesSent()).toEqual([64, 48])
+    expect(sizesSent()).toEqual(['64/rgb565', '64/rgb332', '48/rgb565'])
+  })
+
+  it('falls to 48x48 RGB332 as the last rung', async () => {
+    setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY, NACK_EMPTY, ACK])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
+    expect(sizesSent()).toEqual(['64/rgb565', '64/rgb332', '48/rgb565', '48/rgb332'])
   })
 
   it('loads no picture between the version ping and the frame', async () => {
-    setup(FW_RESP, [NACK_EMPTY, ACK])
+    setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY, ACK])
     const order: string[] = []
     const inner = serialMock.sendAndReceive.getMockImplementation()!
     serialMock.sendAndReceive.mockImplementation(async (frame: Uint8Array, expect: number[]) => {
       order.push(expect.includes(FrameType.FIRMWARE_INFO_RESPONSE) ? 'ping' : 'frame')
       return inner(frame, expect)
     })
-    loadAvatarMock.mockImplementation(async (_u: string, size: number) => {
+    loadAvatarMock.mockImplementation(async (_u: string, size: number, format: string) => {
       order.push('load')
-      return size === 64 ? A64 : A48
+      return avatarOf(size, format)
     })
     expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
-    expect(order).toEqual(['load', 'load', 'ping', 'frame', 'frame'])
+    expect(order).toEqual(['load', 'load', 'load', 'load', 'ping', 'frame', 'frame', 'frame'])
   })
 
-  it('says the signer has no room when both sizes are refused, once each', async () => {
-    setup(fwWith({ nvs_free_entries: 340, nvs_total_entries: 756 }), [NACK_EMPTY])
-    await expect(syncIdentityMeta()).rejects.toThrow(/no room for the picture \(its storage is 55% full\)/)
-    expect(sizesSent()).toEqual([48])
-    expect(metaPushes()).toBe(1)
-  })
-
-  it('tries 48x48 once even when the estimate says it will not fit', async () => {
-    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [])
-    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
-    expect(sizesSent()).toEqual([48])
+  it('says the signer has no room when every rung is refused, once each', async () => {
+    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [NACK_EMPTY, NACK_EMPTY, NACK_EMPTY])
+    await expect(syncIdentityMeta()).rejects.toThrow(/no room for the picture \(its storage is 74% full\)/)
+    expect(sizesSent()).toEqual(['64/rgb332', '48/rgb565', '48/rgb332'])
+    expect(metaPushes()).toBe(3)
   })
 
   it('omits the percentage when the signer did not report its storage', async () => {
-    setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY])
+    setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY, NACK_EMPTY, NACK_EMPTY])
     await expect(syncIdentityMeta()).rejects.toThrow(/^The signer has no room for the picture\./)
-    expect(sizesSent()).toEqual([64, 48])
+    expect(sizesSent()).toEqual(['64/rgb565', '64/rgb332', '48/rgb565', '48/rgb332'])
   })
 
   describe('USB session', () => {
@@ -1513,7 +1538,7 @@ describe('identity card auto-sync on serial master list', () => {
 
     emitMasterList([master])
     await vi.waitFor(() => expect(metaPushes()).toBe(1))
-    expect(placeholderMock).toHaveBeenCalledWith('bob', 64)
+    expect(placeholderMock).toHaveBeenCalledWith('bob', 64, 'rgb565')
     expect(loadAvatarMock).not.toHaveBeenCalled()
   })
 
@@ -1529,7 +1554,7 @@ describe('identity card auto-sync on serial master list', () => {
 
     emitMasterList([master])
     await vi.waitFor(() => expect(metaPushes()).toBe(1))
-    expect(placeholderMock).toHaveBeenCalledWith('carol', 64)
+    expect(placeholderMock).toHaveBeenCalledWith('carol', 64, 'rgb565')
   })
 
   it('releases the dedupe guard when no profile exists yet, so a later refresh retries', async () => {
@@ -1576,7 +1601,7 @@ describe('identity card auto-sync on serial master list', () => {
         )
       })
       // Relay pushes shrink to 48x48 — a 64x64 event OOM-rebooted a T-Display.
-      expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48)
+      expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48, 'rgb565')
       expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
       await vi.waitFor(() => expect(device.logs.join('\n')).toContain('identity card synced to signer: erin (small picture)'))
     } finally {
