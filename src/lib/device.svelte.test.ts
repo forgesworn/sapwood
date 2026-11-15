@@ -1378,6 +1378,28 @@ describe('syncIdentityMeta over USB', () => {
     expect(metaPushes()).toBe(3)
   })
 
+  it('ends on a plain storage-full line when the last rung is refused with storage_full', async () => {
+    const full = nackWith('storage_full: not enough storage left for the avatar; the pairings need the room')
+    setup(FW_RESP, [full, full, full, full])
+    await expect(syncIdentityMeta()).rejects.toThrow(
+      "The picture was not stored because the signer's storage is full. Removing a pairing frees room.",
+    )
+    expect(sizesSent()).toEqual(['64/rgb565', '64/rgb332', '48/rgb565', '48/rgb332'])
+  })
+
+  it('steps down on storage_full and stores the smaller picture', async () => {
+    const full = nackWith('storage_full: not enough storage left for the avatar; the pairings need the room')
+    setup(fwWith({ nvs_free_entries: 200, nvs_total_entries: 756 }), [full, full, ACK])
+    expect(await syncIdentityMeta()).toEqual({ name: 'zed', picture: 'small' })
+    expect(sizesSent()).toEqual(['64/rgb332', '48/rgb565', '48/rgb332'])
+  })
+
+  it('keeps the stats-based start no lower than 64x64 RGB332', async () => {
+    setup(fwWith({ nvs_free_entries: 130, nvs_total_entries: 756 }), [])
+    await syncIdentityMeta()
+    expect(sizesSent()).toEqual(['64/rgb332'])
+  })
+
   it('omits the percentage when the signer did not report its storage', async () => {
     setup(FW_RESP, [NACK_EMPTY, NACK_EMPTY, NACK_EMPTY, NACK_EMPTY])
     await expect(syncIdentityMeta()).rejects.toThrow(/^The signer has no room for the picture\./)
@@ -1601,12 +1623,74 @@ describe('identity card auto-sync on serial master list', () => {
         )
       })
       // Relay pushes shrink to 48x48 — a 64x64 event OOM-rebooted a T-Display.
-      expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48, 'rgb565')
+      expect(loadAvatarMock).toHaveBeenCalledWith('https://x/e.jpg', 48, 'rgb332')
+      expect(loadAvatarMock).not.toHaveBeenCalledWith('https://x/e.jpg', 64, expect.anything())
       expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
       await vi.waitFor(() => expect(device.logs.join('\n')).toContain('identity card synced to signer: erin (small picture)'))
     } finally {
       await disconnect() // clears the 4s status poll
     }
+  })
+
+  describe('relay picture ladder', () => {
+    const relayCalls = () => relayRequestMock.mock.calls.filter((c) => c[0] === 'set_identity_meta')
+    async function relaySetup(replies: (string | null)[]) {
+      const { pubHex } = freshMaster()
+      resolveMock.mockResolvedValue(new Map([[pubHex, { name: 'erin', picture: 'https://x/e.jpg' }]]))
+      loadAvatarMock.mockImplementation(async (_u: string, size: number, format: string) => ({
+        w: size, h: size, format, bytes: format === 'rgb332' ? new Uint8Array([1]) : new Uint8Array([2, 2]),
+      }))
+      const queue = [...replies]
+      relayRequestMock.mockImplementation(async (method: unknown) => {
+        if (method === 'get_status') return { master_count: 1, master_npub_hex: pubHex, mode: 'wifi-standalone', relay: 'wss://r' }
+        if (method === 'list_clients') return { clients: [] }
+        if (method === 'set_identity_meta') {
+          const err = queue.shift()
+          if (err) throw new Error(err)
+        }
+        return { ok: true }
+      })
+      await connectRelay(pubHex, ['wss://r.example'])
+    }
+    const sent = () => relayCalls().map((c) => (c[1] as { avatar_b64: string }).avatar_b64)
+    const RGB332 = 'AQ==' // [1]
+    const RGB565 = 'AgI=' // [2, 2]
+
+    it('sends 48x48 RGB332 first and stops when it is accepted', async () => {
+      await relaySetup([null])
+      try {
+        await vi.waitFor(() => expect(device.logs.join('\n')).toContain('(small picture)'))
+        expect(relayCalls()).toHaveLength(1)
+        expect(relayCalls()[0]![1]).toMatchObject({ w: 48, h: 48 })
+        expect(sent()).toEqual([RGB332])
+      } finally { await disconnect() }
+    })
+
+    it('falls back to 48x48 Rgb565 on older firmware\'s length refusal', async () => {
+      await relaySetup(['avatar length 2304 != w*h*2'])
+      try {
+        await vi.waitFor(() => expect(relayCalls()).toHaveLength(2))
+        expect(sent()).toEqual([RGB332, RGB565])
+        await vi.waitFor(() => expect(device.logs.join('\n')).toContain('(small picture)'))
+      } finally { await disconnect() }
+    })
+
+    it('never falls back on storage_full, and says the signer is full', async () => {
+      await relaySetup(['storage_full: not enough storage left for the avatar; the pairings need the room'])
+      try {
+        await vi.waitFor(() => expect(device.logs.join('\n')).toContain('Removing a pairing frees room'))
+        expect(relayCalls()).toHaveLength(1)
+        expect(loadAvatarMock).not.toHaveBeenCalledWith(expect.anything(), 64, expect.anything())
+      } finally { await disconnect() }
+    })
+
+    it('does not fall back on an unrelated error', async () => {
+      await relaySetup(['name must be 1-255 bytes'])
+      try {
+        await vi.waitFor(() => expect(device.logs.join('\n')).toContain('identity card sync failed: name must be'))
+        expect(relayCalls()).toHaveLength(1)
+      } finally { await disconnect() }
+    })
   })
 
   it('adds signer audit entries from relay status to the log', async () => {

@@ -28,8 +28,8 @@ import {
 import { dedupeIdentities } from './identity-key.js'
 import { bunkerUriWithEndpoint } from './bunker.js'
 import { dedupeBy } from './dedupe.js'
-import { loadAvatar, loadAvatarRungs, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
-import { PICTURE_LADDER, pickPictureStart, type PictureRung } from './nvs-room.js'
+import { loadAvatarRungs, placeholderAvatar, buildSetIdentityMeta, type Avatar } from './avatar.js'
+import { PICTURE_LADDER, pickPictureStart, type PictureRung, type PictureSide } from './nvs-room.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
 import {
@@ -558,6 +558,23 @@ export interface IdentityCardSync {
 /** A refusal the signer gave as its answer; resending the frame cannot change it. */
 class IdentityCardRefused extends Error {}
 
+/** The result line when the signer's storage cannot take the picture. */
+const PICTURE_STORAGE_FULL =
+  "The picture was not stored because the signer's storage is full. Removing a pairing frees room. The signer keeps what it had, and signing is not affected."
+
+/** The signer's `storage_full:` refusal (USB NACK text, or the relay reply's error). */
+const isStorageFull = (text: string): boolean => /(^|[^a-z_])storage_full\b/.test(text)
+
+/** What firmware before v0.18.0-beta.40 answers to an RGB332 length over the relay
+ *  (`avatar length N != w*h*2`; beta.40 says `... is neither w*h*2 nor w*h` of a bad length). */
+const OLD_FIRMWARE_LENGTH_REFUSAL = /avatar length \d+ (!= w\*h\*2|is neither)/
+
+/** Relay pictures: 48x48 only, RGB332 first, then Rgb565 for older firmware. */
+const RELAY_RUNGS: { side: PictureSide; format: 'rgb565' | 'rgb332' }[] = [
+  { side: 48, format: 'rgb332' },
+  { side: 48, format: 'rgb565' },
+]
+
 /** The signer dropped a USB session this page still believed was open. */
 class StaleUsbSession extends Error {}
 
@@ -571,13 +588,14 @@ function nvsPercentFull(info: FirmwareInfo | null): number | null {
 
 /**
  * Fetch the master's kind-0 profile, resize its avatar in-browser to a small
- * Rgb565 bitmap, and push the name + avatar to the signer — over USB
+ * bitmap (Rgb565 or RGB332), and push the name + avatar to the signer — over USB
  * (SET_IDENTITY_META, 0x5b) or over the relay management channel
  * (`set_identity_meta`, firmware ≥0.9.12). The signer stores it and shows it
  * on its identity card; it never fetches or decodes images itself. If the
  * picture is missing or its host refuses the fetch (CORS), an initial-on-disc
  * placeholder is pushed so the card still carries the name. Over USB the
- * picture size follows the signer's free storage (64x64, else 48x48). Returns
+ * picture size follows the signer's free storage and its refusals (64x64, else
+ * 48x48); over the relay it is 48x48 only. Returns
  * what was synced, or null when there is no master / no resolvable profile.
  */
 export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
@@ -598,24 +616,38 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
 
   if (device.mode === 'relay') {
     // Relay pushes travel inside a NIP-44 event a classic ESP32 must parse while
-    // its TLS session already occupies the heap — 48x48 halves the bytes end to
-    // end (a 64x64 relay push OOM-rebooted a T-Display).
-    let avatar: Avatar
+    // its TLS session already occupies the heap, so 48x48 halves the bytes end to
+    // end (a 64x64 relay push OOM-rebooted a T-Display). RGB332 goes first: one
+    // byte a pixel, and the signer stores it that way. Firmware before
+    // v0.18.0-beta.40 refuses that length, and only that refusal falls back to
+    // 48x48 Rgb565. `storage_full` is final: a bigger picture cannot fit.
+    let avatars: Avatar[]
     let picture: IdentityCardPicture = 'small'
     try {
       if (!profile.picture) throw new Error('no picture')
-      avatar = await loadAvatar(profile.picture, 48, 'rgb565')
+      avatars = await loadAvatarRungs(profile.picture, RELAY_RUNGS)
     } catch {
-      avatar = placeholderAvatar(name, 48, 'rgb565')
+      avatars = RELAY_RUNGS.map((r) => placeholderAvatar(name, r.side, r.format))
       picture = 'placeholder'
     }
     if (!relayTransport) return null
-    await relayTransport.request(
-      'set_identity_meta',
-      { name, w: avatar.w, h: avatar.h, avatar_b64: bytesToBase64(avatar.bytes) },
-      30_000,
-    )
-    return { name, picture }
+    for (let i = 0; i < avatars.length; i++) {
+      const avatar = avatars[i]!
+      try {
+        await relayTransport.request(
+          'set_identity_meta',
+          { name, w: avatar.w, h: avatar.h, avatar_b64: bytesToBase64(avatar.bytes) },
+          30_000,
+        )
+        return { name, picture }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        if (isStorageFull(message)) throw new IdentityCardRefused(PICTURE_STORAGE_FULL)
+        if (i < avatars.length - 1 && OLD_FIRMWARE_LENGTH_REFUSAL.test(message)) continue
+        throw e
+      }
+    }
+    return null
   }
 
   // A wifi-mode signer only drains USB in windows (fast polls while wifi
@@ -661,11 +693,13 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
       const start = pickPictureStart({ free: info?.nvs_free_entries, total: info?.nvs_total_entries })
       // Without stats, start at the top. With them, the estimate picks the
       // first rung that fits; a refusal after "fits" still steps down.
+      let lastReason = ''
       for (const entry of pictures.slice(start)) {
         const frame = buildSetIdentityMeta(pubHex, name, entry.avatar)
         const reply = await serialTransport.sendAndReceive(frame, [FrameType.ACK, FrameType.NACK], 20_000)
         if (reply.type === FrameType.ACK) return { name, picture: entry.picture }
         const reason = new TextDecoder().decode(reply.payload).trim()
+        lastReason = reason
         if (reason === 'bridge auth required') {
           // No pairing in this browser: the signer belongs to another one.
           if (!hasUsbPairing()) throw new IdentityCardRefused(WRONG_USB_PAIRING)
@@ -680,6 +714,8 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
           throw new StaleUsbSession()
         }
       }
+      // Beta.40 and later say `storage_full:` when the pairings need the room.
+      if (isStorageFull(lastReason)) throw new IdentityCardRefused(PICTURE_STORAGE_FULL)
       const pct = nvsPercentFull(info)
       throw new IdentityCardRefused(
         `The signer has no room for the picture${pct === null ? '' : ` (its storage is ${pct}% full)`}. Signing is not affected; the signer's card shows an initial instead.`,

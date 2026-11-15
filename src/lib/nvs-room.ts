@@ -1,7 +1,7 @@
 /**
  * How many NVS entries a blob write needs, and whether the signer has them.
  * A TypeScript port of the arithmetic in the firmware's `nvs_room.rs`
- * (ESP-IDF v5.3.2 `nvs_flash`), so Sapwood can pick an identity-card picture
+ * (ESP-IDF v5.3.2 `nvs_flash`), so Sapwood can guess an identity-card picture
  * size the signer will accept before it sends 8 KB that gets refused. The
  * estimate errs high; the signer stays the authority.
  */
@@ -67,11 +67,14 @@ export const PICTURE_LADDER: readonly PictureRung[] = [
 /**
  * Where on PICTURE_LADDER to start, given the signer's NVS stats: rung 0
  * (64x64 Rgb565) without stats or when the estimate says it fits, otherwise
- * rung 1 (64x64 RGB332). Never lower: the estimate assumes the new blob is
- * written beside the stored one, but the signer's storage write erases the
- * stored picture before writing the new one, and Sapwood cannot see how big
- * that is. The signer's
- * NACKs walk the rest of the ladder.
+ * rung 1 (64x64 RGB332). Never lower. The signer does not erase the stored
+ * picture first (heartwood-esp32 v0.18.0-beta.40 replaces it in place), but it
+ * judges a picture by more than the free-entry count: it also keeps room for a
+ * full-size network config rewrite and for every pairing table to be rewritten
+ * (`nvs::avatar_allowed`). This estimate does not model those, so it is a hint
+ * and the signer's refusals (`storage_full:`) walk the rest of the ladder. A
+ * wrong guess costs one refused send, whereas starting lower on the estimate
+ * could give up a picture the signer would have taken.
  */
 export function pickPictureStart(stats: { free?: number; total?: number }): number {
   if (stats.free === undefined || stats.total === undefined) return 0
