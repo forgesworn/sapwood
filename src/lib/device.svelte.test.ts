@@ -118,6 +118,7 @@ import {
   ensureSapwoodPairing, serialRemovePersona, vaultReconnectShouldAbort,
   mgmtApplyPresetPermissions, mgmtWithdrawConsent, releaseIdleSerial, isThisBrowsersUsbPairing,
   usbDisplayFlip, setDisplayFlip, mgmtSetAwayApproval, generateRefusalMessage,
+  serialWrappedAccount,
 } from './device.svelte.js'
 import { joinedSsid } from './joined-network.js'
 import { kithmootPermissionChanges, KITHMOOT_PRIVATE_PRESET } from './client-permission-upgrade.js'
@@ -141,6 +142,28 @@ const FW_RESP = {
   type: FrameType.FIRMWARE_INFO_RESPONSE,
   payload: new TextEncoder().encode('{"version":"0.9.10","board":"tdisplay"}'),
 }
+
+describe('wrapped account USB management', () => {
+  it('probes explicit support, authenticates, then sends exactly one bounded command', async () => {
+    const root = { slot: 0, mode: 1, npub: nip19.npubEncode('11'.repeat(32)) }
+    const target = { slot: 1, mode: 0, npub: nip19.npubEncode('22'.repeat(32)) }
+    device.connected = true; device.mode = 'serial'; device.bridgeAuthed = false
+    device.masters = [{ ...root, label: 'root' }, { ...target, label: 'raw' }]
+    serialMock.sendAndReceive.mockReset()
+    serialMock.sendAndReceive
+      .mockResolvedValueOnce({ type: FrameType.FIRMWARE_INFO_RESPONSE, payload: new TextEncoder().encode(JSON.stringify({ version: 'preview', capabilities: ['wrapped_nsec_usb_v1'] })) })
+      .mockResolvedValueOnce({ type: FrameType.SESSION_ACK, payload: new Uint8Array([0]) })
+      .mockResolvedValueOnce({ type: FrameType.WRAPPED_NSEC_RESP, payload: new TextEncoder().encode(JSON.stringify({ op: 'wrap', npub: target.npub, record: 'nstw1:' + 'A'.repeat(175) })) })
+    await serialWrappedAccount({ op: 'wrap', root, target })
+    expect(serialMock.sendAndReceive).toHaveBeenCalledTimes(3)
+    const call = serialMock.sendAndReceive.mock.calls[2]!
+    const sent = parseFrame(call[0])
+    expect(sent.type).toBe(FrameType.WRAPPED_NSEC_CMD)
+    expect(JSON.parse(new TextDecoder().decode(sent.payload))).toEqual({ op: 'wrap', root, target })
+    expect(call).toHaveLength(3) // No resend option on this physical ceremony.
+    expect(device.awaitingButton).toBeNull()
+  })
+})
 
 function remoteNetworkResponse(
   relays: string[] = ['wss://r.example'],
