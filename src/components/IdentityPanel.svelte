@@ -3,7 +3,7 @@
   // one, the signer's public profile, and this browser's operator key.
   // Replaces the old Masters, Provision and half the Settings tab.
   import {
-    device, refreshMasters, syncIdentityMeta, removeIdentity,
+    device, refreshMasters, syncIdentityMeta, IdentityCardSkipped, removeIdentity,
     serialDerivePersona, serialRemovePersona, serialRenamePersona,
   } from '../lib/device.svelte.js'
   import { httpTransport } from '../lib/http.js'
@@ -126,7 +126,8 @@
     try {
       const synced = await syncIdentityMeta()
       if (!synced) {
-        profileStatus = 'No profile found for this identity on the profile relays yet.'
+        profileStatus = null
+        profileError = 'Syncing the identity card needs a USB or WiFi connection.'
       } else if (synced.picture === 'placeholder') {
         profileStatus = `Sent "${synced.name}" with its initial on a disc, because the profile picture was missing or could not be loaded.`
       } else if (synced.picture === 'full-fewer-colours') {
@@ -139,6 +140,10 @@
         profileStatus = `Sent "${synced.name}" and its full picture to the signer.`
       }
     } catch (e) {
+      if (e instanceof IdentityCardSkipped) {
+        profileStatus = e.message
+        return
+      }
       profileStatus = null
       profileError = e instanceof Error ? e.message : 'Could not sync the profile.'
     } finally {

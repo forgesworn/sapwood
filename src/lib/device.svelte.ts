@@ -32,6 +32,7 @@ import { loadAvatarRungs, placeholderAvatar, buildSetIdentityMeta, type Avatar }
 import { PICTURE_LADDER, pickPictureStart, type PictureRung, type PictureSide } from './nvs-room.js'
 import { buildProvisionFrame, type ProvisionMode } from './provision.js'
 import { resolveProfiles, profileDisplayName } from './profiles.js'
+import { getProfileRelays } from './profile-relays.js'
 import {
   FirstFulfilledError,
   firstFulfilled,
@@ -558,6 +559,11 @@ export interface IdentityCardSync {
 /** A refusal the signer gave as its answer; resending the frame cannot change it. */
 class IdentityCardRefused extends Error {}
 
+/** Nothing was sent, for a reason a later try may clear. The message says which. */
+export class IdentityCardSkipped extends Error {}
+
+const relayHost = (url: string): string => url.replace(/^wss?:\/\//, '').replace(/\/+$/, '')
+
 /** The result line when the signer's storage cannot take the picture. */
 const PICTURE_STORAGE_FULL =
   "The picture was not stored because the signer's storage is full. Removing a pairing frees room. The signer keeps what it had, and signing is not affected."
@@ -596,23 +602,35 @@ function nvsPercentFull(info: FirmwareInfo | null): number | null {
  * placeholder is pushed so the card still carries the name. Over USB the
  * picture size follows the signer's free storage and its refusals (64x64, else
  * 48x48); over the relay it is 48x48 only. Returns
- * what was synced, or null when there is no master / no resolvable profile.
+ * what was synced, or null on a transport that cannot take the card. Throws
+ * IdentityCardSkipped, whose message says why, when there is nothing to send
+ * yet: no identity, no profile on the profile relays, no name, or the WiFi link down.
  */
 export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
   if (device.mode !== 'serial' && device.mode !== 'relay') return null
   const master = device.masters[0]
-  if (!master?.npub) return null
+  if (!master?.npub) {
+    throw new IdentityCardSkipped("The signer hasn't reported its identity yet. Wait a moment and try again.")
+  }
   let pubHex: string
   try {
     pubHex = nip19.decode(master.npub).data as string
   } catch {
-    return null
+    throw new IdentityCardSkipped("The signer reported an identity Sapwood can't read, so there is no profile to look up.")
   }
 
-  const profile = (await resolveProfiles([pubHex])).get(pubHex)
-  if (!profile) return null
+  const relays = getProfileRelays() // never empty: falls back to the defaults
+  const profile = (await resolveProfiles([pubHex], relays)).get(pubHex)
+  if (!profile) {
+    const hosts = relays.map((r) => relayHost(r.url)).join(', ')
+    throw new IdentityCardSkipped(
+      `No profile for this identity came back from the profile relays (${hosts}). They may not have it, or may not have answered in time. Check the list under Profile relays and try again.`,
+    )
+  }
   const name = profileDisplayName(profile)
-  if (!name) return null
+  if (!name) {
+    throw new IdentityCardSkipped('The profile was found but has no name to show. Set a display name in your Nostr client, then try again.')
+  }
 
   if (device.mode === 'relay') {
     // Relay pushes travel inside a NIP-44 event a classic ESP32 must parse while
@@ -630,7 +648,9 @@ export async function syncIdentityMeta(): Promise<IdentityCardSync | null> {
       avatars = RELAY_RUNGS.map((r) => placeholderAvatar(name, r.side, r.format))
       picture = 'placeholder'
     }
-    if (!relayTransport) return null
+    if (!relayTransport) {
+      throw new IdentityCardSkipped('The WiFi link to the signer dropped. Reconnect and try again.')
+    }
     for (let i = 0; i < avatars.length; i++) {
       const avatar = avatars[i]!
       try {
@@ -768,12 +788,18 @@ async function autoSyncIdentityMeta() {
         : synced.picture === 'small' ? 'small picture' : 'initial disc'
       addLog(`identity card synced to signer: ${synced.name} (${what})`)
     } else {
-      // No profile on the relays yet — release for a later refresh to retry.
+      // A transport that cannot take the card: release for a later refresh.
       idMetaSynced.delete(npub)
       idMetaAttempts.set(npub, (idMetaAttempts.get(npub) ?? 0) + 1)
     }
   } catch (e) {
     idMetaSynced.delete(npub)
+    if (e instanceof IdentityCardSkipped) {
+      // Nothing to send yet (no profile, no name, link down): a later refresh retries.
+      idMetaAttempts.set(npub, (idMetaAttempts.get(npub) ?? 0) + 1)
+      addLog(`identity card not synced: ${e.message}`)
+      return
+    }
     // A refusal is the signer's answer, so asking again unprompted cannot
     // change it (and a wrong pairing must not be presented over and over).
     idMetaAttempts.set(npub, e instanceof IdentityCardRefused ? ID_META_MAX_ATTEMPTS : (idMetaAttempts.get(npub) ?? 0) + 1)
