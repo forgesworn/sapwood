@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  CHUNK_MAX_SIZE, PAGE_ENTRIES, availableEntries, avatarBlobLength, blobWriteEntries, pickPictureSide,
+  CHUNK_MAX_SIZE, PAGE_ENTRIES, availableEntries, avatarBlobLength, blobWriteEntries, pickPictureStart,
 } from './nvs-room'
 
 describe('nvs-room', () => {
@@ -23,16 +23,22 @@ describe('nvs-room', () => {
     expect(availableEntries(340)).toBe(214)
     expect(availableEntries(100)).toBe(0)
   })
+})
 
-  it('picks 64 when it fits, 48 when only that fits, and 48 as a last try', () => {
-    expect(pickPictureSide({ free: 126 + 277, total: 756 })).toEqual({ side: 64, fits: true })
-    expect(pickPictureSide({ free: 126 + 276, total: 756 })).toEqual({ side: 48, fits: true })
-    expect(pickPictureSide({ free: 340, total: 756 })).toEqual({ side: 48, fits: true })
-    expect(pickPictureSide({ free: 126 + 164, total: 756 })).toEqual({ side: 48, fits: false })
+describe('pickPictureStart', () => {
+  it('starts at the top without stats', () => {
+    expect(pickPictureStart({})).toBe(0)
+    expect(pickPictureStart({ free: 340 })).toBe(0)
   })
 
-  it('assumes 64 when the stats are absent', () => {
-    expect(pickPictureSide({})).toEqual({ side: 64, fits: null })
-    expect(pickPictureSide({ free: 340 })).toEqual({ side: 64, fits: null })
+  it('starts at 64x64 Rgb565 when the estimate says it fits', () => {
+    expect(pickPictureStart({ free: 126 + 277, total: 756 })).toBe(0)
+  })
+
+  it('starts at 64x64 RGB332 when storage is tight, and never lower', () => {
+    expect(pickPictureStart({ free: 126 + 276, total: 756 })).toBe(1)
+    expect(pickPictureStart({ free: 340, total: 756 })).toBe(1)
+    expect(pickPictureStart({ free: 200, total: 756 })).toBe(1)
+    expect(pickPictureStart({ free: 0, total: 756 })).toBe(1)
   })
 })
