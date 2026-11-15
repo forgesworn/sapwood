@@ -33,6 +33,14 @@ describe('IdentityPanel identity card sync', () => {
     expect(alert.className).toContain('error-text')
   })
 
+  it('shows why nothing was sent as a status, not an alert', async () => {
+    const { IdentityCardSkipped } = await import('../lib/device.svelte.js')
+    syncMock.mockRejectedValue(new IdentityCardSkipped('No profile for this identity came back from the profile relays (relay.one.example).'))
+    await resync()
+    expect(await screen.findByText(/came back from the profile relays \(relay.one.example\)/)).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('says which picture went on success, with no alert', async () => {
     syncMock.mockResolvedValue({ name: 'alice', picture: 'small' })
     await resync()

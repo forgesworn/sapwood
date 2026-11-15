@@ -111,7 +111,7 @@ vi.mock('./relay-transport.js', () => {
 })
 
 import {
-  abortNetworkConfig, device, syncIdentityMeta, configureNetwork, configureNetworkRemotely, getNetworkConfig,
+  abortNetworkConfig, device, syncIdentityMeta, IdentityCardSkipped, configureNetwork, configureNetworkRemotely, getNetworkConfig,
   mgmtCreateClient, mgmtRevokeClient, mgmtUpdateClient, mgmtApproveSigning,
   mgmtClientUri, connectRelay, disconnect, refreshRelayAudit,
   patchNetworkOverUsb, refreshUsbNetworkState, setOperatorOverUsb, scanWifi,
@@ -3726,5 +3726,45 @@ describe('generateRefusalMessage', () => {
   it('keeps the storage-failure wording for a bare NACK', () => {
     expect(generateRefusalMessage(new Uint8Array())).toMatch(/storage write failed/)
     expect(generateRefusalMessage(bytes('  '))).toMatch(/storage write failed/)
+  })
+})
+
+describe('syncIdentityMeta says why nothing was sent', () => {
+  beforeEach(() => {
+    localStorage.removeItem('heartwood.profileRelays')
+    device.mode = 'serial'
+    device.connected = true
+    serialMock.sendAndReceive.mockReset()
+  })
+
+  async function skipMessage(): Promise<string> {
+    const err = await syncIdentityMeta().then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(IdentityCardSkipped)
+    expect(serialMock.sendAndReceive).not.toHaveBeenCalled()
+    return (err as Error).message
+  }
+
+  it('before the signer reports its identity', async () => {
+    device.masters = []
+    expect(await skipMessage()).toMatch(/hasn't reported its identity yet/)
+  })
+
+  it('when no profile came back, naming the relays asked', async () => {
+    device.masters = [freshMaster().master]
+    resolveMock.mockResolvedValue(new Map())
+    localStorage.setItem('heartwood.profileRelays', JSON.stringify([
+      { url: 'wss://relay.one.example', write: false },
+      { url: 'wss://relay.two.example/', write: true },
+    ]))
+    const message = await skipMessage()
+    expect(message).toContain('(relay.one.example, relay.two.example)')
+    expect(message).toMatch(/Profile relays/)
+  })
+
+  it('when the profile has no name', async () => {
+    const { pubHex, master } = freshMaster()
+    device.masters = [master]
+    resolveMock.mockResolvedValue(new Map([[pubHex, { picture: 'https://x/z.jpg' }]]))
+    expect(await skipMessage()).toMatch(/has no name to show/)
   })
 })
