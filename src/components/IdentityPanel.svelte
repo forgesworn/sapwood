@@ -9,6 +9,7 @@
   import { httpTransport } from '../lib/http.js'
   import { identityKey } from '../lib/identity-key.js'
   import Provision from './Provision.svelte'
+  import WrappedAccount from './WrappedAccount.svelte'
   import RecoveryWizard from './RecoveryWizard.svelte'
   import OperatorKey from './OperatorKey.svelte'
   import ProfileRelays from './ProfileRelays.svelte'
@@ -332,6 +333,13 @@
     <details class="disclosure" open={device.mode === 'serial' && device.masters.length === 0}>
       <summary>Add an identity to this signer</summary>
       <Provision />
+    </details>
+  </section>
+
+  <section>
+    <details class="disclosure">
+      <summary>Back up or restore an existing raw account</summary>
+      <WrappedAccount />
     </details>
   </section>
 
