@@ -55,13 +55,15 @@ export async function wrappedRequest(c: WrappedConnection, command: WrappedComma
   validate(c, command)
   // Send once. On a lost restore reply, refresh identities before retrying.
   const reply = await c.exchange(command)
+  if (reply.payload.length > 512) throw new Error('The signer returned an invalid recovery receipt.')
   if (reply.type !== FrameType.WRAPPED_NSEC_RESP) {
     throw new Error(new TextDecoder().decode(reply.payload).slice(0, 256) || 'The signer refused the wrapped account operation.')
   }
-  if (reply.payload.length > 512) throw new Error('The signer returned an invalid recovery receipt.')
-  const receipt: unknown = JSON.parse(new TextDecoder().decode(reply.payload))
-  if (!receipt || typeof receipt !== 'object') throw new Error('The signer returned an invalid recovery receipt.')
+  const receipt: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(reply.payload))
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw new Error('The signer returned an invalid recovery receipt.')
   const value = receipt as Record<string, unknown> // Narrow the untrusted JSON receipt before reading fields.
+  const fields = command.op === 'wrap' ? ['op', 'npub', 'record'] : command.op === 'restore' ? ['op', 'npub', 'slot', 'mode', 'derivation_version'] : ['op', 'npub']
+  if (Object.keys(value).length !== fields.length || Object.keys(value).some(key => !fields.includes(key))) throw new Error('The signer returned an invalid recovery receipt.')
   const expected = command.op === 'wrap' ? command.target.npub : command.expected_npub
   if (value.op !== command.op || value.npub !== expected) throw new Error('The signer returned a different identity. Nothing is confirmed.')
   if (command.op === 'wrap' && (typeof value.record !== 'string' || !validWrappedRecord(value.record))) throw new Error('The signer returned an invalid wrapped file.')

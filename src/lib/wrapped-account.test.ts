@@ -53,4 +53,19 @@ describe('device wrapped accounts', () => {
     vi.mocked(c.exchange).mockResolvedValue({ type: FrameType.WRAPPED_NSEC_RESP, payload: new TextEncoder().encode(JSON.stringify({ op: 'check', npub: a })) })
     await expect(wrappedRequest(c, { op: 'check', root, record, expected_npub: b })).rejects.toThrow(/identity/)
   })
+  it('refuses unexpected receipt fields rather than confirming an undocumented response', async () => {
+    for (const extra of [{ secret: 'unexpected' }, { slot: 3 }, { record }]) {
+      const c = connection()
+      vi.mocked(c.exchange).mockResolvedValue({ type: FrameType.WRAPPED_NSEC_RESP, payload: new TextEncoder().encode(JSON.stringify({ op: 'check', npub: b, ...extra })) })
+      await expect(wrappedRequest(c, { op: 'check', root, record, expected_npub: b })).rejects.toThrow(/receipt/)
+    }
+  })
+  it('accepts the firmware check and raw-slot restore receipts', async () => {
+    const c = connection()
+    c.masters = [{ ...root, label: 'root' }]
+    vi.mocked(c.exchange).mockResolvedValueOnce({ type: FrameType.WRAPPED_NSEC_RESP, payload: new TextEncoder().encode(JSON.stringify({ op: 'check', npub: b })) })
+    await expect(wrappedRequest(c, { op: 'check', root, record, expected_npub: b })).resolves.toEqual({ op: 'check', npub: b })
+    vi.mocked(c.exchange).mockResolvedValueOnce({ type: FrameType.WRAPPED_NSEC_RESP, payload: new TextEncoder().encode(JSON.stringify({ op: 'restore', npub: b, slot: 1, mode: 0, derivation_version: 0 })) })
+    await expect(wrappedRequest(c, { op: 'restore', root, record, expected_npub: b, destination: 1, label: 'raw' })).resolves.toEqual({ op: 'restore', npub: b, slot: 1 })
+  })
 })

@@ -10,6 +10,7 @@
   let status = $state('')
   let error = $state('')
   let checked = $state('')
+  let fileSelection = 0
   const masters = $derived(device.masters.filter(m => !m.persona && m.mode !== undefined))
   const rawTargets = $derived(masters.filter(m => m.mode === 0 && String(m.slot) !== rootSlot))
   const destination = $derived(masters.length ? Math.max(...masters.map(m => m.slot)) + 1 : 0)
@@ -43,6 +44,7 @@
     })
   }
   async function selectFile(event: Event) {
+    const selection = ++fileSelection
     checked = ''; record = ''; status = ''; error = ''
     const input = event.currentTarget
     if (!(input instanceof HTMLInputElement)) return
@@ -51,9 +53,12 @@
     try {
       if (file.size !== 181) throw new Error('Choose an unmodified 181-byte .nstw file.')
       const text = await file.text()
+      if (selection !== fileSelection) return
       if (!validWrappedRecord(text)) throw new Error('Choose an unmodified 181-byte .nstw file.')
       record = text
-    } catch (e) { error = e instanceof Error ? e.message : 'Could not read the file.' }
+    } catch (e) {
+      if (selection === fileSelection) error = e instanceof Error ? e.message : 'Could not read the file.'
+    }
   }
   async function check() {
     checked = ''

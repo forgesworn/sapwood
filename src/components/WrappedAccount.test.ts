@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/svelte'
+import { act, fireEvent, render, screen } from '@testing-library/svelte'
 import { nip19 } from 'nostr-tools'
 const { request } = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock('../lib/device.svelte.js', async orig => ({ ...await orig<typeof import('../lib/device.svelte.js')>(), serialWrappedAccount: request }))
@@ -36,5 +36,39 @@ it('refuses oversized input before a device operation and explains the two-part 
   expect(screen.getByText(/same root.*encrypted file/)).toBeTruthy()
   await fireEvent.change(screen.getByLabelText('Saved encrypted file'), { target: { files: [new File(['x'.repeat(182)], 'large.nstw')] } })
   expect((await screen.findByRole('alert')).textContent).toMatch(/181-byte/)
+  expect(request).not.toHaveBeenCalled()
+})
+
+it('checks the latest selected file when an earlier file read finishes last', async () => {
+  render(WrappedAccount)
+  await fireEvent.change(screen.getByLabelText('Recovery root'), { target: { value: '0' } })
+  await fireEvent.input(screen.getByLabelText('Expected account npub'), { target: { value: b } })
+  let finishOldRead!: (value: string) => void
+  const old = new File([record], 'old.nstw')
+  Object.defineProperty(old, 'text', { value: () => new Promise<string>(resolve => { finishOldRead = resolve }) })
+  const latestRecord = 'nstw1:' + 'B'.repeat(175)
+  const latest = new File([latestRecord], 'latest.nstw')
+  Object.defineProperty(latest, 'text', { value: async () => latestRecord })
+  const input = screen.getByLabelText('Saved encrypted file')
+  await fireEvent.change(input, { target: { files: [old] } })
+  await fireEvent.change(input, { target: { files: [latest] } })
+  await act(() => finishOldRead(record))
+  request.mockResolvedValue({ op: 'check', npub: b })
+  await fireEvent.click(screen.getByRole('button', { name: 'Check saved file on signer' }))
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ op: 'check', record: latestRecord }))
+})
+
+it('does not revive a previous file after the latest selection is rejected', async () => {
+  render(WrappedAccount)
+  await fireEvent.change(screen.getByLabelText('Recovery root'), { target: { value: '0' } })
+  await fireEvent.input(screen.getByLabelText('Expected account npub'), { target: { value: b } })
+  let finishOldRead!: (value: string) => void
+  const old = new File([record], 'old.nstw')
+  Object.defineProperty(old, 'text', { value: () => new Promise<string>(resolve => { finishOldRead = resolve }) })
+  const input = screen.getByLabelText('Saved encrypted file')
+  await fireEvent.change(input, { target: { files: [old] } })
+  await fireEvent.change(input, { target: { files: [new File(['bad'], 'bad.nstw')] } })
+  await act(() => finishOldRead(record))
+  expect(screen.getByRole('button', { name: 'Check saved file on signer' }).hasAttribute('disabled')).toBe(true)
   expect(request).not.toHaveBeenCalled()
 })
