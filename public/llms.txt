@@ -1,6 +1,13 @@
 # Sapwood
 
-Sapwood is a browser-based management UI for Heartwood ESP32 signing devices.
+> Sapwood is a browser-based management UI for Heartwood ESP32 signing devices.
+
+## ForgeSworn ecosystem
+
+- [ForgeSworn library guide](https://forgesworn.dev/llms.txt): Find related libraries, tools and integration guides by task and runtime.
+- [ForgeSworn on GitHub](https://github.com/forgesworn): Browse the organisation’s public repositories.
+- [Project source](https://github.com/forgesworn/sapwood): Canonical source repository, documentation and release information.
+- [heartwood-esp32](https://github.com/forgesworn/heartwood-esp32): Firmware for the device Sapwood manages.
 
 ## Links
 
