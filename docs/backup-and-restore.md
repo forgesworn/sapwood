@@ -4,11 +4,10 @@
 > automated suites but have not completed the physical Heartwood write-down,
 > wipe, and restore matrix. Use test keys only and retain an independent backup.
 
-A Heartwood signer keeps its secrets on the device, where no interface can read
-them back out. That is the security model, not a gap. It also means backups have
-to be made at the right moment, and there is more than one thing worth backing
-up. This page is the map. Typed recovery words have their [own page](key-backup.md)
-for the detail.
+A Heartwood signer keeps plaintext secrets on the device. The wrapped-account
+preview can export an encrypted file; recovering it also requires the same
+root. There is more than one thing worth backing up. This page is the map.
+Typed recovery words have their [own page](key-backup.md) for the detail.
 
 There are up to **three** separate secrets in play, each backed up and restored a
 different way:
@@ -51,13 +50,44 @@ When you bring in an existing key (an `nsec1…`, or a password-encrypted
 whether the exact npub or an nsec-tree-derived identity must return. It has a
 dedicated page: **[Typed recovery words for an imported key](key-backup.md)**.
 
-The offer only appears while you are importing. Once a key is on the signer it can
-never be read back out, so if you skip the backup the only way to make one later is
-to re-import the key from its original source.
+The typed-word offer appears while importing. Raw private keys cannot be read
+back out. The wrapped-account preview below can create an encrypted backup of
+a raw-key slot without exposing that secret to the browser.
 
 You can also make this backup offline, from a key you already hold, without a
 device: pipe it into the command line console, `... | sapwood key backup`. It runs
 the same encoding and never opens the signer.
+
+### Wrapped backup of an existing raw account
+
+**Test keys only:** this preview needs firmware advertising
+`wrapped_nsec_usb_v1`. Independent security review and physical wipe/restore
+acceptance remain pending. Keep an independent backup.
+
+Under **Advanced > Identity > Back up or restore an existing raw account**,
+connect directly by USB. Choose the recovery root A and a separate raw-key
+account B held on the signer. Download the encrypted `.nstw` file, then select
+the saved file, enter B's exact npub and choose **Check saved file on signer**.
+Read all three pages on the signer and hold its button for five seconds when
+offered. A download alone is not a verified backup.
+
+Recovery requires **the same root construction and the encrypted file**. B's
+original raw nsec and npub are preserved; A cannot derive an unrelated B without
+that file. Keep A's independent recovery backup and the `.nstw` file separately.
+This does not create a public association or a derivation proof.
+
+To restore, first restore A with its original mode, select the file and check
+its exact expected npub. Give B a name and confirm the displayed next empty raw
+slot. Existing accounts cannot be overwritten. The signer performs decryption,
+validation and storage; raw keys stay off the host. WiFi firmware reboots after
+a successful restore. If the reply is lost, refresh identities before retrying.
+Pair Bark, Cambium and other apps with B separately using their normal consent.
+
+The preview refuses new-slot restore while at-rest seed encryption is active,
+as existing provisioning does. It does not disable the PIN/vault or add a
+plaintext slot beside encrypted seeds. Wrapping and checking unlocked slots
+remain available. Older firmware, relay-only connections and personas are
+refused; there is no browser or generic NIP-44 decrypt fallback.
 
 ## 2. The operator key
 

@@ -1,3 +1,4 @@
+import { wrappedRequest, type WrappedCommand } from './wrapped-account.js'
 import { parseClientApprovals } from './client-consent.js'
 import { awayApprovalNotApplied } from './away-approval.js'
 // Reactive device state shared across all components.
@@ -6,7 +7,7 @@ import { awayApprovalNotApplied } from './away-approval.js'
 import { transport as serialTransport, type ReadRetryOptions, type SerialEvent } from './serial.js'
 import { httpTransport, HttpTransport, type HttpEvent } from './http.js'
 import {
-  buildSetNetConfig, FrameType, buildProvisionList, type NetConfig,
+  buildSetNetConfig, FrameType, buildFrame, buildProvisionList, type NetConfig,
   buildGetNetConfig, buildPatchNetConfig, buildSetOperator, type LocalNetConfigPatch,
   buildSessionAuth, buildSessionEnd, buildSetBridgeSecret, buildGenerateIdentity, buildRestoreIdentity,
   buildFirmwareInfo, buildWifiScan, buildDisplayFlip, buildPhoneUnlockCmd,
@@ -2978,6 +2979,7 @@ export interface FirmwareInfo {
    *  damaged, not that there are none; always `0` once `at_rest` is
    *  `"none"`. */
   unlock_phone_count?: number | null
+  capabilities?: string[]
 }
 
 /** Parse a FIRMWARE_INFO_RESPONSE payload; null when it is not the expected JSON. */
@@ -2987,6 +2989,7 @@ function parseFirmwareInfo(payload: Uint8Array): FirmwareInfo | null {
     if (typeof info?.version !== 'string') return null
     return {
       version: info.version,
+      capabilities: Array.isArray(info.capabilities) ? info.capabilities.filter((v: unknown): v is string => typeof v === 'string') : [],
       board: typeof info.board === 'string' ? info.board : '',
       ...(typeof info.uptime_s === 'number' ? { uptime_s: info.uptime_s } : {}),
       ...(typeof info.last_reset === 'string' ? { last_reset: info.last_reset } : {}),
@@ -4566,4 +4569,24 @@ if (typeof window !== 'undefined' && (window as unknown as { __sapwoodE2E?: bool
   ;(window as unknown as { __sapwoodClearError?: unknown }).__sapwoodClearError = () => {
     device.error = null
   }
+}
+
+/** Wrapped files cross the cable; raw private keys stay on the signer. */
+export async function serialWrappedAccount(command: WrappedCommand) {
+  return wrappedRequest({
+    get mode() { return device.mode },
+    get connected() { return device.connected },
+    get masters() { return device.masters },
+    firmware: getFirmwareVersion,
+    authenticate: ensureBridgeAuth,
+    exchange: async (request) => {
+      device.awaitingButton = 'Read all three signer pages, then hold its button for 5 seconds to approve.'
+      try {
+        return await serialTransport.sendAndReceive(
+          buildFrame(FrameType.WRAPPED_NSEC_CMD, new TextEncoder().encode(JSON.stringify(request))),
+          [FrameType.WRAPPED_NSEC_RESP, FrameType.NACK], 70_000,
+        )
+      } finally { device.awaitingButton = null }
+    },
+  }, command)
 }
